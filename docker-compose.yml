@@ -78,8 +78,8 @@ services:
   # ── Frontend：nginx 静态托管 + 反代后端 ──────────────────────
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: frontend/Dockerfile
     restart: unless-stopped
     depends_on:
       - web

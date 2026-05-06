@@ -9,12 +9,13 @@ WORKDIR /app
 # 启用 corepack，使用与 lockfile 匹配的 pnpm 版本
 RUN corepack enable
 
-# 仅拷贝清单先装依赖，命中构建缓存；锁文件可能不存在则降级到普通安装
-COPY package.json pnpm-lock.yaml* ./
+# 仅拷贝清单先装依赖，命中构建缓存
+COPY frontend/package.json frontend/pnpm-lock.yaml* ./
 RUN pnpm install --frozen-lockfile || pnpm install
 
-# 拷贝其余源码再构建
-COPY . .
+# 拷贝其余源码与 docs 目录（Extensions.tsx 需要引用 docs/PLUGIN-DEV-GUIDE.md）
+COPY frontend/ .
+COPY docs/ /app/docs/
 RUN pnpm build
 
 
