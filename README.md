@@ -29,7 +29,17 @@
   <img src="docs/screenshots/command-template.png" width="45%" alt="Command Template" />
 </p>
 
-## Quick Start
+## Prerequisites
+ 
+ 在开始之前，你需要准备好以下内容：
+ 
+ 1.  **Telegram API 凭据**：前往 [my.telegram.org](https://my.telegram.org) 申请 `API_ID` 和 `API_HASH`。
+ 2.  **网络环境**：由于 Telegram API 在国内无法直接访问，若你使用国内服务器，请确保拥有可用的 SOCKS5 或 HTTP 代理。
+ 3.  **基础环境**：
+     *   **Docker 部署**：安装 Docker 20.10+ 及 Compose V2。
+     *   **本地开发**：Python 3.12+，Node.js 18+，Pnpm 8+。
+ 
+ ## Quick Start
 
 ### 本机开发（HTTP，适合调试）
 
@@ -58,6 +68,13 @@ docker compose up -d --build
 ### 公网部署（HTTPS）
 
 见 [docs/DEPLOY-PUBLIC.md](docs/DEPLOY-PUBLIC.md)
+
+## Configuration
+
+项目的核心配置位于 `.env` 文件中：
+
+- **安全项**：务必修改 `MASTER_KEY` 与 `JWT_SECRET`。`MASTER_KEY` 丢失会导致数据库内所有加密数据无法找回。
+- **网络代理**：在 `.env` 中设置 `TG_DEFAULT_PROXY` 即可。Docker 模式下访问宿主机代理建议使用 `socks5://host.docker.internal:1080`。
 
 ## Tech Stack
 
