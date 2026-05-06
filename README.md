@@ -18,7 +18,14 @@
 
 ## Screenshots
 
-_Coming soon: Dashboard / 账号详情 / 自动回复编辑 / 命令模板_
+<p align="center">
+  <img src="docs/screenshots/dashboard.png" width="45%" alt="Dashboard" />
+  <img src="docs/screenshots/account-detail.png" width="45%" alt="Account Detail" />
+</p>
+<p align="center">
+  <img src="docs/screenshots/ai-module.png" width="45%" alt="AI Module" />
+  <img src="docs/screenshots/command-template.png" width="45%" alt="Command Template" />
+</p>
 
 ## Quick Start
 
