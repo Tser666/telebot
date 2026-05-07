@@ -232,7 +232,7 @@ class Game24Plugin(Plugin):
                 continue
 
         if prize <= 0:
-            await event.edit(f"⚠️ 请指定奖金金额，例：,{self._command_name} 2000")
+            await event.edit(f"⚠️ 请指定奖金金额")
             return
 
         chat_id = event.chat_id
@@ -252,9 +252,9 @@ class Game24Plugin(Plugin):
             f"⏳ 限时：{self._timeout} 秒\n"
             "🔢 可用符号：+ - x ÷ * / ( )\n"
             "\n"
-            "请直接发送算式。\n"
-            "示例：如果题目是 [ 8 ] [ 3 ] [ 2 ]，可以发 8*(3+2-1)\n"
-            "必须恰好使用这 4 个数字各一次，结果严格等于 24。"
+            "请直接发送算式，结果必须等于 24。\n"
+            "示例：(1+2+3)*4、8/(3-8/3)\n"
+            "必须恰好使用这 4 个数字各一次，可用 + - x ÷ * / ( )"
         )
 
         try:
