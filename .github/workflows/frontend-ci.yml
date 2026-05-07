@@ -4,13 +4,13 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'frontend/**'
-      - 'docs/**'
+      - "frontend/**"
+      - "docs/**"
   pull_request:
     branches: [ main ]
     paths:
-      - 'frontend/**'
-      - 'docs/**'
+      - "frontend/**"
+      - "docs/**"
 
 jobs:
   build:
@@ -25,29 +25,23 @@ jobs:
           node-version: 22
 
       - name: Install pnpm
-        run: |
-          corepack enable
-          pnpm --version
+        run: corepack enable
 
       - name: Get pnpm store directory
         shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
 
       - uses: actions/cache@v4
         name: Setup pnpm cache
         with:
           path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles("**/pnpm-lock.yaml") }}
+          restore-keys: ${{ runner.os }}-pnpm-store-
 
       - name: Install dependencies
         working-directory: frontend
-        run: |
-          pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Build frontend
         working-directory: frontend
-        run: |
-          pnpm build
+        run: pnpm build
