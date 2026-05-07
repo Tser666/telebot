@@ -20,8 +20,8 @@ from telethon.errors import (
 
 from ..crypto import decrypt_str
 from ..db.base import AsyncSessionLocal
-from ..db.models.account import Account, Proxy
-from ..db.models.command import AccountCommandLink, CommandTemplate, LLMProvider
+from ..db.models.account import Account, Proxy, SudoUser
+from ..db.models.command import AccountCommandLink, CommandAlias, CommandTemplate, LLMProvider
 from ..db.models.system import SystemSetting
 from ..redis_client import get_redis
 from ..settings import settings as app_settings
@@ -367,8 +367,9 @@ async def _refresh_command_context(account_id: int) -> None:
     """
     templates: dict[str, dict] = {}
     providers: dict[int, dict] = {}
-    # 命令前缀：DB 里 system_setting.command_prefix 优先，没有则用 .env 默认
+        # 命令前缀：DB 里 system_setting.command_prefix 优先，没有则用 .env 默认
     prefix: str = app_settings.command_prefix or ","
+    sudo_prefix: str = "."
     async with AsyncSessionLocal() as db:
         # 0) 命令前缀（系统设置）
         try:
@@ -383,6 +384,20 @@ async def _refresh_command_context(account_id: int) -> None:
                     prefix = v
         except Exception:  # noqa: BLE001
             # DB 读不到（如迁移没跑）就退回 .env 默认；不影响其它字段加载
+            pass
+        
+        # 0.5) Sudo 前缀（系统设置）
+        try:
+            row_sudo = await db.get(SystemSetting, "sudo_prefix")
+            if row_sudo is not None and isinstance(row_sudo.value, dict):
+                v = str(row_sudo.value.get("value", "") or "").strip()
+                if v:
+                    sudo_prefix = v
+            elif row_sudo is not None and isinstance(row_sudo.value, str):
+                v = row_sudo.value.strip()
+                if v:
+                    sudo_prefix = v
+        except Exception:  # noqa: BLE001
             pass
 
         # 1) 该账号启用中的命令模板
@@ -466,12 +481,40 @@ async def _refresh_command_context(account_id: int) -> None:
                 "models": list(getattr(p, "models", None) or []),
             }
 
+        # 3) 命令别名
+        alias_rows = (
+            await db.execute(
+                select(CommandAlias).where(
+                    (CommandAlias.account_id == account_id)
+                    | (CommandAlias.account_id.is_(None))
+                )
+            )
+        ).scalars().all()
+        aliases: dict[str, str] = {r.alias: r.target for r in alias_rows}
+
+        # 4) Sudo users
+        sudo_rows = (
+            await db.execute(
+                select(SudoUser).where(SudoUser.account_id == account_id)
+            )
+        ).scalars().all()
+        sudo_users: dict[int, dict[str, Any]] = {}
+        for r in sudo_rows:
+            sudo_users[r.tg_user_id] = {
+                "display_name": r.display_name,
+                "allowed_chat_ids": list(r.allowed_chat_ids or []),
+                "allowed_commands": list(r.allowed_commands or []),
+            }
+
     set_command_context(
         CommandContext(
             account_id=account_id,
             templates=templates,
             providers=providers,
             command_prefix=prefix,
+            aliases=aliases,
+            sudo_users=sudo_users,
+            sudo_prefix=sudo_prefix,
         )
     )
 

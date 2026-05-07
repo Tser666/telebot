@@ -10,7 +10,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -45,6 +46,24 @@ class PluginContext:
     engine: Any = None  # RateLimitEngine
     redis: Any = None  # redis.asyncio.Redis
     log: Callable[..., Awaitable[None]] | None = None
+    generation: int = 0
+
+    @asynccontextmanager
+    async def conversation(self, peer: Any, timeout: float = 30.0) -> AsyncIterator[Any]:
+        """创建与 peer 的对话会话。
+
+        用法::
+
+            async with ctx.conversation("@BotFather") as conv:
+                await conv.send("/newbot")
+                resp = await conv.get_response()
+        """
+        from ..conversation import conversation as _conv
+
+        if self.client is None:
+            raise RuntimeError("PluginContext.client 未初始化")
+        async with _conv(self.client, peer, timeout) as conv:
+            yield conv
 
 
 # ─────────────────────────────────────────────────────

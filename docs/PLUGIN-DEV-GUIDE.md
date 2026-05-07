@@ -10,11 +10,8 @@
 - 一个可复制到 `data/plugins/installed/` 的第三方加载机制
 
 它不是：
-- PagerMaid 原生插件运行环境（我们不是 Pyrogram）
 - 远程插件市场（本项目当前不做 repo 订阅安装）
 - 可绕过权限控制的后门（installed 插件默认走沙箱）
-
-如果你正在从 PagerMaid 迁移，请重点看第 7 章。
 
 ---
 
@@ -287,48 +284,7 @@ rm -rf /path/to/telebot/data/plugins/installed/<key>
 
 ---
 
-## 7. 从 PagerMaid 插件移植（菜谱）
-
-PagerMaid 插件多是 Pyrogram 写法；Telebot 是 Telethon，API 不兼容，但逻辑可以迁移。
-
-核心原则：
-- 看源码“在干嘛”
-- 不抄原实现
-- 用 Telethon API 重写
-
-### 7.1 速查映射
-
-| PagerMaid / Pyrogram | Telebot / Telethon |
-|---|---|
-| `@Client.on_message` | `Plugin.on_message` |
-| `filters.command(["x"])` | `commands = {"x": handler}` |
-| `filters.regex(...)` | `on_message + re` |
-| `message.reply_text` | `event.reply` |
-| `message.edit` | `event.edit` |
-| `message.text` | `event.raw_text` |
-| `message.chat.id` | `event.chat_id` |
-| `message.reply_to_message` | `await event.get_reply_message()` |
-| `pyrogram.errors.FloodWait` | `telethon.errors.FloodWaitError` |
-
-### 7.2 推荐迁移步骤
-
-1. 先读懂插件业务目标（输入/输出/异常）
-2. 画出命令入口与分支
-3. 用本项目骨架建目录
-4. 把每个分支替换成 Telethon 等价调用
-5. 加 manifest 权限声明
-6. 本地 smoke test
-
-### 7.3 翻译类插件的注意点
-
-- 输入文本优先用“被回复消息内容”，不是命令本身
-- 用户只输 `,fy zh` 时，默认目标是中文
-- 语言代码和语言名做映射与容错（如 `zh-cn`、`en`、`japanese`）
-- 回复过长时避免直接塞超长 prompt
-
----
-
-## 8. 沙箱权限声明
+## 7. 沙箱权限声明
 
 installed 插件默认拿到的是 `SandboxClient` 而不是真实 `TelegramClient`。
 

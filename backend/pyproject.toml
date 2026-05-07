@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "telebot-backend"
-version = "0.7.1"
+version = "0.8.0"
 description = "Telegram Userbot 管理系统后端"
 requires-python = ">=3.12"
 license = {text = "MIT"}
@@ -30,7 +30,7 @@ dependencies = [
 
     # Telegram 客户端：Telethon（活跃维护、类型注解完备）
     "telethon>=1.43,<2.0.0",
-    "cryptg>=0.4.0",            # C 加速 AES-IGE，等价于 Pyrogram 的 tgcrypto
+    "cryptg>=0.4.0",            # C 加速 AES-IGE（Telethon）
     "python-socks[asyncio]>=2.4.4",  # SOCKS5/HTTP/MTProxy 出口代理
 
     # 加密 / 认证

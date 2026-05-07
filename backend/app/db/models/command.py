@@ -244,3 +244,25 @@ class LLMProvider(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+# ── 命令别名（Sprint5）──────────────────────────────────────
+class CommandAlias(Base):
+    """命令别名：支持多词别名 + 参数透传。
+
+    - ``alias`` 可含空格（多词别名），如 "fy zh"
+    - ``target`` 是目标命令（可含预设参数），如 "translate zh"
+    - ``account_id`` 为 NULL 时表示全局别名；有值时仅该账号生效
+    """
+
+    __tablename__ = "command_alias"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    alias: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    target: Mapped[str] = mapped_column(String(128), nullable=False)
+    account_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("account.id", ondelete="CASCADE"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

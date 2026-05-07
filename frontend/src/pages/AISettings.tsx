@@ -84,7 +84,7 @@ function HowItWorksCard({ cmdPrefix }: { cmdPrefix: string }) {
         <CardDescription>
           在 TG 任意对话中回复某条消息，发"命令前缀ai"，如：
           <code className="mx-1">{cmdPrefix}ai 你的问题</code>，worker 会用 LLM
-          的回答<strong>编辑你刚刚发出去的命令消息</strong>（PagerMaid 风格）
+          的回答<strong>编辑你刚刚发出去的命令消息</strong>
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">

@@ -12,6 +12,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    JSON,
     LargeBinary,
     SmallInteger,
     String,
@@ -134,3 +135,26 @@ class HumanizeConfig(Base):
     cold_start_days: Mapped[int] = mapped_column(SmallInteger, default=7)
 
     account: Mapped[Account] = relationship("Account", back_populates="humanize")
+
+
+# ── Sudo 用户（Sprint5）──────────────────────────────────────
+class SudoUser(Base):
+    """授权其他 TG 用户通过独立前缀触发命令。
+
+    - ``allowed_chat_ids``：白名单对话 ID 列表；NULL/空 = 所有对话均可
+    - ``allowed_commands``：白名单命令列表；NULL/空 = 所有命令均可
+    """
+
+    __tablename__ = "sudo_user"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("account.id", ondelete="CASCADE"), nullable=False
+    )
+    tg_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    allowed_chat_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    allowed_commands: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

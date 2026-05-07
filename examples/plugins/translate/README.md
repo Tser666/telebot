@@ -1,19 +1,16 @@
-# translate（PagerMaid 移植示例）
+# translate（插件示例）
 
-## 源出处
+## 功能
 
-本样例参考的是 PagerMaid 插件：
-- https://github.com/TeamPGM/PagerMaid_Plugins/blob/master/translate/main.py
+回复一条文本消息后，使用 LLM 翻译到目标语言。
 
-参考的是“功能意图”（回复消息后翻译），不是源码拷贝。
+## 设计决策
 
-## 移植决策
-
-- 从 Pyrogram 事件处理改为 Telebot 插件命令机制：`commands = {"fy": ...}`
-- 命令语义保持一致：
+- 使用 Telebot 插件命令机制：`commands = {"fy": ...}`
+- 命令语义：
   - `,fy <lang>` 翻译被回复文本到目标语言
   - `,fy auto` 自动识别语言后翻译
-- LLM 调用不走第三方 SDK，直接复用 Telebot 现有链路：
+- LLM 调用复用 Telebot 现有链路：
   - `worker.command.get_command_context()` 获取 provider 池
   - `services.llm_client.build_client()` 构造客户端
 - provider 选择策略：
@@ -43,4 +40,3 @@ cp -R examples/plugins/translate data/plugins/installed/
 
 1. 回复一条文本消息
 2. 发送 `,fy zh` 或 `,fy auto`
-

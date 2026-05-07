@@ -92,11 +92,6 @@ docker compose up -d --build
 
 ## FAQ
 
-### Q: 这跟 PagerMaid 有什么区别？
-
-- PagerMaid 是 Pyrogram 单进程；本项目是 FastAPI Web UI 多账号管理 + worker 子进程隔离 + 现代 React 前端
-- 不兼容 PagerMaid 插件（Pyrogram → Telethon），但提供移植指南（见插件开发指南）
-
 ### Q: 多用户支持？
 
 - 单租户设计，一个超管账号；多用户不在路线图
@@ -117,6 +112,3 @@ MIT — 见 [LICENSE](LICENSE)
 ## 致谢
 
 - [Telethon](https://github.com/LonamiWebs/Telethon) - 优秀的 Telegram MTProto 客户端库
-- [PagerMaid-Pyro](https://github.com/TeamPGM/PagerMaid-Pyro) - 插件机制和命令体系的设计灵感来源
-
-本项目是完全重新实现的架构，借鉴了 PagerMaid-Pyro 的设计理念但使用不同的技术栈和实现方式。

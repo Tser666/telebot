@@ -1,4 +1,4 @@
-"""PagerMaid translate 逻辑的 Telethon 重写示例。"""
+"""翻译插件示例。"""
 
 from __future__ import annotations
 

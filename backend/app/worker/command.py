@@ -1,7 +1,7 @@
 """TG 内命令派发。
 
 用户在 TG 中**自己给自己发**（任何对话，含收藏夹）以前缀（默认 ``,``）开头的消息时，
-worker 拦截命令并**编辑原消息**为执行结果（PagerMaid 风格）。
+worker 拦截命令并**编辑原消息**为执行结果。
 
 内置命令：``,help`` ``,status`` ``,ping`` ``,pause`` ``,resume`` ``,reboot``（项目级）``,restart``（账号级）``,id``。
 插件可以通过 ``register_plugin_command`` 追加额外命令（不会覆盖内置）。
@@ -59,6 +59,15 @@ class CommandContext:
     templates: dict[str, dict[str, Any]]
     providers: dict[int, dict[str, Any]]
     command_prefix: str = ","
+    aliases: dict[str, str] = None  # type: ignore[assignment]  # {alias: target}
+    sudo_users: dict[int, dict[str, Any]] = None  # type: ignore[assignment]  # {tg_user_id: config}
+    sudo_prefix: str = "."
+
+    def __post_init__(self) -> None:
+        if self.aliases is None:
+            self.aliases = {}
+        if self.sudo_users is None:
+            self.sudo_users = {}
 
 
 # 全局 ctx 由 runtime.py 在 worker 进程启动时初始化并通过闭包传给 handler；
@@ -117,6 +126,40 @@ def _safe_exception_text(e: BaseException, max_len: int = 200) -> str:
     if len(msg) > max_len:
         msg = msg[:max_len] + "…"
     return msg
+
+
+async def _check_sudo_permission(event, cmd: str, account_id: int) -> tuple[bool, str]:
+    """检查 sudo 权限。
+    
+    Returns:
+        (allowed, error_message)
+    """
+    if _ctx is None or not _ctx.sudo_users:
+        return False, "sudo 系统未配置"
+    
+    sender = await event.get_sender()
+    tg_user_id = getattr(sender, "id", None)
+    if tg_user_id is None:
+        return False, "无法识别发送者"
+    
+    sudo_config = _ctx.sudo_users.get(tg_user_id)
+    if sudo_config is None:
+        return False, f"TG 用户 {tg_user_id} 不在 sudo 列表中"
+    
+    # 检查 chat_id 白名单
+    allowed_chats = sudo_config.get("allowed_chat_ids", [])
+    if allowed_chats:  # 空列表 = 所有对话
+        chat_id = event.chat_id
+        if chat_id not in allowed_chats:
+            return False, f"此对话（chat_id={chat_id}）不在白名单中"
+    
+    # 检查命令白名单
+    allowed_cmds = sudo_config.get("allowed_commands", [])
+    if allowed_cmds:  # 空列表 = 所有命令
+        if cmd not in allowed_cmds:
+            return False, f"命令 `{cmd}` 不在白名单中"
+    
+    return True, ""
 
 
 def _replied_media_placeholder(msg: Any) -> str:
@@ -371,6 +414,220 @@ async def _cmd_del(client, event, args, account_id):
         await event.edit("没找到可撤回的消息")
         return
     await client.delete_messages(chat, to_delete[: n + 1])
+
+
+@builtin("alias", doc="管理命令别名（set/del/ls）")
+async def _cmd_alias(client, event, args, account_id):
+    """命令别名管理。"""
+    from sqlalchemy import delete, select
+
+    from ..db.base import AsyncSessionLocal
+    from ..db.models.command import CommandAlias
+
+    if not args:
+        await event.edit("用法：,alias set <别名> <目标> / ,alias del <别名> / ,alias ls")
+        return
+
+    sub = args[0]
+
+    if sub in ("ls", "list"):
+        async with AsyncSessionLocal() as db:
+            rows = (
+                await db.execute(
+                    select(CommandAlias).where(
+                        (CommandAlias.account_id == account_id)
+                        | (CommandAlias.account_id.is_(None))
+                    )
+                )
+            ).scalars().all()
+        if not rows:
+            await event.edit("当前没有任何别名")
+            return
+        lines = [f"• {r.alias} → {r.target}" for r in rows]
+        await event.edit("命令别名列表：\n" + "\n".join(lines))
+        return
+
+    if sub == "del":
+        alias_name = " ".join(args[1:]).strip()
+        if not alias_name:
+            await event.edit("用法：,alias del <别名>")
+            return
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                delete(CommandAlias).where(CommandAlias.alias == alias_name)
+            )
+            await db.commit()
+        if result.rowcount:
+            if _ctx is not None:
+                _ctx.aliases.pop(alias_name, None)
+            await event.edit(f"已删除别名：{alias_name}")
+        else:
+            await event.edit(f"别名 {alias_name!r} 不存在")
+        return
+
+    if sub == "set":
+        rest = " ".join(args[1:]).strip()
+        for sep in (" -> ", " → "):
+            if sep in rest:
+                parts = rest.split(sep, 1)
+                alias_name = parts[0].strip()
+                target_name = parts[1].strip()
+                break
+        else:
+            tokens = rest.split()
+            if len(tokens) < 2:
+                await event.edit("用法：,alias set <别名> -> <目标命令>")
+                return
+            alias_name = tokens[0]
+            target_name = " ".join(tokens[1:])
+
+        if not alias_name or not target_name:
+            await event.edit("别名和目标不能为空")
+            return
+
+        async with AsyncSessionLocal() as db:
+            existing = (
+                await db.execute(
+                    select(CommandAlias).where(CommandAlias.alias == alias_name)
+                )
+            ).scalar_one_or_none()
+            if existing:
+                existing.target = target_name
+            else:
+                db.add(CommandAlias(alias=alias_name, target=target_name, account_id=account_id))
+            await db.commit()
+        if _ctx is not None:
+            _ctx.aliases[alias_name] = target_name
+        await event.edit(f"别名已设置：{alias_name} → {target_name}")
+        return
+
+    await event.edit(f"未知子命令：{sub}（支持 set/del/ls）")
+
+
+@builtin("sudo", doc="管理 sudo 用户（add/del/ls）")
+async def _cmd_sudo(client, event, args, account_id):
+    """管理 sudo 用户（超级用户，可代表账号执行命令）。"""
+    from sqlalchemy import delete, select
+
+    from ..db.base import AsyncSessionLocal
+    from ..db.models.account import SudoUser
+
+    if not args:
+        await event.edit("用法：,sudo add <tg_user_id> [--display-name <name>] [--chat-ids <id1,id2>] [--commands <cmd1,cmd2>]\n"
+                       "     ,sudo del <tg_user_id>\n"
+                       "     ,sudo ls")
+        return
+
+    sub = args[0]
+
+    if sub in ("ls", "list"):
+        async with AsyncSessionLocal() as db:
+            rows = (
+                await db.execute(
+                    select(SudoUser).where(SudoUser.account_id == account_id)
+                )
+            ).scalars().all()
+        if not rows:
+            await event.edit("当前没有任何 sudo 用户")
+            return
+        lines = []
+        for r in rows:
+            chat_str = ",".join(str(c) for c in (r.allowed_chat_ids or [])) or "全部"
+            cmd_str = ",".join(r.allowed_commands or []) or "全部"
+            lines.append(f"• TG用户 {r.tg_user_id}（{r.display_name or '无'}）\n"
+                         f"  允许对话：{chat_str}\n"
+                         f"  允许命令：{cmd_str}")
+        await event.edit("Sudo 用户列表：\n" + "\n".join(lines))
+        return
+
+    if sub == "del":
+        if len(args) < 2:
+            await event.edit("用法：,sudo del <tg_user_id>")
+            return
+        try:
+            tg_user_id = int(args[1])
+        except ValueError:
+            await event.edit(f"无效的 tg_user_id：{args[1]}")
+            return
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                delete(SudoUser).where(
+                    SudoUser.account_id == account_id,
+                    SudoUser.tg_user_id == tg_user_id
+                )
+            )
+            await db.commit()
+        if result.rowcount:
+            if _ctx is not None and _ctx.sudo_users:
+                _ctx.sudo_users.pop(tg_user_id, None)
+            await event.edit(f"已删除 sudo 用户：TG用户 {tg_user_id}")
+        else:
+            await event.edit(f"sudo 用户 {tg_user_id} 不存在")
+        return
+
+    if sub == "add":
+        if len(args) < 2:
+            await event.edit("用法：,sudo add <tg_user_id> [--display-name <name>] [--chat-ids <id1,id2>] [--commands <cmd1,cmd2>]")
+            return
+        try:
+            tg_user_id = int(args[1])
+        except ValueError:
+            await event.edit(f"无效的 tg_user_id：{args[1]}")
+            return
+        
+        # 解析可选参数
+        display_name = None
+        allowed_chat_ids: list[int] = []
+        allowed_commands: list[str] = []
+        
+        rest_args = args[2:]
+        i = 0
+        while i < len(rest_args):
+            if rest_args[i] == "--display-name" and i + 1 < len(rest_args):
+                display_name = rest_args[i + 1]
+                i += 2
+            elif rest_args[i] == "--chat-ids" and i + 1 < len(rest_args):
+                chat_str = rest_args[i + 1]
+                try:
+                    allowed_chat_ids = [int(x.strip()) for x in chat_str.split(",")]
+                except ValueError:
+                    await event.edit(f"无效的 chat_ids：{chat_str}")
+                    return
+                i += 2
+            elif rest_args[i] == "--commands" and i + 1 < len(rest_args):
+                cmd_str = rest_args[i + 1]
+                allowed_commands = [x.strip() for x in cmd_str.split(",")]
+                i += 2
+            else:
+                i += 1
+        
+        async with AsyncSessionLocal() as db:
+            existing = (
+                await db.execute(
+                    select(SudoUser).where(
+                        SudoUser.account_id == account_id,
+                        SudoUser.tg_user_id == tg_user_id
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing:
+                existing.display_name = display_name
+                existing.allowed_chat_ids = allowed_chat_ids
+                existing.allowed_commands = allowed_commands
+            else:
+                db.add(SudoUser(
+                    account_id=account_id,
+                    tg_user_id=tg_user_id,
+                    display_name=display_name,
+                    allowed_chat_ids=allowed_chat_ids,
+                    allowed_commands=allowed_commands,
+                ))
+            await db.commit()
+        
+        await event.edit(f"已添加/更新 sudo 用户：TG用户 {tg_user_id}（{display_name or '无'}）")
+        return
+
+    await event.edit(f"未知子命令：{sub}（支持 add/del/ls）")
 
 
 _register_builtin_aliases()
@@ -1030,17 +1287,35 @@ def make_command_handler(client: TelegramClient, account_id: int, prefix: str | 
 
     @client.on(events.NewMessage(outgoing=True))
     async def _h(event):
-        # 每次消息从 ctx 取最新前缀；ctx 没就绪时退回闭包里的 fallback
-        p = (_ctx.command_prefix if _ctx else "") or fallback_prefix
-        # re.compile 微秒级；user message 频率本来就低，每条编译一次完全无所谓
-        pattern = re.compile(rf"^{re.escape(p)}(\w+)(?:\s+(.*))?$", re.S)
         text = event.raw_text or ""
-        m = pattern.match(text)
-        if not m:
-            return
-        cmd = m.group(1)
-        args_raw = (m.group(2) or "").strip()
+        
+        # 先尝试 sudo_prefix 匹配（sudo 模式）
+        sudo_p = (_ctx.sudo_prefix if _ctx else "") or "."
+        pattern_sudo = re.compile(rf"^{re.escape(sudo_p)}(\w+)(?:\s+(.*))?$", re.S)
+        m = pattern_sudo.match(text)
+        use_sudo = False
+        if m:
+            use_sudo = True
+            cmd = m.group(1)
+            args_raw = (m.group(2) or "").strip()
+        else:
+            # 再尝试 command_prefix 匹配（普通模式）
+            p = (_ctx.command_prefix if _ctx else "") or fallback_prefix
+            pattern = re.compile(rf"^{re.escape(p)}(\w+)(?:\s+(.*))?$", re.S)
+            m = pattern.match(text)
+            if not m:
+                return
+            cmd = m.group(1)
+            args_raw = (m.group(2) or "").strip()
+        
         args = args_raw.split() if args_raw else []
+        
+        # 如果是 sudo 模式，检查权限
+        if use_sudo:
+            allowed, error_msg = await _check_sudo_permission(event, cmd, account_id)
+            if not allowed:
+                await event.edit(f"✗ Sudo 权限拒绝：{error_msg}")
+                return
 
         # 1. 内置命令优先
         primary = _BUILTIN_ALIAS_TO_PRIMARY.get(cmd)
@@ -1056,7 +1331,49 @@ def make_command_handler(client: TelegramClient, account_id: int, prefix: str | 
                     pass
             return
 
-        # 2. 模板命令（按 name 查 worker-local ctx）
+        # 2. 别名解析（贪心最长匹配）
+        if _ctx is not None and _ctx.aliases:
+            # 尝试从 "cmd arg1 arg2..." 中匹配最长的别名
+            full_rest = f"{cmd} {args_raw}".strip() if args_raw else cmd
+            matched_alias: str | None = None
+            for alias in sorted(_ctx.aliases.keys(), key=len, reverse=True):
+                if full_rest == alias or full_rest.startswith(alias + " "):
+                    matched_alias = alias
+                    break
+            if matched_alias is not None:
+                target = _ctx.aliases[matched_alias]
+                remaining = full_rest[len(matched_alias):].strip()
+                # 重新拼接：target + remaining args
+                new_text = f"{target} {remaining}".strip() if remaining else target
+                new_parts = new_text.split(None, 1)
+                new_cmd = new_parts[0] if new_parts else ""
+                new_args_raw = new_parts[1] if len(new_parts) > 1 else ""
+                new_args = new_args_raw.split() if new_args_raw else []
+                # 重新派发到 builtin
+                primary2 = _BUILTIN_ALIAS_TO_PRIMARY.get(new_cmd)
+                item2 = _BUILTIN.get(primary2) if primary2 else None
+                if item2 is not None:
+                    try:
+                        await item2.handler(client, event, new_args, account_id)
+                    except Exception as e:  # noqa: BLE001
+                        try:
+                            await event.edit(f"✗ 执行失败：{_safe_exception_text(e)}")
+                        except Exception:
+                            pass
+                    return
+                # 重新派发到模板
+                tpl2 = _ctx.templates.get(new_cmd)
+                if tpl2 is not None:
+                    try:
+                        await _run_template(client, event, new_args, tpl2, account_id)
+                    except Exception as e:  # noqa: BLE001
+                        try:
+                            await event.edit(f"✗ 执行失败：{_safe_exception_text(e)}")
+                        except Exception:
+                            pass
+                    return
+
+        # 3. 模板命令（按 name 查 worker-local ctx）
         if _ctx is not None:
             tpl = _ctx.templates.get(cmd)
             if tpl is not None:
@@ -1069,7 +1386,7 @@ def make_command_handler(client: TelegramClient, account_id: int, prefix: str | 
                         pass
                 return
 
-        # 3. 未知命令
+        # 4. 未知命令
         try:
             await event.edit(f"未知命令：{cmd}（{p}help 查看可用列表）")
         except Exception:

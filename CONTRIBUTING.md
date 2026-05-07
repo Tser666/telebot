@@ -22,7 +22,6 @@
 
 ❌ 不接的方向（不要浪费时间）：
 - 多用户 / RBAC / 团队协作功能
-- PagerMaid 插件兼容层（API 不通，参考 `docs/PLUGIN-DEV-GUIDE.md` §7 移植指南）
 - 邮件 / Slack / Discord 通知（TG-self 已够；fork 自己加）
 - 备份云端化 / Prometheus 集成
 
@@ -190,5 +189,4 @@ PR 模板里有专门的迁移自查项 —— **每条都勾上**才合并。
 参考 / 启发：
 
 - [Telethon](https://codeberg.org/Lonami/Telethon) — 整个 TG 协议层靠它
-- [PagerMaid-Pyro](https://github.com/TeamPGM/PagerMaid-Pyro) — 命令体系 / 插件生态参考（虽然 API 不通用）
 - [shadcn/ui](https://ui.shadcn.com/) — 前端 UI 风格

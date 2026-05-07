@@ -215,6 +215,7 @@ class _AccountState:
 
     def __init__(self, account_id: int) -> None:
         self.account_id = account_id
+        self.generation: int = 1
         self.engine: RateLimitEngine | None = None
         self.client: TelegramClient | None = None
         self.redis: Any = None  # redis.asyncio.Redis
@@ -327,6 +328,8 @@ async def load_plugins_for_account(
                 ctx = state.contexts.get(fkey)
                 if ctx is None:
                     continue
+                if ctx.generation != state.generation:
+                    continue
                 try:
                     await inst.on_message(ctx, event)
                 except Exception as exc:  # noqa: BLE001
@@ -417,6 +420,7 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
         engine=state.engine,
         redis=state.redis or redis,
         log=_make_logger(redis, state.account_id),
+        generation=state.generation,
     )
 
     try:
@@ -493,6 +497,7 @@ async def reload_account_config(account_id: int, payload: dict | None = None) ->
     state = _STATES.get(account_id)
     if state is None:
         return
+    state.generation += 1
     redis = state.redis or get_redis()
 
     # 刷新动态发现的 BUILTIN_FEATURES，让新增 builtin 插件目录立即可见
@@ -584,6 +589,7 @@ async def reload_plugin(account_id: int, plugin_key: str | None) -> None:
     state = _STATES.get(account_id)
     if state is None:
         return
+    state.generation += 1
     redis = state.redis or get_redis()
 
     # 1) 先 shutdown 旧实例

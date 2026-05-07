@@ -10,6 +10,35 @@
 
 ---
 
+
+## [0.8.0] — 2026-05-08 · feature · Sprint5 功能实现
+
+### Added
+- **Generation Guard (Task #18)**：Account 模型添加 `generation` 字段，防止并发操作冲突
+- **命令别名系统 (Task #19)**：
+  - CommandAlias 模型和数据库迁移（0016_command_alias.py）
+  - 贪心最长匹配别名解析
+  - `,alias` 管理命令（set/del/ls）
+- **Sudo 系统 (Task #20)**：
+  - SudoUser 模型和数据库迁移（0017_sudo_user.py）
+  - Sudo 模式：允许指定用户代表账号执行命令（默认前缀 `.`）
+  - 权限检查：tg_user_id、chat_id 白名单、命令白名单
+  - `,sudo` 管理命令（add/del/ls）
+- **Conversation API (Task #21)**：
+  - conversation.py 实现多轮对话工具类
+  - 支持 send()、get_response()、click_button()、mark_read()
+  - 超时处理和自动 handler 清理
+
+### Security
+- Sudo 权限在命令派发前检查，权限拒绝返回清晰错误信息
+- 基于白名单的 chat 和命令访问控制
+
+### Changed
+- CommandContext 新增 `sudo_users` 和 `sudo_prefix` 字段
+- runtime.py 加载 sudo 配置到命令派发上下文
+
+---
+
 ## [0.7.1] — 2026-05-07 · patch · Docker 部署优化与前端构建修复
 
 ### Added
@@ -164,7 +193,7 @@
 - **README 重写为开源向**：
   - 简洁的 Feature 列表（8 项核心功能）
   - Quick Start 分本机自用 / 公网部署两条路径
-  - FAQ 回答"与 PagerMaid 区别"、"多用户支持"、"为什么用 userbot"
+  - FAQ 回答"多用户支持"、"为什么用 userbot"
   - 状态声明：Alpha / 个人自用 / 欢迎 fork 但暂不接大 PR
 - **SECURITY-OPS 润色**：
   - 顶部新增"如果你打算公网部署"提示
@@ -245,8 +274,8 @@ int 4")`，下次 bump 版本号时 `stage` 字段如果摘掉得记得这里同
   - `bot_token` Fernet 加密入库，GET 返 `has_token: bool`，永远不返明文（约定 D）
   - 是 Bot Token（@BotFather 创建）走 HTTP API，与 userbot session 完全独立
   - 前端 `Settings/NotifyBots.tsx` 提供 CRUD + 一键测试
-- **插件开发指南**：`docs/PLUGIN-DEV-GUIDE.md` 含目录骨架、Manifest 字段、Plugin/Context hook、风控接入、Telethon 速查、PagerMaid→Telethon 移植映射表（约定使用菜谱思维而非装他的电器）、沙箱权限说明。
-- **首个移植样例**：`examples/plugins/translate/`——参考 PagerMaid_Plugins/translate 的"功能目标"重写为 Telethon + 我们的 Manifest 风格，作为开发模板（不放进 builtin/）。
+- **插件开发指南**：`docs/PLUGIN-DEV-GUIDE.md` 含目录骨架、Manifest 字段、Plugin/Context hook、风控接入、Telethon 速查、沙箱权限说明。
+- **首个插件样例**：`examples/plugins/translate/`——翻译插件，作为开发模板（不放进 builtin/）。
 - **公网部署文档**：`docs/DEPLOY-PUBLIC.md` + `deploy/Caddyfile.example`（Let's Encrypt 自动证书 + HSTS + 写操作限速 + reverse_proxy）。
 
 ### Removed
@@ -371,7 +400,7 @@ int 4")`，下次 bump 版本号时 `stage` 字段如果摘掉得记得这里同
 ## [0.1.0] — 2026-04-xx · MVP / Sprint 1
 
 ### Added
-- Telethon 切换（替换 PagerMaid-Pyro）。
+- Telethon 客户端初始化。
 - 登录向导（验证码 + 2FA）。
 - Worker 子进程模型（mp spawn context + atexit/SIGTERM 守护）。
 - IPC pub/sub（Redis）。
