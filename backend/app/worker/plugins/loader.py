@@ -11,7 +11,7 @@
 
 模块化后插件以"目录"形式存在：
 - 内置：``backend/app/worker/plugins/builtin/<key>/{__init__.py, manifest.py, plugin.py}``
-- 第三方：``data/plugins/installed/<key>/{__init__.py, manifest.py, plugin.py}``（阶段 B 引入）
+- 第三方：``plugins/installed/<key>/{__init__.py, manifest.py, plugin.py}``（阶段 B 引入）
 每个插件目录的 ``__init__.py`` 必须暴露 ``PLUGIN_CLASS``（Plugin 子类）与 ``MANIFEST``
 （``Manifest`` 实例）两个常量；``discover_plugins()`` 扫描时按目录读取这两个常量装载。
 
@@ -74,7 +74,7 @@ def _installed_dir() -> Path:
         return Path(settings.plugins_installed_dir).resolve()
     except Exception:  # noqa: BLE001
         # settings 加载失败时退化到默认相对路径
-        return Path("./data/plugins/installed").resolve()
+        return Path("./plugins/installed").resolve()
 
 
 def _scan_builtin_dirs() -> list[Path]:
@@ -120,7 +120,7 @@ def _load_dir(path: Path, source: str) -> dict[str, type[Plugin]]:
 
     - ``source="builtin"``：走正常的 ``importlib.import_module`` 路径，包名是
       ``app.worker.plugins.builtin.<key>``，能享受 Python 的 import 缓存。
-    - ``source="installed"``：第三方插件解压在 ``data/plugins/installed/<key>/``，
+    - ``source="installed"``：第三方插件解压在 ``plugins/installed/<key>/``，
       不属于 ``app.*`` 包；用 ``spec_from_file_location`` + ``submodule_search_locations``
       手工创建模块对象再执行，使其能 ``from .plugin import ...`` 等相对 import。
 
@@ -193,7 +193,7 @@ def discover_plugins() -> dict[str, type[Plugin]]:
 
     - 同名时 ``installed`` 覆盖 ``builtin``（第三方插件可"覆盖升级"内置实现）。
     - 单个插件失败只记日志，不影响其它插件。
-    - 不存在 ``data/plugins/installed`` 目录时直接跳过该源。
+    - 不存在 ``plugins/installed`` 目录时直接跳过该源。
     """
     out: dict[str, type[Plugin]] = {}
     for sub in _scan_builtin_dirs():
