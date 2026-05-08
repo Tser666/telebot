@@ -87,7 +87,7 @@ class PluginMetadata:
 # ─────────────────────────────────────────────────────
 # 内部工具：路径与 Git
 # ─────────────────────────────────────────────────────
-_NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$")
+_NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]*$")  # no dots to prevent .. traversal
 
 
 def _installed_root() -> Path:

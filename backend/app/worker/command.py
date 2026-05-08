@@ -630,6 +630,13 @@ async def _cmd_sudo(client, event, args, account_id):
     await event.edit(f"未知子命令：{sub}（支持 add/del/ls）")
 
 
+@builtin("plugin", doc="远程插件管理（list/install/remove/enable/disable/update）")
+async def _cmd_plugin(client, event, args, account_id):
+    """远程插件管理入口，委托给 commands.plugin_cmd。"""
+    from .commands.plugin_cmd import handle_plugin_cmd
+    await handle_plugin_cmd(client, event, args, account_id)
+
+
 _register_builtin_aliases()
 
 

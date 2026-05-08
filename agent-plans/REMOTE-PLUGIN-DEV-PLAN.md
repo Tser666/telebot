@@ -414,3 +414,45 @@ from .remote_plugin import RemotePlugin  # noqa: F401
 | 前端插件市场 | P2 | 浏览式 UI，搜索/筛选 |
 | 插件依赖管理 | P2 | requires_features 校验 |
 | 沙箱隔离 | P3 | 远程插件权限限制 |
+
+---
+
+## 完成报告
+
+**完成时间：** 2026-05-08
+
+**交付清单：**
+
+| 文件 | 状态 |
+|------|------|
+| `backend/app/db/models/remote_plugin.py` | ✅ 已有 |
+| `backend/alembic/versions/0018_create_remote_plugin_table.py` | ✅ 已有 |
+| `backend/app/services/remote_plugin_service.py` | ✅ 已有（完整实现） |
+| `backend/app/schemas/remote_plugin.py` | ✅ 新建 |
+| `backend/app/api/remote_plugin.py` | ✅ 新建（含 update 接口） |
+| `backend/app/main.py` | ✅ 追加路由注册 |
+| `backend/app/worker/commands/__init__.py` | ✅ 新建 |
+| `backend/app/worker/commands/plugin_cmd.py` | ✅ 新建 |
+| `backend/app/worker/command.py` | ✅ 追加 `@builtin("plugin", ...)` |
+| `frontend/src/types/remotePlugin.ts` | ✅ 新建 |
+| `frontend/src/api/remotePlugin.ts` | ✅ 新建 |
+| `frontend/src/pages/RemotePlugins/index.tsx` | ✅ 新建（卡片式 UI） |
+| `frontend/src/App.tsx` | ✅ 追加 `/remote-plugins` 路由 |
+| `frontend/src/components/layout/Sidebar.tsx` | ✅ 追加侧边栏"远程插件"入口 |
+
+**API 端点：**
+- `GET /api/remote-plugins` — 列出所有已安装远程插件
+- `POST /api/remote-plugins/install` — 从 Git URL 安装
+- `POST /api/remote-plugins/{name}/enable` — 启用
+- `POST /api/remote-plugins/{name}/disable` — 禁用
+- `POST /api/remote-plugins/{name}/update` — git pull 更新
+- `DELETE /api/remote-plugins/{name}` — 卸载
+
+**Bot 命令：** `,plugin list/install/remove/enable/disable/update`
+
+**验收结果：**
+- `ruff check` 全绿（backend 新增文件）
+- `pnpm run build` 成功（✓ built in 3.04s，无新增错误）
+- 语法检查全部通过
+- 已遵守 README 约定（只追加 main.py router，不改他人文件，not 改 builtin plugin）
+

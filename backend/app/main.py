@@ -316,3 +316,8 @@ app.include_router(commands_api.router)
 from .api import system_health as system_health_api  # noqa: E402
 
 app.include_router(system_health_api.router)
+
+# 远程插件管理（git clone 安装的第三方插件）
+from .api import remote_plugin as remote_plugin_api  # noqa: E402
+
+app.include_router(remote_plugin_api.router)

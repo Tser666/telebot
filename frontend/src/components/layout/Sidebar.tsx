@@ -13,6 +13,7 @@ import {
   Sparkles,
   Users,
   X,
+  GitFork,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { APP_VERSION_LABEL } from "@/lib/version";
@@ -30,6 +31,7 @@ const NAV: NavItem[] = [
   { to: "/", label: "概览", icon: LayoutDashboard, end: true },
   { to: "/accounts", label: "账号", icon: Users },
   { to: "/plugins", label: "插件", icon: Boxes },
+  { to: "/remote-plugins", label: "远程插件", icon: GitFork },
   { to: "/templates", label: "模板", icon: LayoutTemplate },
   { to: "/ai", label: "AI", icon: Sparkles },
   { to: "/logs", label: "日志", icon: ScrollText },
