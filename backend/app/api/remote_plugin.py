@@ -1,10 +1,9 @@
 """远程插件管理 API 路由。"""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, HTTPException
 
-from ..db import get_db
+from ..deps import DBSession
 from ..schemas.remote_plugin import RemotePluginCreate, RemotePluginOut
 from ..services import remote_plugin_service as svc
 from ..services.remote_plugin_service import (
@@ -19,7 +18,7 @@ router = APIRouter(prefix="/api/remote-plugins", tags=["remote-plugins"])
 
 
 @router.get("", response_model=list[RemotePluginOut])
-async def list_remote_plugins(db: AsyncSession = Depends(get_db)):
+async def list_remote_plugins(db: DBSession):
     """列出所有已安装远程插件。"""
     rows = await svc.list_installed(db)
     return rows
@@ -27,7 +26,7 @@ async def list_remote_plugins(db: AsyncSession = Depends(get_db)):
 
 @router.post("/install", response_model=RemotePluginOut, status_code=201)
 async def api_install_plugin(
-    body: RemotePluginCreate, db: AsyncSession = Depends(get_db)
+    body: RemotePluginCreate, db: DBSession
 ):
     """从 Git URL 克隆并安装远程插件。"""
     try:
@@ -46,7 +45,7 @@ async def api_install_plugin(
 
 
 @router.post("/{name}/enable")
-async def api_enable(name: str, db: AsyncSession = Depends(get_db)):
+async def api_enable(name: str, db: DBSession):
     """启用指定远程插件。"""
     try:
         row = await svc.enable(db, name)
@@ -57,7 +56,7 @@ async def api_enable(name: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{name}/disable")
-async def api_disable(name: str, db: AsyncSession = Depends(get_db)):
+async def api_disable(name: str, db: DBSession):
     """禁用指定远程插件。"""
     try:
         row = await svc.disable(db, name)
@@ -68,7 +67,7 @@ async def api_disable(name: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{name}/update", response_model=RemotePluginOut)
-async def api_update(name: str, db: AsyncSession = Depends(get_db)):
+async def api_update(name: str, db: DBSession):
     """从远程仓库 git pull 并更新插件元数据。"""
     try:
         row = await svc.update(db, name)
@@ -84,7 +83,7 @@ async def api_update(name: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.delete("/{name}")
-async def api_uninstall(name: str, db: AsyncSession = Depends(get_db)):
+async def api_uninstall(name: str, db: DBSession):
     """卸载并删除指定远程插件。"""
     found = await svc.uninstall(db, name)
     if not found:
