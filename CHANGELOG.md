@@ -15,18 +15,27 @@
 
 ### Added
 - **远程插件管理系统**：
-  - `RemotePlugin` 数据库模型 + Alembic 迁移（0018）
-  - 远程插件 API（list / install / enable / disable / update / uninstall）
-  - 远程插件 Service 层（git clone、manifest 解析、热加载触发）
-  - `/plugin` Bot 命令（list / install / remove / enable / disable / update）
-  - 前端远程插件管理页面（卡片布局、安装输入框、启用/禁用/更新/卸载）
+  - `RemotePlugin` 数据库模型 + Alembic 迁移（0018、0019）
+  - 远程插件 API（list / install / enable / disable / update / uninstall / enable-accounts / disable-accounts）
+  - 远程插件 Service 层（git clone、manifest 解析、热加载触发、Feature 表联动）
+  - `/plugin` Bot 命令（list / install / remove / enable / disable / update，install 支持 `--default` 参数）
+  - 前端远程插件管理 Tab（卡片布局、安装输入框、默认启用开关、启用/禁用/更新/卸载）
   - 插件验证函数 `validate_manifest()`（必填字段校验）
+- **账号级远程插件管理**：
+  - 安装时可勾选「默认为所有账号启用」（`default_enabled`），自动注册到 Feature 表 + 为所有账号创建 AccountFeature 行
+  - 功能矩阵 Tab 自动展示远程插件列（因为注册到了 Feature 表）
+  - 按账号启停远程插件 API（`enable-accounts` / `disable-accounts`），复用 `feature_service.bulk_set_enabled`
+  - 卸载时自动清理 Feature / AccountFeature 关联行
+- **插件中心 UI 重构**：
+  - 远程插件从独立页面合并到插件中心第四 Tab（功能矩阵 / 已加载插件 / 远程插件 / 开发指南）
+  - 侧边栏移除「远程插件」独立入口，统一走「插件」
+  - `/remote-plugins` 旧路由自动跳转到 `/plugins`
 - **远程插件开发文档**：`docs/REMOTE-PLUGIN-GUIDE.md` + `docs/REMOTE-PLUGIN-DEV-PLAN.md`
 
 ### Fixed
 - 插件名称正则去除 `.`，防止 `..` 路径穿越攻击
-- `remote_plugin` Schema 字段 `installed_at` → `created_at`，与 model 对齐
-- 安装后 toast 提示用户"默认禁用，请手动启用"
+- `remote_plugin` Schema 字段 `installed_at` 与 model 对齐
+- 安装后 toast 根据是否默认启用显示不同提示文案
 
 ### Changed
 - 插件开发指南（PLUGIN-DEV-GUIDE.md）全面重写，合并远程插件规范

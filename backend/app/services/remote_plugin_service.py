@@ -32,6 +32,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.models.account import Account
+from ..db.models.feature import AccountFeature, Feature
 from ..db.models.remote_plugin import RemotePlugin
 from ..settings import settings
 from ..worker.ipc import CMD_RELOAD_PLUGIN, cmd_channel, make_cmd
@@ -279,6 +280,7 @@ async def install(
     *,
     name: str | None = None,
     enable: bool = False,
+    default_enabled: bool = False,
 ) -> RemotePlugin:
     """从 Git 仓库克隆并安装一个远程插件。
 
@@ -288,7 +290,9 @@ async def install(
       3. ``git clone <source_url> plugins/installed/<name>``
       4. 读 ``plugin.json`` / ``manifest.py``
       5. 写 ``remote_plugin`` 行
-      6. 触发 ``reload_plugin`` 广播
+      6. 注册到 ``feature`` 表（is_builtin=False），使功能矩阵可见
+      7. 若 ``default_enabled=True``，为所有已有账号创建 ``AccountFeature`` 行
+      8. 触发 ``reload_plugin`` 广播
 
     任何中间步骤失败：已克隆的目录会被清理；DB 不会留下脏行（由调用方
     在事务里 commit / rollback 即可，本函数只 ``flush``）。
@@ -333,9 +337,50 @@ async def install(
             source_url=source_url,
             version=meta.version,
             enabled=bool(enable),
+            default_enabled=default_enabled,
         )
         db.add(row)
+
+        # 注册到 feature 表（使功能矩阵可见）
+        feat = (
+            await db.execute(select(Feature).where(Feature.key == final_name))
+        ).scalar_one_or_none()
+        if feat is None:
+            db.add(Feature(
+                key=final_name,
+                display_name=meta.display_name or final_name,
+                is_builtin=False,
+                version=meta.version,
+            ))
+        else:
+            # 已存在则校正 display_name 和 version
+            feat.display_name = meta.display_name or final_name
+            feat.version = meta.version
+            feat.is_builtin = False
+
         await db.flush()
+
+        # 如果 default_enabled=True，为所有已有账号启用
+        if default_enabled:
+            aids = (await db.execute(select(Account.id))).scalars().all()
+            for aid in aids:
+                af = (
+                    await db.execute(
+                        select(AccountFeature).where(
+                            AccountFeature.account_id == int(aid),
+                            AccountFeature.feature_key == final_name,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if af is None:
+                    db.add(AccountFeature(
+                        account_id=int(aid),
+                        feature_key=final_name,
+                        enabled=True,
+                        state="active",
+                    ))
+            await db.flush()
+
     except Exception:
         # 元数据/写库失败 → 回滚文件系统的 clone
         shutil.rmtree(target, ignore_errors=True)
@@ -347,7 +392,7 @@ async def install(
 
 
 async def uninstall(db: AsyncSession, name: str) -> bool:
-    """卸载远程插件：删 DB 行 + 删插件目录。
+    """卸载远程插件：删 DB 行 + 删插件目录 + 清理 Feature/AccountFeature 行。
 
     返回 ``True`` 表示真删了一行。``name`` 不存在时返回 ``False``，不抛异常。
     """
@@ -356,6 +401,22 @@ async def uninstall(db: AsyncSession, name: str) -> bool:
     ).scalar_one_or_none()
     if row is None:
         return False
+
+    # 清理 AccountFeature 行
+    afs = (
+        await db.execute(
+            select(AccountFeature).where(AccountFeature.feature_key == name)
+        )
+    ).scalars().all()
+    for af in afs:
+        await db.delete(af)
+
+    # 清理 Feature 行
+    feat = (
+        await db.execute(select(Feature).where(Feature.key == name))
+    ).scalar_one_or_none()
+    if feat is not None:
+        await db.delete(feat)
 
     await db.delete(row)
     await db.flush()

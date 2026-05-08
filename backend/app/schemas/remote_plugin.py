@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 class RemotePluginCreate(BaseModel):
     source_url: str
+    default_enabled: bool = False
 
 
 class RemotePluginOut(BaseModel):
@@ -19,8 +20,8 @@ class RemotePluginOut(BaseModel):
     source_url: str
     version: str
     enabled: bool
-    cleanup_mode: str = "no-op"
-    created_at: datetime | None = None
+    default_enabled: bool = False
+    installed_at: datetime | None = None
 
     class Config:
         from_attributes = True

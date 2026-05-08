@@ -7,10 +7,15 @@ export interface RemotePlugin {
   source_url: string;
   version: string;
   enabled: boolean;
-  cleanup_mode: string;
+  default_enabled: boolean;
   installed_at: string | null;
 }
 
 export interface InstallRequest {
   source_url: string;
+  default_enabled?: boolean;
+}
+
+export interface AccountPluginAction {
+  account_ids: number[];
 }

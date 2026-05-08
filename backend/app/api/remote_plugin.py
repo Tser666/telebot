@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from ..deps import DBSession
 from ..schemas.remote_plugin import RemotePluginCreate, RemotePluginOut
+from ..services import feature_service
 from ..services import remote_plugin_service as svc
 from ..services.remote_plugin_service import (
     DuplicatePluginName,
@@ -28,9 +30,15 @@ async def list_remote_plugins(db: DBSession):
 async def api_install_plugin(
     body: RemotePluginCreate, db: DBSession
 ):
-    """从 Git URL 克隆并安装远程插件。"""
+    """从 Git URL 克隆并安装远程插件。
+
+    ``default_enabled=True`` 时，安装后自动为所有已有账号启用该插件
+    （写入 AccountFeature 行），功能矩阵 Tab 会自动展示。
+    """
     try:
-        row = await svc.install(db, body.source_url)
+        row = await svc.install(
+            db, body.source_url, default_enabled=body.default_enabled,
+        )
         await db.commit()
         await db.refresh(row)
         return row
@@ -46,7 +54,7 @@ async def api_install_plugin(
 
 @router.post("/{name}/enable")
 async def api_enable(name: str, db: DBSession):
-    """启用指定远程插件。"""
+    """启用指定远程插件（全局开关）。"""
     try:
         row = await svc.enable(db, name)
         await db.commit()
@@ -57,13 +65,40 @@ async def api_enable(name: str, db: DBSession):
 
 @router.post("/{name}/disable")
 async def api_disable(name: str, db: DBSession):
-    """禁用指定远程插件。"""
+    """禁用指定远程插件（全局开关）。"""
     try:
         row = await svc.disable(db, name)
         await db.commit()
         return {"ok": True, "name": row.name, "enabled": False}
     except RemotePluginNotFound as e:
         raise HTTPException(404, detail={"code": e.code, "message": e.message}) from e
+
+
+class AccountPluginAction(BaseModel):
+    account_ids: list[int]
+
+
+@router.post("/{name}/enable-accounts")
+async def api_enable_accounts(name: str, body: AccountPluginAction, db: DBSession):
+    """按账号启用远程插件（写入 AccountFeature 行，功能矩阵可见）。"""
+    # 先确认远程插件存在
+    rp = await svc.get_by_name(db, name)
+    if rp is None:
+        raise HTTPException(404, detail={"code": "PLUGIN_NOT_FOUND", "message": f"插件 {name} 不存在"})
+    n = await feature_service.bulk_set_enabled(db, body.account_ids, name, enabled=True)
+    await db.commit()
+    return {"ok": True, "name": name, "applied": n}
+
+
+@router.post("/{name}/disable-accounts")
+async def api_disable_accounts(name: str, body: AccountPluginAction, db: DBSession):
+    """按账号禁用远程插件。"""
+    rp = await svc.get_by_name(db, name)
+    if rp is None:
+        raise HTTPException(404, detail={"code": "PLUGIN_NOT_FOUND", "message": f"插件 {name} 不存在"})
+    n = await feature_service.bulk_set_enabled(db, body.account_ids, name, enabled=False)
+    await db.commit()
+    return {"ok": True, "name": name, "applied": n}
 
 
 @router.post("/{name}/update", response_model=RemotePluginOut)
@@ -84,7 +119,7 @@ async def api_update(name: str, db: DBSession):
 
 @router.delete("/{name}")
 async def api_uninstall(name: str, db: DBSession):
-    """卸载并删除指定远程插件。"""
+    """卸载并删除指定远程插件（同时清理 Feature/AccountFeature 行）。"""
     found = await svc.uninstall(db, name)
     if not found:
         raise HTTPException(

@@ -1,5 +1,5 @@
 import { api } from "@/lib/api";
-import type { RemotePlugin, InstallRequest } from "@/types/remotePlugin";
+import type { RemotePlugin, InstallRequest, AccountPluginAction } from "@/types/remotePlugin";
 
 const BASE = "/api/remote-plugins";
 
@@ -27,6 +27,28 @@ export async function disableRemotePlugin(
 ): Promise<{ ok: boolean; name: string; enabled: boolean }> {
   const { data } = await api.post(
     `${BASE}/${encodeURIComponent(name)}/disable`
+  );
+  return data;
+}
+
+export async function enableRemotePluginForAccounts(
+  name: string,
+  body: AccountPluginAction
+): Promise<{ ok: boolean; name: string; applied: number }> {
+  const { data } = await api.post(
+    `${BASE}/${encodeURIComponent(name)}/enable-accounts`,
+    body
+  );
+  return data;
+}
+
+export async function disableRemotePluginForAccounts(
+  name: string,
+  body: AccountPluginAction
+): Promise<{ ok: boolean; name: string; applied: number }> {
+  const { data } = await api.post(
+    `${BASE}/${encodeURIComponent(name)}/disable-accounts`,
+    body
   );
   return data;
 }

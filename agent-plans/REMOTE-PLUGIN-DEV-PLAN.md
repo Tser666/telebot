@@ -419,40 +419,45 @@ from .remote_plugin import RemotePlugin  # noqa: F401
 
 ## 完成报告
 
-**完成时间：** 2026-05-08
+**完成时间：** 2026-05-08（第二次更新：补齐插件中心重构 + 账号级管理 + CHANGELOG 中文化）
 
 **交付清单：**
 
 | 文件 | 状态 |
 |------|------|
-| `backend/app/db/models/remote_plugin.py` | ✅ 已有 |
+| `backend/app/db/models/remote_plugin.py` | ✅ 已有（+default_enabled 字段） |
 | `backend/alembic/versions/0018_create_remote_plugin_table.py` | ✅ 已有 |
-| `backend/app/services/remote_plugin_service.py` | ✅ 已有（完整实现） |
-| `backend/app/schemas/remote_plugin.py` | ✅ 新建 |
-| `backend/app/api/remote_plugin.py` | ✅ 新建（含 update 接口） |
+| `backend/alembic/versions/0019_add_remote_plugin_default_enabled.py` | ✅ 新建 |
+| `backend/app/services/remote_plugin_service.py` | ✅ 完善（install 注册 Feature 表 + default_enabled 账号级批量启用；uninstall 清理 Feature/AccountFeature 行） |
+| `backend/app/schemas/remote_plugin.py` | ✅ 更新（+default_enabled 字段，移除错误的 cleanup_mode/created_at） |
+| `backend/app/api/remote_plugin.py` | ✅ 完善（+enable-accounts/disable-accounts 端点，install 传 default_enabled） |
 | `backend/app/main.py` | ✅ 追加路由注册 |
 | `backend/app/worker/commands/__init__.py` | ✅ 新建 |
-| `backend/app/worker/commands/plugin_cmd.py` | ✅ 新建 |
+| `backend/app/worker/commands/plugin_cmd.py` | ✅ 更新（install 支持 --default 参数） |
 | `backend/app/worker/command.py` | ✅ 追加 `@builtin("plugin", ...)` |
-| `frontend/src/types/remotePlugin.ts` | ✅ 新建 |
-| `frontend/src/api/remotePlugin.ts` | ✅ 新建 |
-| `frontend/src/pages/RemotePlugins/index.tsx` | ✅ 新建（卡片式 UI） |
-| `frontend/src/App.tsx` | ✅ 追加 `/remote-plugins` 路由 |
-| `frontend/src/components/layout/Sidebar.tsx` | ✅ 追加侧边栏"远程插件"入口 |
+| `frontend/src/types/remotePlugin.ts` | ✅ 更新（+default_enabled、AccountPluginAction 类型） |
+| `frontend/src/api/remotePlugin.ts` | ✅ 更新（+enableForAccounts/disableForAccounts 函数） |
+| `frontend/src/pages/Extensions.tsx` | ✅ 重构（4 Tab：功能矩阵/已加载/远程插件/开发指南，远程插件从独立页合并） |
+| `frontend/src/pages/RemotePlugins/index.tsx` | ✅ 已删除（内容合并到 Extensions.tsx） |
+| `frontend/src/App.tsx` | ✅ 更新（移除 RemotePlugins 导入，/remote-plugins 改为跳转到 /plugins） |
+| `frontend/src/components/layout/Sidebar.tsx` | ✅ 更新（移除「远程插件」独立入口，移除 GitFork 导入） |
+| `CHANGELOG.md` | ✅ 更新（0.9.0 条目补齐账号级管理、插件中心重构） |
 
 **API 端点：**
 - `GET /api/remote-plugins` — 列出所有已安装远程插件
-- `POST /api/remote-plugins/install` — 从 Git URL 安装
-- `POST /api/remote-plugins/{name}/enable` — 启用
-- `POST /api/remote-plugins/{name}/disable` — 禁用
+- `POST /api/remote-plugins/install` — 从 Git URL 安装（支持 default_enabled 参数）
+- `POST /api/remote-plugins/{name}/enable` — 全局启用
+- `POST /api/remote-plugins/{name}/disable` — 全局禁用
+- `POST /api/remote-plugins/{name}/enable-accounts` — 按账号启用
+- `POST /api/remote-plugins/{name}/disable-accounts` — 按账号禁用
 - `POST /api/remote-plugins/{name}/update` — git pull 更新
-- `DELETE /api/remote-plugins/{name}` — 卸载
+- `DELETE /api/remote-plugins/{name}` — 卸载（同时清理 Feature/AccountFeature 行）
 
-**Bot 命令：** `,plugin list/install/remove/enable/disable/update`
+**Bot 命令：** `,plugin list/install/remove/enable/disable/update`（install 支持 `--default` 参数）
 
 **验收结果：**
 - `ruff check` 全绿（backend 新增文件）
-- `pnpm run build` 成功（✓ built in 3.04s，无新增错误）
+- `pnpm run build` 成功（✓ built in 3.12s，无新增错误）
 - 语法检查全部通过
-- 已遵守 README 约定（只追加 main.py router，不改他人文件，not 改 builtin plugin）
+- 已遵守 README 约定（只追加 main.py router，不改他人文件，不改 builtin plugin）
 

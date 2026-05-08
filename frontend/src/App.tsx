@@ -20,7 +20,6 @@ import { CommandTemplates } from "@/pages/Settings/CommandTemplates";
 import { Extensions } from "@/pages/Extensions";
 import { AISettings } from "@/pages/AISettings";
 import { Templates } from "@/pages/Templates";
-import { RemotePlugins } from "@/pages/RemotePlugins";
 
 type AppErrorBoundaryState = { hasError: boolean };
 
@@ -106,7 +105,7 @@ export default function App() {
           <Route path="plugins" element={<Extensions />} />
           <Route path="matrix" element={<Navigate to="/plugins" replace />} />
           <Route path="extensions" element={<Navigate to="/plugins" replace />} />
-          <Route path="remote-plugins" element={<RemotePlugins />} />
+          <Route path="remote-plugins" element={<Navigate to="/plugins" replace />} />
           <Route path="logs" element={<Logs />} />
           <Route path="settings" element={<SettingsIndex />} />
           <Route path="settings/commands" element={<CommandTemplates />} />

@@ -2,7 +2,7 @@
 
 支持子命令：
   ,plugin list                    - 列出已安装远程插件
-  ,plugin install <url>           - 从 Git URL 安装
+  ,plugin install <url> [--default]- 从 Git URL 安装（--default 默认为所有账号启用）
   ,plugin remove <name>           - 卸载
   ,plugin enable <name>           - 启用
   ,plugin disable <name>          - 禁用
@@ -18,6 +18,7 @@ HELP_TEXT = """📦 远程插件管理
 
 ,plugin list                 列出已安装远程插件
 ,plugin install <url>        从 Git 仓库安装插件
+  --default                  安装后默认为所有账号启用
 ,plugin remove <name>        卸载指定插件
 ,plugin enable <name>        启用指定插件
 ,plugin disable <name>       禁用指定插件
@@ -42,10 +43,11 @@ async def handle_plugin_cmd(client, event, args: list, account_id: int) -> bool:
 
     if sub == "install":
         if len(args) < 2:
-            await event.edit("用法：,plugin install <git-url>")
+            await event.edit("用法：,plugin install <git-url> [--default]")
             return True
         url = args[1]
-        await _subcmd_install(event, url)
+        default_enabled = "--default" in args[2:]
+        await _subcmd_install(event, url, default_enabled=default_enabled)
         return True
 
     if sub in ("remove", "uninstall"):
@@ -108,7 +110,7 @@ async def _subcmd_list(event) -> None:
     await event.edit("\n".join(lines))
 
 
-async def _subcmd_install(event, url: str) -> None:
+async def _subcmd_install(event, url: str, *, default_enabled: bool = False) -> None:
     from ...db.base import AsyncSessionLocal
     from ...services import remote_plugin_service as svc
     from ...services.remote_plugin_service import (
@@ -121,14 +123,17 @@ async def _subcmd_install(event, url: str) -> None:
     await event.edit(f"⏳ 正在安装 {url} …")
     try:
         async with AsyncSessionLocal() as db:
-            row = await svc.install(db, url)
+            row = await svc.install(db, url, default_enabled=default_enabled)
             await db.commit()
+        status = "已启用" if row.enabled else "已禁用（需 ,plugin enable 启用）"
+        if default_enabled:
+            status = "已为所有账号启用"
         await event.edit(
             f"✅ 安装成功\n"
             f"名称: {row.name}\n"
             f"版本: {row.version}\n"
             f"作者: {row.author or '未知'}\n"
-            f"状态: {'已启用' if row.enabled else '已禁用（需 ,plugin enable 启用）'}"
+            f"状态: {status}"
         )
     except DuplicatePluginName as e:
         await event.edit(f"❌ 安装失败：插件已存在\n{e.message}")

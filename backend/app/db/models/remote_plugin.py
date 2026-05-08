@@ -37,6 +37,10 @@ class RemotePlugin(Base):
     source_url: Mapped[str] = mapped_column(Text, nullable=False)
     version: Mapped[str] = mapped_column(String(64), nullable=False, default="0.0.0")
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    default_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False,
+        comment="安装时是否默认为所有账号启用；启用后自动在 AccountFeature 创建行",
+    )
     installed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
