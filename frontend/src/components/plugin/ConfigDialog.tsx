@@ -169,7 +169,7 @@ function FieldInput({ fk, field, value, onChange }: { fk: string; field: ConfigF
       <div>
         <label className="text-sm font-medium">{label}</label>
         {field.description && <p className="text-xs text-muted-foreground">{field.description}</p>}
-        <input type="number" value={value ?? field.default ?? ""} min={field.minimum} max={field.maximum}
+        <input type="number" value={String(value ?? field.default ?? "")} min={field.minimum as number} max={field.maximum as number}
           onChange={(e) => onChange(Number(e.target.value))}
           className="mt-1 w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm" />
         {field.minimum !== undefined && field.maximum !== undefined && (
@@ -182,7 +182,7 @@ function FieldInput({ fk, field, value, onChange }: { fk: string; field: ConfigF
     <div>
       <label className="text-sm font-medium">{label}</label>
       {field.description && <p className="text-xs text-muted-foreground">{field.description}</p>}
-      <input type="text" value={value ?? field.default ?? ""} onChange={(e) => onChange(e.target.value)}
+      <input type="text" value={String(value ?? field.default ?? "")} onChange={(e) => onChange(e.target.value)}
         placeholder={String(field.default ?? "")}
         className="mt-1 w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm" />
     </div>
