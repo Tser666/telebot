@@ -11,6 +11,30 @@
 ---
 
 
+## [0.9.0] — 2026-05-08 · feature · 远程插件管理系统 + 安全加固
+
+### Added
+- **远程插件管理系统**：
+  - `RemotePlugin` 数据库模型 + Alembic 迁移（0018）
+  - 远程插件 API（list / install / enable / disable / update / uninstall）
+  - 远程插件 Service 层（git clone、manifest 解析、热加载触发）
+  - `/plugin` Bot 命令（list / install / remove / enable / disable / update）
+  - 前端远程插件管理页面（卡片布局、安装输入框、启用/禁用/更新/卸载）
+  - 插件验证函数 `validate_manifest()`（必填字段校验）
+- **远程插件开发文档**：`docs/REMOTE-PLUGIN-GUIDE.md` + `docs/REMOTE-PLUGIN-DEV-PLAN.md`
+
+### Fixed
+- 插件名称正则去除 `.`，防止 `..` 路径穿越攻击
+- `remote_plugin` Schema 字段 `installed_at` → `created_at`，与 model 对齐
+- 安装后 toast 提示用户"默认禁用，请手动启用"
+
+### Changed
+- 插件开发指南（PLUGIN-DEV-GUIDE.md）全面重写，合并远程插件规范
+- Sprint5 和 CONTRACTS 归档到 `archive/plans/`
+- 版本号统一升至 0.9.0
+
+---
+
 ## [0.8.0] — 2026-05-08 · feature · Sprint5 功能实现
 
 ### Added
