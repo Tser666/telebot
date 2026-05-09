@@ -23,6 +23,7 @@ MANIFEST = Manifest(
     #   - "account": 账号级配置，按账号隔离（默认）
     config_schema={
         "type": "object",
+        "x-ui-mode": "platform",
         "properties": {
             "default_notify": {
                 "type": "boolean", "title": "执行后通知", "default": True,

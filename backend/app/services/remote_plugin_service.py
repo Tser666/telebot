@@ -143,7 +143,7 @@ class PluginMetadataSchema(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def _fill_name_from_key(self) -> "PluginMetadataSchema":
+    def _fill_name_from_key(self) -> PluginMetadataSchema:
         if self.name is None and self.key is not None:
             self.name = self.key
         return self
@@ -272,13 +272,13 @@ async def _run_git(*args: str, cwd: str | Path | None = None, timeout: float = 1
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(), timeout=timeout
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         await proc.wait()
         raise GitOperationFailed(
             "GIT_TIMEOUT",
             f"git {' '.join(args)} 超时（{timeout}s）",
-        )
+        ) from None
     if proc.returncode != 0:
         msg = (stderr or b"").decode("utf-8", errors="replace").strip()
         raise GitOperationFailed(

@@ -145,6 +145,31 @@ def _safe_exception_text(e: BaseException, max_len: int = 200) -> str:
     return msg
 
 
+def _humanize_llm_error(e: BaseException, max_len: int = 360) -> str:
+    """把 LLM 调用错误翻译成用户可执行的提示，同时复用脱敏规则。"""
+    raw = str(e)
+    text = _safe_exception_text(e, max_len=max_len)
+    lowered = raw.lower()
+
+    if "budget_exceeded" in lowered or "已达上限" in raw:
+        return _safe_exception_text(RuntimeError(raw), max_len=max_len)
+    if "usage_limit" in lowered or "quota" in lowered or "insufficient_quota" in lowered:
+        return "模型服务额度已用完或账户余额不足。请更换 provider / API Key，或等待额度恢复。"
+    if "429" in raw or "rate_limit" in lowered or "too many requests" in lowered:
+        return "模型服务正在限流。请稍后重试，或切换到备用 provider。"
+    if "401" in raw or "403" in raw or "unauthorized" in lowered or "forbidden" in lowered or "auth" in lowered:
+        return "模型鉴权失败：API Key 无效、过期，或当前账号没有权限。请检查 provider 配置。"
+    if "404" in raw or "model not found" in lowered:
+        return "模型或接口不存在。请检查 provider endpoint、api_format 和模型名称。"
+    if "timeout" in lowered:
+        return "模型响应超时。请稍后重试，或调低 max_tokens / 换更快的 provider。"
+    if "connect" in lowered or "network" in lowered or "proxy" in lowered or "ssl" in lowered:
+        return "连接模型服务失败。请检查网络、代理和 provider endpoint。"
+    if "所有 provider 都失败" in raw:
+        return "所有可用 provider 都调用失败。请检查主 provider 和 fallback provider 配置。"
+    return text
+
+
 def _safe_log_text(text: str, max_len: int = 200) -> str:
     """把用户内容净化成"可安全记录日志"的形式。
 
@@ -166,7 +191,7 @@ def _safe_log_text(text: str, max_len: int = 200) -> str:
     return f'<len={length}> "{preview}"'
 
 
-def _dto_to_fake_row(dto) -> "LLMProviderModel":  # type: ignore[name-defined]
+def _dto_to_fake_row(dto) -> Any:
     """将 LLMProviderDTO 转为临时 ORM 行（向后兼容 build_client）。"""
     from ..db.models.command import LLMProvider as LLMProviderModel
 
@@ -1272,7 +1297,7 @@ async def _run_ai(client, event, args, tpl: dict[str, Any], account_id: int) -> 
 
             await _refresh_command_context(_ctx.account_id)
             provider_dict = _ctx.providers.get(chosen_provider_id)
-        except Exception as e:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             log.exception("[ai] provider miss 时刷新失败 account=%s pid=%s", _ctx.account_id, chosen_provider_id)
             # 刷新失败时继续走"provider 不存在"的友好提示；不要把 DB/网络错误
             # 覆盖掉用户真正需要看到的 provider_id。
@@ -1393,7 +1418,6 @@ async def _run_ai(client, event, args, tpl: dict[str, Any], account_id: int) -> 
 
     # build_client 在内部解密 api_key；导入时点放函数内，避免循环依赖。
     # complete 调用走 llm_runtime，以获得 retry + fallback；STT 仍直接使用选中的 provider。
-    from ..db.models.command import LLMProvider as LLMProviderModel
     from ..services.llm_client import LLMCallFailed, LLMError, LLMResult, build_client
     from ..services.llm_dto import LLMProviderDTO
     from ..services.llm_runtime import build_fallback_chain, call_with_fallback
@@ -1517,26 +1541,25 @@ async def _run_ai(client, event, args, tpl: dict[str, Any], account_id: int) -> 
             fb_note = f"fallback → @{used_provider_dto.name or used_provider_dto.id}"
             routing_note = f"{routing_note} · {fb_note}" if routing_note else fb_note
     except LLMCallFailed as e:
-        # message 已在 LLMError 内脱敏；LLMCallFailed 包含 provider 信息
-        err_msg = str(e)
+        err_msg = _humanize_llm_error(e)
         if e.provider_name:
             err_msg = f"[{e.provider_name}] {err_msg}"
-        await event.edit(f"✗ AI 调用失败：{err_msg[:300]}")
+        await event.edit(f"✗ AI 调用失败：{err_msg}")
         return
     except LLMError as e:
-        # message 已在 LLMError 内脱敏
-        await event.edit(f"✗ AI 调用失败：{e}")
+        await event.edit(f"✗ AI 调用失败：{_humanize_llm_error(e)}")
         return
     except Exception as e:  # noqa: BLE001
-        await event.edit(f"✗ AI 调用失败：{type(e).__name__}: {str(e)[:120]}")
+        await event.edit(f"✗ AI 调用失败：{_humanize_llm_error(e)}")
         return
 
     # ── 处理 LLM 生成的图片（如 Grok 文生图）────────────────────
     if result.image_urls or result.image_data:
         import base64 as _b64
-        import httpx as _httpx
         import io as _io
         import os as _os
+
+        import httpx as _httpx
         gen_image_bytes: list[bytes] = []
         gen_image_exts: list[str] = []  # 与 gen_image_bytes 一一对应的文件扩展名
 
@@ -1936,7 +1959,7 @@ def make_command_handler(client: TelegramClient, account_id: int, prefix: str | 
     async def _handle(event, *, allow_normal: bool, incoming_sudo: bool = False):
         text = event.raw_text or ""
         sudo_p = (_ctx.sudo_prefix if _ctx else "") or "."
-        pattern_sudo = re.compile(rf"^{re.escape(sudo_p)}(\w+)(?:\s+(.*))?$", re.S)
+        pattern_sudo = re.compile(rf"^{re.escape(sudo_p)}(\S+)(?:\s+(.*))?$", re.S)
         m = pattern_sudo.match(text)
         if m:
             cmd = m.group(1)
@@ -1959,7 +1982,7 @@ def make_command_handler(client: TelegramClient, account_id: int, prefix: str | 
             return
 
         p = (_ctx.command_prefix if _ctx else "") or fallback_prefix
-        pattern = re.compile(rf"^{re.escape(p)}(\w+)(?:\s+(.*))?$", re.S)
+        pattern = re.compile(rf"^{re.escape(p)}(\S+)(?:\s+(.*))?$", re.S)
         m = pattern.match(text)
         if not m:
             return

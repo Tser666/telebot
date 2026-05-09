@@ -118,6 +118,31 @@ export function Game24ConfigPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6 max-w-lg">
+          {/* 状态 */}
+          {game24Feature && (
+            <div className="rounded-md border bg-muted/30 p-3 text-xs">
+              <div className="font-medium">当前状态</div>
+              <div className="mt-1 text-muted-foreground">
+                启用：{game24Feature.enabled ? "是" : "否"} ·
+                状态：{game24Feature.state}
+                {game24Feature.last_error
+                  ? ` · 最近错误：${game24Feature.last_error}`
+                  : ""}
+              </div>
+            </div>
+          )}
+
+          {/* 使用说明 */}
+          <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
+            <div className="font-medium text-foreground">使用说明</div>
+            <ul className="mt-1.5 list-inside list-disc space-y-0.5">
+              <li>在群内发送 <code>{cmdPrefix}{command} 奖金金额</code> 开始游戏（例：{cmdPrefix}{command} 2000）</li>
+              <li>系统生成 4 个数字，第一个用算式答对的人获得奖金</li>
+              <li>可用运算符：+ - * / ( )，也支持 x / ÷ / × 别名</li>
+              <li>指令前缀跟随系统设置，可在系统配置中修改</li>
+            </ul>
+          </div>
+
           {/* 指令名 */}
           <div className="space-y-1.5">
             <Label htmlFor="command">触发指令名</Label>
@@ -153,31 +178,6 @@ export function Game24ConfigPage() {
                 setDirty(true);
               }}
             />
-          </div>
-
-          {/* 状态 */}
-          {game24Feature && (
-            <div className="rounded-md border bg-muted/30 p-3 text-xs">
-              <div className="font-medium">当前状态</div>
-              <div className="mt-1 text-muted-foreground">
-                启用：{game24Feature.enabled ? "是" : "否"} ·
-                状态：{game24Feature.state}
-                {game24Feature.last_error
-                  ? ` · 最近错误：${game24Feature.last_error}`
-                  : ""}
-              </div>
-            </div>
-          )}
-
-          {/* 使用说明 */}
-          <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
-            <div className="font-medium text-foreground">使用说明</div>
-            <ul className="mt-1.5 list-inside list-disc space-y-0.5">
-              <li>在群内发送 <code>{cmdPrefix}{command} 奖金金额</code> 开始游戏（例：{cmdPrefix}{command} 2000）</li>
-              <li>系统生成 4 个数字，第一个用算式答对的人获得奖金</li>
-              <li>可用运算符：+ - * / ( )，也支持 x / ÷ / × 别名</li>
-              <li>指令前缀跟随系统设置，可在系统配置中修改</li>
-            </ul>
           </div>
 
           <div className="flex items-center gap-3 pt-2">

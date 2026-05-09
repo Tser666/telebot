@@ -12,8 +12,6 @@
 from __future__ import annotations
 
 import asyncio
-import tempfile
-from pathlib import Path
 
 import pytest
 
@@ -72,8 +70,9 @@ class TestRemotePluginSecurity:
 
     def test_runtime_discovery_does_not_execute_installed_by_default(self, monkeypatch, tmp_path):
         """worker 刷新 builtin 注册表时不能顺手执行 installed 插件代码。"""
-        from app.worker.plugins import loader as loader_mod
         import os as _os
+
+        from app.worker.plugins import loader as loader_mod
 
         monkeypatch.setattr(svc.settings, "plugins_installed_dir", str(tmp_path / "installed"))
         monkeypatch.delenv("EVIL_RUNTIME_DISCOVERY", raising=False)
@@ -130,7 +129,6 @@ class TestRemotePluginSecurity:
 
     def test_run_git_timeout_works(self):
         """验证 _run_git 支持 timeout 参数。"""
-        import asyncio as _asyncio
 
         async def _test():
             with pytest.raises(svc.GitOperationFailed) as ex:
@@ -224,7 +222,6 @@ class TestPluginCommandLifecycle:
         """验证 unregister_plugin_command 能正确移除命令。"""
         from app.worker.command import (
             _PLUGIN_COMMANDS,
-            _BUILTIN,
             register_plugin_command,
             unregister_plugin_command,
         )
@@ -318,8 +315,9 @@ class TestPluginMetadataSchema:
 
     def test_rejects_path_traversal_in_name(self):
         """name 中包含路径穿越字符必须被拒绝。"""
-        from app.services.remote_plugin_service import PluginMetadataSchema
         from pydantic import ValidationError
+
+        from app.services.remote_plugin_service import PluginMetadataSchema
 
         for bad_name in ("../etc", "foo/bar", "..", "foo\\bar", "foo\0bar"):
             with pytest.raises(ValidationError):
@@ -327,16 +325,18 @@ class TestPluginMetadataSchema:
 
     def test_rejects_invalid_version(self):
         """版本号格式不正确必须被拒绝。"""
-        from app.services.remote_plugin_service import PluginMetadataSchema
         from pydantic import ValidationError
+
+        from app.services.remote_plugin_service import PluginMetadataSchema
 
         with pytest.raises(ValidationError):
             PluginMetadataSchema(name="test", version="latest")
 
     def test_author_length_limit(self):
         """author 字段长度限制。"""
-        from app.services.remote_plugin_service import PluginMetadataSchema
         from pydantic import ValidationError
+
+        from app.services.remote_plugin_service import PluginMetadataSchema
 
         with pytest.raises(ValidationError):
             PluginMetadataSchema(name="test", version="1.0.0", author="x" * 300)

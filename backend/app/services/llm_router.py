@@ -285,7 +285,6 @@ async def _ask_classifier(
     replied_text: str | None,
 ) -> str | None:
     """调 classifier provider 返回一个 label；任何错误返回 None。"""
-    from ..db.models.command import LLMProvider as LLMProviderModel
     from .llm_client import LLMError, build_client
 
     # 使用 LLMProviderDTO 替代手搓 fake ORM row
@@ -321,7 +320,7 @@ async def _ask_classifier(
     return None
 
 
-def _dto_to_fake_row(dto) -> "LLMProviderModel":  # type: ignore[name-defined]
+def _dto_to_fake_row(dto) -> Any:
     """将 LLMProviderDTO 转为临时 ORM 行（向后兼容）。"""
     from ..db.models.command import LLMProvider as LLMProviderModel
 

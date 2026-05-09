@@ -57,7 +57,7 @@ class LLMProviderDTO:
             self.tags = []
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "LLMProviderDTO":
+    def from_dict(cls, d: dict[str, Any]) -> LLMProviderDTO:
         """从 dict（runtime ctx 中的 provider_dict）构造 DTO。"""
         return cls(
             id=int(d.get("id", 0)),
@@ -74,7 +74,7 @@ class LLMProviderDTO:
         )
 
     @classmethod
-    def from_orm_row(cls, row: Any) -> "LLMProviderDTO":
+    def from_orm_row(cls, row: Any) -> LLMProviderDTO:
         """从 ORM LLMProvider 行构造 DTO。"""
         return cls(
             id=int(row.id),

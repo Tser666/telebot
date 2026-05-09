@@ -881,6 +881,18 @@ def test_safe_exception_text_redacts_sk_key() -> None:
     assert "<redacted>" in msg
 
 
+def test_humanize_llm_error_redacts_path_and_token() -> None:
+    from app.worker.command import _humanize_llm_error
+
+    e = RuntimeError(
+        "OpenAI 接口返回 401: key sk-veryverysecret-XYZ failed at /Users/me/app/config.py"
+    )
+    msg = _humanize_llm_error(e)
+    assert "sk-veryverysecret" not in msg
+    assert "/Users/me" not in msg
+    assert "API Key" in msg or "鉴权失败" in msg
+
+
 def test_safe_exception_text_truncates() -> None:
     from app.worker.command import _safe_exception_text
 

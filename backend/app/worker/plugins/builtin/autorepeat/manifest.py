@@ -20,6 +20,7 @@ MANIFEST = Manifest(
     permissions=["send_message", "edit_message", "read_chat"],
     config_schema={
         "type": "object",
+        "x-ui-mode": "rules",
         "required": ["target_chat_id"],
         "properties": {
             "target_chat_id": {

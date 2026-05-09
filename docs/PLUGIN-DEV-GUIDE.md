@@ -19,10 +19,11 @@
 11. [安全边界](#11-安全边界)
 12. [前端集成](#12-前端集成)
     - [模式概览](#模式概览)
-    - [模式 A：规则驱动配置页](#模式-a规则驱动配置页forward--autoreply--scheduler--autorepeat)
+    - [模式 A：规则驱动配置页](#模式-a规则驱动配置页forward--autoreply--autorepeat)
     - [模式 A 补充：后端 Dry-Run 适配](#模式-a-补充后端-dry-run-适配)
-    - [模式 B：单配置对象页](#模式-b单配置对象页game24)
+    - [模式 B：单配置对象页](#模式-b单配置对象页game24--codex-image)
     - [模式 C：Schema 驱动弹窗](#模式-cschema-驱动弹窗configdialog)
+    - [基础能力：平台内置功能](#基础能力平台内置功能scheduler)
     - [适配自检清单](#适配自检清单)
 13. [调试建议](#13-调试建议)
 14. [安全与合规](#14-安全与合规)
@@ -254,19 +255,24 @@ MANIFEST = Manifest(
 
 **优先级：** 账号级配置 > 插件全局配置 > config_schema 中的 default
 
-**前端渲染：** 有 config_schema 的插件，点击"配置"按钮会弹出 Dialog 表单：
+**前端渲染：** `config_schema["x-ui-mode"]` 决定插件配置入口：
+- `rules` / `single` / `platform` 且已注册专属页面 → 跳转到专属配置页
+- `schema` 或没有专属页面 → 弹出 `ConfigDialog` 自动表单
 - `level: global` 的字段 → 全局配置区（所有账号共享）
 - `level: account` 的字段 → 账号配置区（按账号隔离）
 - 无 level 的字段 → 默认按账号隔离
 
 **必填字段验证清单（内置插件）：**
 
-| 插件 | config_schema | 状态 |
-|------|--------------|------|
-| forward | ✅ target_chat_id, mode | 已有 |
-| game24 | ✅ time_limit, prize, max_players | 已补 |
-| scheduler | ✅ default_notify, max_tasks | 已补 |
-| translate | ✅ default_lang, llm_provider | 已补 |
+| 插件 | config_schema | UI 模式 | 状态 |
+|------|--------------|---------|------|
+| forward | ✅ target_chat_id, mode | `rules` | 已有 |
+| auto_reply | 规则通过 Rules API 管理 | `rules` fallback | 已有 |
+| autorepeat | ✅ trigger / repeat / chat 配置 | `rules` | 已有 |
+| game24 | ✅ command, timeout | `single` | 已补 |
+| codex_image | ✅ command, access_token, model, message_template, image_size/aspect_ratio/image_format, timeout/status/output/instructions | `single` | 已补 |
+| scheduler | ✅ default_notify, max_tasks | `platform` | 已迁移为平台基础能力 |
+| translate | ✅ default_lang, llm_provider | `schema` | 已补 |
 
 ### Manifest 验证
 
@@ -515,21 +521,45 @@ Manifest 中的 `permissions` 字段声明插件需要的能力：
 
 ## 12. 前端集成
 
-插件前端配置页分三种模式，按复杂度递增：
+插件前端配置分三种插件模式，另有一类平台内置基础能力。后续新增插件时，优先通过 `manifest.py` 的 `config_schema["x-ui-mode"]` 声明分类，前端会自动归类展示。
 
 ### 模式概览
 
-| 模式 | 适用场景 | 典型插件 | 配置入口 |
-|------|---------|---------|---------|
-| **A — 规则驱动** | 每条规则独立配置，需 CRUD + 试运行 | forward、auto_reply、scheduler、autorepeat | 专属配置页 |
-| **B — 单配置对象** | 整个插件一份配置，无规则概念 | game24 | 专属配置页 |
-| **C — Schema 驱动** | 轻量插件，不需要专属页面 | 无 config_schema 的插件 / 远程插件 | ConfigDialog 弹窗 |
+| 分类 | 适用场景 | 大白话 | 典型功能 | 配置入口 |
+|------|---------|--------|---------|---------|
+| **A — 规则驱动** | 多条规则独立配置，需 CRUD + 试运行 | 像自动化流水线：先建规则，再按匹配条件触发动作 | forward、auto_reply、autorepeat | 专属配置页 |
+| **B — 单配置对象** | 每个账号只保存一份插件配置 | 像一个工具面板：配置好触发指令和参数，直接运行 | game24、codex_image | 专属配置页 |
+| **C — Schema 驱动** | 轻量插件，不需要定制页面 | 像通用表单：插件声明字段，前端自动渲染 | 简单远程插件 / 小工具插件 | ConfigDialog 弹窗 |
+| **基础能力 — 平台内置** | 系统运行时常驻能力，不作为普通插件展示 | 像底座服务：给插件或平台调用，不强调启停 | scheduler | 平台功能页 |
 
-**关键判断**：插件是否有 `config_schema` 且需要按「规则」管理多份配置？是 → 模式 A；只有一份全局/账号配置 → 模式 B；无专属页面需求 → 模式 C。
+**关键判断**：需要维护多条规则 → 模式 A；只有一份账号配置并需要更好的专属体验 → 模式 B；普通字段表单足够 → 模式 C；像调度器这种系统服务 → 基础能力。
+
+#### 自动分类规则
+
+新增插件应在 `config_schema` 顶层声明 `x-ui-mode`：
+
+```python
+config_schema={
+    "type": "object",
+    "x-ui-mode": "single",  # rules / single / schema / platform
+    "properties": {
+        "command": {"type": "string", "title": "触发指令名", "default": "demo"},
+    },
+}
+```
+
+| `x-ui-mode` | 展示位置 | 说明 |
+|-------------|----------|------|
+| `rules` | 模式 A | 规则驱动插件，通常有规则列表、创建/编辑、dry-run |
+| `single` | 模式 B | 单配置对象插件，通常有专属配置页 |
+| `schema` | 模式 C | 强制走 `ConfigDialog` 自动表单 |
+| `platform` | 基础能力 | 平台内置能力，不混在普通插件列表里 |
+
+前端统一从 `frontend/src/lib/plugin-modes.ts` 读取分类。旧内置插件仍保留 key fallback，但新插件不要依赖 fallback。
 
 ---
 
-### 模式 A：规则驱动配置页（Forward / AutoReply / Scheduler / Autorepeat）
+### 模式 A：规则驱动配置页（Forward / AutoReply / Autorepeat）
 
 规则驱动插件每条 rule 存储独立的 `config` JSON，通过 CRUD API 管理。前端专属页面提供：规则列表 + 创建/编辑对话框 + 试运行（dry-run）。
 
@@ -539,9 +569,9 @@ Manifest 中的 `permissions` 字段声明插件需要的能力：
 |---|------|---------|
 | 1 | `frontend/src/api/types.ts` | 添加 `XxxRuleConfig` 接口（描述单条规则的 config 字段） |
 | 2 | `frontend/src/pages/Features/XxxConfig.tsx` | **新建**：规则列表页（参考 `AutoReply.tsx` 或 `Forward.tsx`） |
-| 3 | `frontend/src/App.tsx` | ① import 新页面组件 ② 添加路由 `:aid/features/xxx` ③ 在 `FEATURE_CONFIG_PAGES` 中添加 key |
-| 4 | `frontend/src/pages/Accounts/Detail.tsx` | 在 `FEATURE_CONFIG_PAGE_KEYS` Set 中添加 key |
-| 5 | `frontend/src/pages/Extensions.tsx` | 在 `FEATURE_CONFIG_PAGE_KEYS` Set 中添加 key |
+| 3 | `backend/app/worker/plugins/builtin/xxx/manifest.py` | `config_schema["x-ui-mode"] = "rules"` |
+| 4 | `frontend/src/App.tsx` | ① import 新页面组件 ② 添加路由 `:aid/features/xxx` ③ 在 `FEATURE_CONFIG_PAGES` 中添加 key |
+| 5 | `frontend/src/pages/Accounts/Detail.tsx` / `frontend/src/pages/Extensions.tsx` | 在 `FEATURE_CONFIG_PAGE_KEYS` Set 中添加 key |
 | 6 | `backend/app/db/models/feature.py` | 添加 `FEATURE_XXX = "xxx"` 常量（如已有可跳过） |
 
 #### 1. types.ts — RuleConfig 接口
@@ -592,13 +622,26 @@ export function XxxConfig() {
 - 对话框：创建/编辑表单，字段来自 RuleConfig
 - 试运行：选规则 → 填样本消息 → 显示命中结果
 
-#### 3. App.tsx — 路由 + 注册
+#### 3. manifest.py — UI 分类
+
+```python
+config_schema={
+    "type": "object",
+    "x-ui-mode": "rules",
+    "properties": {
+        "target_chat_id": {"type": "integer", "title": "目标聊天"},
+        "enabled": {"type": "boolean", "title": "启用", "default": True},
+    },
+}
+```
+
+#### 4. App.tsx — 路由 + 注册
 
 ```tsx
 // ① import
 import { XxxConfig } from "@/pages/Features/XxxConfig";
 
-// ② 路由（在 <Route path=":aid/features/game24"> 之后添加）
+// ② 路由
 <Route path=":aid/features/xxx" element={<XxxConfig />} />
 
 // ③ FEATURE_CONFIG_PAGES 注册
@@ -611,20 +654,20 @@ const FEATURE_CONFIG_PAGES: Record<string, { title: string; description: string 
 
 路由路径格式固定为 `:aid/features/{plugin_key}`，`plugin_key` 必须与 `MANIFEST.key` 一致。
 
-#### 4 & 5. FEATURE_CONFIG_PAGE_KEYS — 两个入口点
+#### 5. FEATURE_CONFIG_PAGE_KEYS — 两个入口点
 
 两个文件中的 `FEATURE_CONFIG_PAGE_KEYS` 必须同步添加：
 
 ```tsx
 // Detail.tsx（账号详情页 → 插件列表"配置"按钮）
 const FEATURE_CONFIG_PAGE_KEYS = new Set([
-  "auto_reply", "autorepeat", "forward", "scheduler", "game24",
+  "auto_reply", "autorepeat", "forward", "game24", "codex_image",
   "xxx",  // ← 新增
 ]);
 
 // Extensions.tsx（插件中心 → 账号插件"配置"按钮）
 const FEATURE_CONFIG_PAGE_KEYS = new Set([
-  "auto_reply", "autorepeat", "forward", "scheduler", "game24",
+  "auto_reply", "autorepeat", "forward", "game24", "codex_image",
   "xxx",  // ← 新增
 ]);
 ```
@@ -702,13 +745,64 @@ if key == FEATURE_XXX:
 
 ---
 
-### 模式 B：单配置对象页（Game24）
+### 模式 B：单配置对象页（Game24 / Codex Image）
 
 只有一份配置、无规则列表的插件，使用专属页面但不需要 CRUD 和 dry-run：
 
 - 创建 `frontend/src/pages/Features/XxxConfig.tsx`，直接展示/编辑单个 config 对象
+- `manifest.py` 中声明 `config_schema["x-ui-mode"] = "single"`
 - 其余适配步骤与模式 A 相同（App.tsx 路由 + FEATURE_CONFIG_PAGES + 两个 PAGE_KEYS）
 - 后端不需要 dry-run 分支
+
+#### 页面布局约定
+
+单配置对象页参考 `Game24Config.tsx` 与 `CodexImageConfig.tsx`。页面从上到下固定为：
+
+1. 返回按钮 + 插件标题
+2. 当前状态（是否启用、当前命令、关键运行状态）
+3. 使用说明（真实触发命令示例、参数示例、注意事项）
+4. 配置表单（账号级配置为主，必要时展示全局配置）
+5. 保存 / 还原操作
+
+当前状态和使用说明要放在顶部，因为这类插件通常靠命令触发，用户最关心的是“现在能不能用”和“怎么叫它”。
+
+#### 命令型插件配置
+
+如果插件支持自定义触发指令，应同时做三件事：
+
+```python
+class XxxPlugin(Plugin):
+    key = "xxx"
+    command_config_keys = {"command"}
+```
+
+```python
+config_schema={
+    "type": "object",
+    "x-ui-mode": "single",
+    "properties": {
+        "command": {
+            "type": "string",
+            "title": "触发指令名",
+            "default": "xxx",
+            "description": "跟在系统命令前缀后使用，支持中文；不要包含空格。",
+        },
+    },
+}
+```
+
+- `command_config_keys` 用于告诉 loader：命令字段变化后要重启该插件并重新注册命令。
+- 命令名支持中文，例如 `,画图 一只猫`；但不能包含空格，因为命令解析以第一个空白分隔命令和参数。
+- 说明文案必须用当前配置中的命令动态生成，不要把 `,cximg`、`,24d` 写死。
+
+#### 已有单配置插件字段参考
+
+| 插件 | 推荐字段 | 说明 |
+|------|---------|------|
+| `game24` | `command`, `timeout` | 触发指令名、答题限时 |
+| `codex_image` | `command`, `access_token`, `model`, `message_template`, `image_size`, `aspect_ratio`, `image_format`, `max_wait_seconds`, `status_interval_seconds`, `delete_command_message`, `show_revised_prompt`, `reasoning_effort`, `custom_instructions` | 触发指令、鉴权、模型、消息模板、图片尺寸/比例/格式、等待与状态提示、输出行为、自定义生成指令 |
+
+专属页面字段应与运行时实际读取的配置保持一致；`manifest.config_schema` 也要同步，避免 ConfigDialog、接口校验和文档出现三套口径。
 
 ---
 
@@ -719,12 +813,13 @@ if key == FEATURE_XXX:
 - `level: "global"` 的字段 → 全局配置区
 - `level: "account"` 或无 level → 账号配置区
 - **不需要**添加到 `FEATURE_CONFIG_PAGE_KEYS`，不需要创建页面文件
-- `config_schema` 写好即可，ConfigDialog 自动渲染
+- `config_schema["x-ui-mode"]` 可写 `schema`，ConfigDialog 自动渲染
 
 ```python
 # config_schema 示例（适用于 ConfigDialog 自动渲染）
 config_schema={
     "type": "object",
+    "x-ui-mode": "schema",
     "properties": {
         "api_key": {
             "type": "string",
@@ -742,25 +837,41 @@ config_schema={
 
 ---
 
+### 基础能力：平台内置功能（Scheduler）
+
+基础能力不是普通插件卡片，而是系统运行时一起初始化的服务。比如 `scheduler` 现在属于平台内置调度能力：页面仍可配置定时任务，但不再强调“作为插件启停”。
+
+适配规则：
+
+- `manifest.py` 声明 `config_schema["x-ui-mode"] = "platform"`
+- 前端会在账号详情和插件中心里放到“基础能力 / 平台内置”分组
+- 如果有专属页面，仍需 `App.tsx` 路由和 `FEATURE_CONFIG_PAGE_KEYS`
+- 后端运行时应由平台服务初始化；插件壳只保留兼容入口或配置入口
+
+---
+
 ### 风格要求
 
-- 深色主题卡片布局
 - 与 TeleBot 现有页面风格一致
 - React + TypeScript + TailwindCSS
 - 新页面参考 `AutoReply.tsx`（规则驱动）或 `Game24Config.tsx`（单配置）的代码结构
+- 表格列宽要稳定，账号详情页和插件中心的同类列表要纵向对齐
+- 配置按钮不依赖启用状态；即使插件当前关闭，也应允许先配置
 
 ### 适配自检清单
 
 新增插件前端配置页后，逐项检查：
 
+- [ ] `manifest.py` 中 `config_schema["x-ui-mode"]` 已声明：`rules` / `single` / `schema` / `platform`
 - [ ] `types.ts` 中 `XxxRuleConfig` 接口与 `manifest.py` config_schema 字段一致
-- [ ] `App.tsx` 中路由路径 `:aid/features/{key}` 与插件 key 一致
-- [ ] `App.tsx` 中 `FEATURE_CONFIG_PAGES` 包含该 key
-- [ ] `Detail.tsx` 中 `FEATURE_CONFIG_PAGE_KEYS` 包含该 key
-- [ ] `Extensions.tsx` 中 `FEATURE_CONFIG_PAGE_KEYS` 包含该 key
+- [ ] 如果有专属页面：`App.tsx` 中路由路径 `:aid/features/{key}` 与插件 key 一致
+- [ ] 如果有专属页面：`App.tsx` 中 `FEATURE_CONFIG_PAGES` 包含该 key
+- [ ] 如果有专属页面：`Detail.tsx` 和 `Extensions.tsx` 的 `FEATURE_CONFIG_PAGE_KEYS` 包含该 key
+- [ ] 如果是命令型插件：`command` 字段可配置，`Plugin.command_config_keys = {"command"}`，说明文案动态读取当前命令
+- [ ] 如果是模式 B：当前状态和使用说明位于配置表单之前
 - [ ] 如需 dry-run：`plugin.py` 导出 `_dry_run_match`，`__init__.py` re-export，`rules.py` 在 fallback 之前添加分支
 - [ ] 如需 dry-run：`feature.py` 中有 `FEATURE_XXX` 常量
-- [ ] 前端 `pnpm build` 通过
+- [ ] 前端 `pnpm -C frontend exec tsc -b --noEmit` 和 `pnpm -C frontend build` 通过
 
 ---
 

@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-import re
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -21,8 +20,6 @@ from app.services.llm_runtime import (
     FallbackChain,
     UsageRecord,
     build_fallback_chain,
-    call_with_fallback,
-    register_usage_callback,
 )
 from app.worker.command import (
     _ensure_html_safe,
@@ -30,7 +27,6 @@ from app.worker.command import (
     _safe_log_text,
     _split_long_message,
 )
-
 
 # ════════════════════════════════════════════════════════════
 # 1) LLMProviderDTO 测试
@@ -141,7 +137,6 @@ def test_build_fallback_chain() -> None:
 def test_build_fallback_chain_skips_same_id() -> None:
     """build_fallback_chain 跳过与 primary 相同 id 的 provider。"""
     providers = {
-        1: LLMProviderDTO(id=1, name="primary", provider="openai"),
         1: LLMProviderDTO(id=1, name="primary", provider="openai"),
     }
     primary = providers[1]

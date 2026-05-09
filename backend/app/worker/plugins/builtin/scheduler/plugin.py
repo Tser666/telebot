@@ -75,26 +75,23 @@ def _croniter_prev(
 
 @register
 class SchedulerPlugin(Plugin):
-    """按 rule.config 驱动定时动作。"""
+    """定时任务兼容壳。
+
+    0.9.8 起，真正的定时任务 tick loop 由 worker runtime 作为平台基础能力启动，
+    不再依赖该插件是否启用。这里保留调度算法和 action 实现，供 runtime 复用，
+    同时避免历史导入、测试和旧配置页面立刻失效。
+    """
 
     key = FEATURE_SCHEDULER
     display_name = "定时任务"
 
     async def on_startup(self, ctx: PluginContext) -> None:
-        ctx.scheduler_task = asyncio.create_task(self._tick_loop(ctx))
         if ctx.log is not None:
-            await ctx.log("info", "[scheduler] started")
+            await ctx.log("info", "[scheduler] plugin shell loaded; platform scheduler owns tick loop")
 
     async def on_shutdown(self, ctx: PluginContext) -> None:
-        task = getattr(ctx, "scheduler_task", None)
-        if task is not None:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
         if ctx.log is not None:
-            await ctx.log("info", "[scheduler] stopped")
+            await ctx.log("info", "[scheduler] plugin shell stopped")
 
     async def _tick_loop(self, ctx: PluginContext) -> None:
         while True:

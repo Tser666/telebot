@@ -8,17 +8,14 @@
 """
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from app.worker.command import (
     CommandContext,
-    _BUILTIN,
-    _BUILTIN_ALIAS_TO_PRIMARY,
     set_command_context,
 )
-
 
 # ════════════════════════════════════════════════════════════
 # 1) CommandContext 别名字段

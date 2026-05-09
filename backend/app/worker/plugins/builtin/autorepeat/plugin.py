@@ -619,6 +619,9 @@ def _dry_run_match(
     )
 
 
+PLUGIN_CLASS = AutoRepeatPlugin
+
+
 __all__ = [
     "AutoRepeatPlugin",
     "PLUGIN_CLASS",

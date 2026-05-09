@@ -11,6 +11,42 @@
 ---
 
 
+## [0.9.8] — 2026-05-10 · feature · Codex 生图体验 + 插件模式与调度器收口
+
+### Added
+- Codex 图片生成插件新增完整账号级配置：
+  - `command` 触发指令名，支持中文命令；
+  - `message_template` 消息模板，统一用于生成中状态编辑与最终图片 caption；
+  - `image_size`、`aspect_ratio`、`image_format` 默认图片参数；
+  - `status_interval_seconds`、`delete_command_message`、`show_revised_prompt`、`reasoning_effort`、`custom_instructions` 等高级行为配置。
+- Codex 生图命令支持临时覆盖图片参数：`--比例/--ratio`、`--size/--resolution`、`--format/--格式`，例如 `,cximg --比例 4:3 --size 1536x1024 --format jpeg 云海里的城市`。
+- Codex 图片生成配置页新增消息模板编辑器、占位符快捷插入、实时预览、分辨率/比例/格式下拉配置。
+- 自定义命令 AI 消息模板配置新增实时预览，便于保存前确认最终 Telegram 展示效果。
+- 前端新增 `plugin-modes.ts` 统一插件模式分类工具；后续插件可通过 `config_schema["x-ui-mode"]` 自动进入规则驱动、单配置对象、Schema 弹窗或平台内置分组。
+
+### Fixed
+- 修复 Codex 生图发送裸 `bytes` 导致 Telegram 中显示 `unnamed` 且没有图片后缀的问题：现在使用带 `.name` 的 `BytesIO` 上传，并根据图片 magic bytes / 配置格式生成 `.png`、`.jpg` 或 `.webp` 文件名。
+- 修复 Codex 生图生成中状态消息没有按 HTML 解析，导致 `<b>...</b>` 标签原样展示的问题；模板 HTML 解析失败时会退回纯文本，避免把标签直接发给用户。
+- 优化 Codex / LLM 错误提示：额度耗尽、限流、鉴权失败、网络异常等错误改成人可读提示，并继续脱敏 token、路径和密钥片段。
+- 修复自定义触发指令名变更后不能实时生效的问题：命令型插件通过 `command_config_keys` 触发 worker 重新注册命令。
+- 命令解析从 `\w+` 放宽为非空白 token，支持中文插件命令。
+
+### Changed
+- 定时任务从普通插件 tick loop 迁移为 worker runtime 的平台基础能力：只要账号 worker 运行，调度器就按规则执行；插件壳仅保留兼容入口和调度算法复用。
+- 账号详情页与插件中心的插件列表改为按模式分组展示：规则驱动、单配置对象、Schema 弹窗、基础能力；表格列宽统一，配置按钮不再依赖启用状态。
+- Codex Image 与 24 点游戏配置页调整为“当前状态 + 使用说明”置顶，命令示例统一读取系统命令前缀和当前配置。
+- 内置插件 manifest 补充 `x-ui-mode` 元数据：`forward` / `autorepeat` 为规则驱动，`game24` / `codex_image` 为单配置对象，`scheduler` 为平台内置。
+- 插件开发指南更新前端配置页规则，补充模式自动分类、命令型插件热重载要求、Codex Image / 24 点页面布局规范和平台调度器说明。
+- 后端 ruff 静态检查收口：整理 import、类型注解、异常链、未使用变量和测试静态问题。
+
+### Verification
+- 后端全量测试通过：`469 passed, 2 skipped`。
+- 后端静态检查通过：`ruff check app`。
+- 前端生产构建通过：`pnpm -C frontend build`。
+
+---
+
+
 ## [0.9.7] — 2026-05-10 · feature · 插件前端规范 + LLM/IPC 可靠性闭环
 
 ### Added

@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.schemas.feature import ConfigValidationResponse
 from app.services.feature_service import (
-    get_effective_plugin_config,
     get_plugin_global_config,
-    set_plugin_global_config,
     validate_config_against_schema,
 )
 

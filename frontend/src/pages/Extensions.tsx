@@ -50,6 +50,7 @@ import { Spinner } from "@/components/ui/misc";
 import { cn } from "@/lib/utils";
 import { getErrMsg } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
+import { isPlatformFeature, pluginMode, PLUGIN_MODE_META, type PluginMode } from "@/lib/plugin-modes";
 import { ConfigDialog } from "@/components/plugin/ConfigDialog";
 
 import { getFeatureMatrix } from "@/api/features";
@@ -172,6 +173,8 @@ function AccountPluginsTab() {
 
   const selectedAccount = data?.accounts.find((a) => a.id === selectedAid);
   const features = data?.features ?? [];
+  const pluginFeatures = features.filter((f) => !isPlatformFeature(f));
+  const platformFeatures = features.filter((f) => isPlatformFeature(f));
 
   // 获取 global config
   const globalConfigQ = useQuery({
@@ -232,100 +235,173 @@ function AccountPluginsTab() {
               </Select>
               {selectedAccount && (
                 <span className="text-xs text-muted-foreground">
-                  {features.filter((f) => selectedAccount.features[f.key] === "active").length} / {features.length} 已启用
+                  {pluginFeatures.filter((f) => selectedAccount.features[f.key] === "active").length} / {pluginFeatures.length} 插件已启用
                 </span>
               )}
             </div>
 
-            {/* 插件列表 — 勾选式 */}
-            {selectedAccount && (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>功能</TableHead>
-                    <TableHead>类型</TableHead>
-                    <TableHead className="text-center">启用</TableHead>
-                    <TableHead className="text-right">操作</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {features.map((f) => {
-                    const state = (selectedAccount.features[f.key] ?? "disabled") as string;
-                    const isActive = state === "active";
-                    return (
+            {selectedAccount && platformFeatures.length > 0 && (
+              <section className="mb-6 space-y-2">
+                <div>
+                  <div className="text-sm font-medium">基础能力 · 平台内置</div>
+                  <p className="text-xs text-muted-foreground">
+                    不像普通插件那样按开关决定是否运行；它随 worker 初始化，为插件和系统页面提供底层能力。
+                  </p>
+                </div>
+                <Table className="table-fixed">
+                  <colgroup>
+                    <col className="w-[46%]" />
+                    <col className="w-[18%]" />
+                    <col className="w-[18%]" />
+                    <col className="w-[18%]" />
+                  </colgroup>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>功能</TableHead>
+                      <TableHead>来源</TableHead>
+                      <TableHead className="text-center">运行方式</TableHead>
+                      <TableHead className="text-right">操作</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {platformFeatures.map((f) => (
                       <TableRow key={f.key}>
                         <TableCell>
                           <div className="font-medium">{f.display_name}</div>
                           <div className="font-mono text-xs text-muted-foreground">{f.key}</div>
                         </TableCell>
                         <TableCell>
-                          <Badge variant={f.is_builtin ? "secondary" : "outline"}>
-                            {f.is_builtin ? "内置" : "第三方"}
-                          </Badge>
+                          <Badge variant="secondary">基础</Badge>
                         </TableCell>
-                        <TableCell className="text-center">
-                          <button
-                            className={cn(
-                              "relative inline-flex h-6 w-11 items-center rounded-full transition-colors",
-                              isActive ? "bg-primary" : "bg-gray-600"
-                            )}
-                            onClick={() =>
-                              toggleMut.mutate({
-                                aid: selectedAccount.id,
-                                key: f.key,
-                                enabled: !isActive,
-                              })
-                            }
-                            disabled={toggleMut.isPending}
-                          >
-                            <span
-                              className={cn(
-                                "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
-                                isActive ? "translate-x-6" : "translate-x-1"
-                              )}
-                            />
-                          </button>
+                        <TableCell className="text-center text-xs text-muted-foreground">
+                          随 worker 启动
                         </TableCell>
                         <TableCell className="text-right">
                           <Button
                             size="sm"
                             variant="outline"
                             className="h-9 px-3"
-                            onClick={() => {
-                              const path = featureConfigPath(selectedAccount.id, f.key);
-                              if (path) {
-                                nav(path);
-                                return;
-                              }
-                              getPluginGlobalConfig(f.key)
-                                .then((gc) => {
-                                  setConfigDialog({
-                                    key: f.key,
-                                    name: f.display_name,
-                                    schema: (f.config_schema as Record<string, unknown>) ?? null,
-                                    globalConfig: gc,
-                                    accountConfig: {},
-                                  });
-                                })
-                                .catch(() => {
-                                  setConfigDialog({
-                                    key: f.key,
-                                    name: f.display_name,
-                                    schema: (f.config_schema as Record<string, unknown>) ?? null,
-                                    globalConfig: {},
-                                    accountConfig: {},
-                                  });
-                                });
-                            }}
+                            onClick={() => nav(`/accounts/${selectedAccount.id}/features/${f.key}`)}
                           >
                             配置 →
                           </Button>
                         </TableCell>
                       </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
+                    ))}
+                  </TableBody>
+                </Table>
+              </section>
+            )}
+
+            {/* 插件列表 — 按配置模式分组 */}
+            {selectedAccount && (
+              <div className="space-y-6">
+                {(["rules", "single", "schema"] as PluginMode[]).map((mode) => {
+                  const grouped = pluginFeatures.filter((f) => pluginMode(f) === mode);
+                  if (grouped.length === 0) return null;
+                  return (
+                    <section key={mode} className="space-y-2">
+                      <div>
+                        <div className="text-sm font-medium">{PLUGIN_MODE_META[mode].label}</div>
+                        <p className="text-xs text-muted-foreground">{PLUGIN_MODE_META[mode].plain}</p>
+                      </div>
+                      <Table className="table-fixed">
+                        <colgroup>
+                          <col className="w-[46%]" />
+                          <col className="w-[18%]" />
+                          <col className="w-[18%]" />
+                          <col className="w-[18%]" />
+                        </colgroup>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>功能</TableHead>
+                            <TableHead>来源</TableHead>
+                            <TableHead className="text-center">启用</TableHead>
+                            <TableHead className="text-right">操作</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {grouped.map((f) => {
+                            const state = (selectedAccount.features[f.key] ?? "disabled") as string;
+                            const isActive = state === "active";
+                            return (
+                              <TableRow key={f.key}>
+                                <TableCell>
+                                  <div className="font-medium">{f.display_name}</div>
+                                  <div className="font-mono text-xs text-muted-foreground">{f.key}</div>
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant={f.is_builtin ? "secondary" : "outline"}>
+                                    {f.is_builtin ? "内置" : "第三方"}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="text-center">
+                                  <button
+                                    className={cn(
+                                      "relative inline-flex h-6 w-11 items-center rounded-full transition-colors",
+                                      isActive ? "bg-primary" : "bg-gray-600"
+                                    )}
+                                    onClick={() =>
+                                      toggleMut.mutate({
+                                        aid: selectedAccount.id,
+                                        key: f.key,
+                                        enabled: !isActive,
+                                      })
+                                    }
+                                    disabled={toggleMut.isPending}
+                                  >
+                                    <span
+                                      className={cn(
+                                        "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
+                                        isActive ? "translate-x-6" : "translate-x-1"
+                                      )}
+                                    />
+                                  </button>
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-9 px-3"
+                                    onClick={() => {
+                                      const path = featureConfigPath(selectedAccount.id, f.key);
+                                      if (path) {
+                                        nav(path);
+                                        return;
+                                      }
+                                      getPluginGlobalConfig(f.key)
+                                        .then((gc) => {
+                                          setConfigDialog({
+                                            key: f.key,
+                                            name: f.display_name,
+                                            schema: (f.config_schema as Record<string, unknown>) ?? null,
+                                            globalConfig: gc,
+                                            accountConfig: {},
+                                          });
+                                        })
+                                        .catch(() => {
+                                          setConfigDialog({
+                                            key: f.key,
+                                            name: f.display_name,
+                                            schema: (f.config_schema as Record<string, unknown>) ?? null,
+                                            globalConfig: {},
+                                            accountConfig: {},
+                                          });
+                                        });
+                                    }}
+                                  >
+                                    配置 →
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </section>
+                  );
+                })}
+              </div>
             )}
           </>
         )}

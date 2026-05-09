@@ -148,6 +148,15 @@ const CONDITIONAL_BUTTONS: Array<{ snippet: string; label: string; desc: string 
   },
 ];
 
+function renderTemplatePreview(template: string, values: Record<string, string>): string {
+  let out = template || PRESET_SIMPLE_TEMPLATE;
+  out = out.replace(/\{\?([a-zA-Z0-9_]+)\}([\s\S]*?)\{\/\?\}/g, (_, key: string, inner: string) =>
+    values[key] ? inner : "",
+  );
+  out = out.replace(/\{([a-zA-Z0-9_]+)\}/g, (_, key: string) => values[key] ?? "");
+  return out;
+}
+
 interface FormState {
   id?: number;
   name: string;
@@ -1232,6 +1241,24 @@ function MessageFormatSection({
   onEscapeValuesChange: (v: boolean) => void;
 }) {
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const previewText = renderTemplatePreview(template, {
+    answer: "这是 AI 回答示例，已按当前消息模板渲染。",
+    answer_first_2: "这是 AI 回答示例，已按当前消息模板渲染。",
+    answer_rest: "这里是从第三行开始的回答内容。",
+    display_input: "被回复消息或用户问题示例",
+    display_input_first_2: "被回复消息或用户问题示例",
+    display_input_rest: "这里是输入内容的剩余部分。",
+    question: "请总结这段内容",
+    quoted: "这是一段被回复的原文。",
+    model: "gpt-5.4",
+    provider: "OpenAI",
+    provider_kind: "openai",
+    in_tokens: "128",
+    out_tokens: "64",
+    total_tokens: "192",
+    routing_note: "auto: chat",
+    time: "12:30",
+  });
 
   // 在光标位置插入文本，光标停在插入末尾
   const insertAtCursor = (text: string) => {
@@ -1378,6 +1405,13 @@ function MessageFormatSection({
         <p className="text-xs text-muted-foreground">
           剩余 {4000 - (template || "").length} 字符。{template.length === 0 ? "（已留空，会用默认）" : ""}
         </p>
+      </div>
+
+      <div className="rounded-md border bg-background p-3 text-xs">
+        <div className="mb-1 font-medium">预览</div>
+        <pre className="whitespace-pre-wrap break-words font-sans text-muted-foreground">
+          {previewText}
+        </pre>
       </div>
     </div>
   );

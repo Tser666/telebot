@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict
+
+if TYPE_CHECKING:
+    from ..db.models.feature import Feature
 
 
 class FeatureInfo(BaseModel):
@@ -17,7 +20,7 @@ class FeatureInfo(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     @classmethod
-    def from_feature(cls, f: "Feature") -> "FeatureInfo":
+    def from_feature(cls, f: Feature) -> FeatureInfo:
         manifest = getattr(f, "manifest", None) or {}
         return cls(
             key=f.key,

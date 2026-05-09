@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Pencil, Play, Plus, Trash2, Zap } from "lucide-react";
 import { toast } from "sonner";
 
-import { listAccountFeatures, toggleAccountFeature } from "@/api/accounts";
 import { getSystemSettings } from "@/api/system";
 import {
   createRule,
@@ -99,26 +98,10 @@ export function SchedulerConfig() {
   });
   const tz = tzQ.data?.timezone || "";
 
-  const featuresQ = useQuery({
-    queryKey: ["account", aid, "features"],
-    queryFn: () => listAccountFeatures(aid),
-    enabled: !!aid,
-  });
-  const featureEnabled = !!featuresQ.data?.find((x) => x.feature_key === "scheduler")?.enabled;
-
   const rulesQ = useQuery({
     queryKey: ["account", aid, "rules", "scheduler"],
     queryFn: () => listRules(aid, "scheduler"),
     enabled: !!aid,
-  });
-
-  const featureToggleMut = useMutation({
-    mutationFn: (next: boolean) => toggleAccountFeature(aid, "scheduler", next),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["account", aid, "features"] });
-      qc.invalidateQueries({ queryKey: ["matrix"] });
-    },
-    onError: (err) => toast.error(getErrMsg(err)),
   });
 
   const [editOpen, setEditOpen] = useState(false);
@@ -253,10 +236,14 @@ export function SchedulerConfig() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle className="text-base">功能总开关</CardTitle>
-              <CardDescription>关闭后本账号所有 scheduler 规则不会触发</CardDescription>
+              <CardTitle className="text-base">基础能力状态</CardTitle>
+              <CardDescription>
+                定时任务调度器随 worker 初始化运行；是否执行由每条规则自己的启用状态控制。
+              </CardDescription>
             </div>
-            <Switch checked={featureEnabled} onCheckedChange={(v) => featureToggleMut.mutate(v)} />
+            <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
+              随 worker 启动
+            </span>
           </div>
         </CardHeader>
       </Card>

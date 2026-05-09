@@ -21,7 +21,6 @@ import logging
 from collections.abc import Iterable
 from typing import Any
 
-import jsonschema
 from jsonschema import Draft7Validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession

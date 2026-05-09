@@ -24,6 +24,8 @@ from ..crypto import decrypt_str
 from ..db.base import AsyncSessionLocal
 from ..db.models.account import Account, Proxy, SudoUser
 from ..db.models.command import AccountCommandLink, CommandAlias, CommandTemplate, LLMProvider
+from ..db.models.feature import FEATURE_SCHEDULER
+from ..db.models.rule import Rule
 from ..db.models.system import SystemSetting
 from ..redis_client import get_redis
 from ..settings import settings as app_settings
@@ -40,8 +42,8 @@ from .ipc import (
     CMD_RELOAD_PLUGIN,
     CMD_RESUME,
     CMD_STOP,
-    EVT_LOGIN_REQUIRED,
     EVT_ACK,
+    EVT_LOGIN_REQUIRED,
     EVT_PONG,
     EVT_STATUS,
     GCMD_KILL_SWITCH,
@@ -60,6 +62,7 @@ from .tg_client import build_client
 log = logging.getLogger(__name__)
 
 _CONFIG_RECONCILE_SECONDS = 60
+_SCHEDULER_TICK_SECONDS = 30
 
 
 async def run_worker(account_id: int) -> None:
@@ -154,12 +157,13 @@ async def run_worker(account_id: int) -> None:
         ipc_task = asyncio.create_task(_listen_cmd(redis, client, account_id, paused))
         global_task = asyncio.create_task(_listen_global(redis, account_id, paused))
         reconcile_task = asyncio.create_task(_periodic_config_reconcile(redis, account_id))
+        scheduler_task = asyncio.create_task(_platform_scheduler_loop(redis, client, account_id, paused))
 
         try:
             # 阻塞直到 client.disconnect() 被调用
             await client.run_until_disconnected()
         finally:
-            for t in (ipc_task, global_task, reconcile_task):
+            for t in (ipc_task, global_task, reconcile_task, scheduler_task):
                 t.cancel()
                 try:
                     await t
@@ -358,13 +362,9 @@ async def _listen_cmd(redis, client, account_id: int, paused: asyncio.Event) -> 
                         result_ok = False
                         result_error: str | None = None
                         try:
-                            from .plugins.loader import _STATES  # type: ignore
-
-                            state = _STATES.get(account_id)
-                            inst = state.instances.get("scheduler") if state else None
-                            ctx = state.contexts.get("scheduler") if state else None
-                            if inst is None or ctx is None:
-                                result_error = "scheduler 插件未加载"
+                            scheduler = await _make_platform_scheduler_context(redis, client, account_id)
+                            if scheduler is None:
+                                result_error = "定时任务调度器尚未初始化"
                             else:
                                 from app.db.base import AsyncSessionLocal
                                 from app.db.models.rule import Rule
@@ -376,6 +376,7 @@ async def _listen_cmd(redis, client, account_id: int, paused: asyncio.Event) -> 
                                 else:
                                     cfg = dict(rule_row.config or {})
                                     fired_at = datetime.now(UTC)
+                                    inst, ctx = scheduler
                                     ok = await inst._fire(ctx, rule_id, cfg)
                                     if ok:
                                         from .plugins.builtin.scheduler.plugin import _get_system_tz
@@ -394,12 +395,6 @@ async def _listen_cmd(redis, client, account_id: int, paused: asyncio.Event) -> 
                                         if row is not None:
                                             row.config = cfg
                                             await db.commit()
-                                    # 同步更新 ctx.rules 中对应 rule 的 in-memory config，
-                                    # 防止下一个 tick 读到旧的 next_fire 导致重复触发
-                                    for r in ctx.rules:
-                                        if r.id == rule_id:
-                                            r.config = cfg
-                                            break
                         except Exception as e:  # noqa: BLE001
                             result_error = f"{type(e).__name__}: {e}"
                             await _log(redis, account_id, "warn", f"execute_rule 失败: {result_error}")
@@ -436,6 +431,78 @@ async def _ack_cmd(redis, cmd: IPCMessage, *, ok: bool, error: str | None = None
         )
     except Exception:  # noqa: BLE001
         pass
+
+
+async def _make_platform_scheduler_context(redis, client, account_id: int):
+    """构造平台级定时任务执行上下文。
+
+    scheduler 已从普通插件 tick loop 迁移到 runtime 基础能力；这里复用原
+    SchedulerPlugin 的调度算法和 action 实现，但不依赖 AccountFeature.enabled。
+    """
+    try:
+        from .plugins.base import PluginContext
+        from .plugins.builtin.scheduler.plugin import SchedulerPlugin
+        from .plugins.loader import _STATES  # type: ignore
+
+        state = _STATES.get(account_id)
+        engine = state.engine if state is not None else None
+        if engine is None:
+            return None
+
+        async def ctx_log(level: str, message: str, **detail) -> None:
+            await _log(redis, account_id, level, message, source="plugin", **detail)
+
+        ctx = PluginContext(
+            account_id=account_id,
+            feature_key=FEATURE_SCHEDULER,
+            config={},
+            rules=[],
+            client=client,
+            engine=engine,
+            redis=redis,
+            log=ctx_log,
+            generation=0,
+        )
+        return SchedulerPlugin(), ctx
+    except Exception as e:  # noqa: BLE001
+        await _log(redis, account_id, "warn", f"初始化定时任务调度器失败: {type(e).__name__}: {e}")
+        return None
+
+
+async def _platform_scheduler_loop(redis, client, account_id: int, paused: asyncio.Event) -> None:
+    """平台级定时任务调度器。
+
+    不再依赖 scheduler 插件启停。只要 worker active，调度器就会周期性读取
+    ``rule.feature_key == scheduler`` 的启用规则并执行。
+    """
+    scheduler = await _make_platform_scheduler_context(redis, client, account_id)
+    if scheduler is None:
+        return
+    inst, ctx = scheduler
+    await _log(redis, account_id, "info", "[scheduler-runtime] started")
+    while True:
+        try:
+            if paused.is_set():
+                async with AsyncSessionLocal() as db:
+                    rules = (
+                        await db.execute(
+                            select(Rule)
+                            .where(
+                                Rule.account_id == account_id,
+                                Rule.feature_key == FEATURE_SCHEDULER,
+                                Rule.enabled.is_(True),
+                            )
+                            .order_by(Rule.priority.desc(), Rule.id.asc())
+                        )
+                    ).scalars().all()
+                ctx.rules = list(rules)
+                await inst._tick_once(ctx)
+            await asyncio.sleep(_SCHEDULER_TICK_SECONDS)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            await _log(redis, account_id, "error", f"[scheduler-runtime] tick error: {type(e).__name__}: {e}")
+            await asyncio.sleep(_SCHEDULER_TICK_SECONDS)
 
 
 async def _periodic_config_reconcile(redis, account_id: int) -> None:

@@ -109,6 +109,7 @@ def test_parse_dt_accepts_z_suffix() -> None:
 async def test_scheduler_floodwait_calls_engine_correctly() -> None:
     """scheduler FloodWaitError 时正确调用 engine.on_flood_wait（不带 peer_id）。"""
     from unittest.mock import AsyncMock
+
     from app.worker.plugins.builtin.scheduler.plugin import SchedulerPlugin
 
     plugin = SchedulerPlugin()

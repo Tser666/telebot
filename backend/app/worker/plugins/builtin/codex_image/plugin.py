@@ -1,12 +1,12 @@
 """Codex 图片生成插件 — 通过 Codex API 调用 GPT 图片生成模型。
 
 功能：
-  - 纯文本生成图片：,cximg 提示词
-  - 参考图+提示词生成：回复图片后 ,cximg 提示词
-  - Token 管理：,cximg token <token> 保存 / ,cximg token 查看
+  - 纯文本生成图片：,{command} 提示词
+  - 参考图+提示词生成：回复图片后 ,{command} 提示词
+  - Token 管理：,{command} token <token> 保存 / ,{command} token 查看
 
 配置存储：
-  - access_token / model / max_wait_seconds 存储在 account_feature.config
+  - command / access_token / model / max_wait_seconds 等存储在 account_feature.config
   - 前端可通过 ConfigDialog（模式 C）或专属页面（模式 B）管理
 
 技术要点：
@@ -22,7 +22,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import json
+import re
 import time
 from typing import Any
 
@@ -35,6 +37,24 @@ from app.worker.plugins.base import Plugin, PluginContext, register
 CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
 DEFAULT_MODEL = "gpt-5.4"
 DEFAULT_MAX_WAIT = 600  # 10 分钟
+DEFAULT_COMMAND = "cximg"
+DEFAULT_STATUS_INTERVAL = 20
+DEFAULT_INSTRUCTIONS = "You are a helpful assistant. Use tools when available."
+DEFAULT_REASONING_EFFORT = "low"
+DEFAULT_MESSAGE_TEMPLATE = (
+    "<b>🎨 Codex 图片生成</b>\n"
+    "<b>状态:</b> {status}\n"
+    "<b>提示词:</b> {prompt}\n"
+    "<b>尺寸:</b> {image_size} · <b>比例:</b> {aspect_ratio} · <b>格式:</b> {image_format}\n"
+    "<b>耗时:</b> {elapsed}"
+    "{?revised_prompt}\n<b>修订提示词:</b> {revised_prompt}{/?}"
+)
+DEFAULT_IMAGE_SIZE = "1024x1024"
+DEFAULT_ASPECT_RATIO = "1:1"
+DEFAULT_IMAGE_FORMAT = "png"
+SUPPORTED_IMAGE_SIZES = {"auto", "1024x1024", "1536x1024", "1024x1536"}
+SUPPORTED_ASPECT_RATIOS = {"auto", "1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"}
+SUPPORTED_IMAGE_FORMATS = {"png", "jpeg", "webp"}
 
 # ─── 工具函数 ───────────────────────────────────────────
 
@@ -48,6 +68,85 @@ def _html_escape(text: str) -> str:
         .replace('"', "&quot;")
         .replace("'", "&#x27;")
     )
+
+
+def _strip_html_tags(text: str) -> str:
+    """HTML 解析失败时兜底展示纯文本，避免把标签原样发到 Telegram。"""
+    return re.sub(r"</?[^>]+>", "", str(text or ""))
+
+
+async def _edit_html(event: Any, text: str) -> None:
+    """编辑消息并按 HTML 解析；模板写坏时退回纯文本。"""
+    try:
+        await event.edit(text, parse_mode="html")
+    except Exception:
+        await event.edit(_strip_html_tags(text))
+
+
+def _safe_error_text(text: str, max_len: int = 500) -> str:
+    """脱敏可展示错误文本：隐藏 token / 本地路径 / 过长原文。"""
+    out = str(text or "")
+    out = re.sub(r"\(?/[^()\s'\"]+\.(?:py|json|env|db|session)\)?", "<path>", out)
+    out = re.sub(r"\(?[A-Za-z]:[\\/][^()\s'\"]+\.(?:py|json|env|db|session)\)?", "<path>", out)
+    out = re.sub(r"sk-[A-Za-z0-9_-]{8,}", "<redacted>", out)
+    out = re.sub(r"Bearer\s+[A-Za-z0-9_.\-]{8,}", "Bearer <redacted>", out)
+    out = re.sub(
+        r"(?i)(access[_-]?token|api[_-]?key|secret|token)\s*[=:]\s*['\"]?[A-Za-z0-9_.\-]{8,}['\"]?",
+        r"\1=<redacted>",
+        out,
+    )
+    if len(out) > max_len:
+        out = out[:max_len] + "…"
+    return out
+
+
+def _format_seconds(seconds: Any) -> str | None:
+    try:
+        total = max(0, int(seconds))
+    except (TypeError, ValueError):
+        return None
+    days, rem = divmod(total, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, _ = divmod(rem, 60)
+    parts: list[str] = []
+    if days:
+        parts.append(f"{days}天")
+    if hours:
+        parts.append(f"{hours}小时")
+    if minutes and len(parts) < 2:
+        parts.append(f"{minutes}分钟")
+    return "".join(parts) or "不到1分钟"
+
+
+def _humanize_codex_error(status_code: int, detail: str) -> str:
+    """把 Codex API 错误翻译成人话，避免原始 JSON 和敏感信息外泄。"""
+    safe_detail = _safe_error_text(detail)
+    payload: Any = None
+    try:
+        payload = json.loads(detail)
+    except Exception:
+        payload = None
+    err = payload.get("error") if isinstance(payload, dict) else None
+    err_type = str(err.get("type") or "") if isinstance(err, dict) else ""
+    message = _safe_error_text(str(err.get("message") or "")) if isinstance(err, dict) else ""
+
+    if err_type == "usage_limit_reached":
+        plan = _safe_error_text(str(err.get("plan_type") or "unknown")) if isinstance(err, dict) else "unknown"
+        resets = _format_seconds(err.get("resets_in_seconds") if isinstance(err, dict) else None)
+        suffix = f"预计 {resets} 后恢复。" if resets else "请稍后再试。"
+        return f"Codex 额度已用完（当前计划：{plan}）。{suffix}\n可以更换 Access Token，或等待额度恢复。"
+
+    if status_code in {401, 403}:
+        return "Codex 鉴权失败：Access Token 无效、过期，或当前账号没有权限。请在配置页重新保存 Token。"
+    if status_code == 429:
+        return "Codex 当前限流或额度不足，请稍后再试；如果频繁出现，可以更换 Token。"
+    if status_code == 404:
+        return "Codex 接口或模型不可用：请检查模型名称和接口是否仍支持。"
+    if status_code >= 500:
+        return "Codex 服务端暂时异常，请稍后重试。"
+    if message:
+        return f"Codex 请求失败：{message}"
+    return f"Codex 请求失败（HTTP {status_code}）：{safe_detail}"
 
 
 def _mask_token(token: str) -> str:
@@ -75,11 +174,132 @@ def _get_config_value(ctx: PluginContext, key: str, default: Any = None) -> Any:
     return cfg.get(key, default)
 
 
+def _command_name(ctx: PluginContext) -> str:
+    value = str(_get_config_value(ctx, "command", DEFAULT_COMMAND) or DEFAULT_COMMAND).strip()
+    return value or DEFAULT_COMMAND
+
+
+def _normalize_choice(value: Any, allowed: set[str], default: str) -> str:
+    out = str(value or "").strip().lower()
+    return out if out in allowed else default
+
+
+def _normalize_size(value: Any) -> str:
+    aliases = {
+        "square": "1024x1024",
+        "landscape": "1536x1024",
+        "portrait": "1024x1536",
+        "横图": "1536x1024",
+        "竖图": "1024x1536",
+        "方图": "1024x1024",
+    }
+    raw = str(value or "").strip().lower()
+    return _normalize_choice(aliases.get(raw, raw), SUPPORTED_IMAGE_SIZES, DEFAULT_IMAGE_SIZE)
+
+
+def _normalize_aspect_ratio(value: Any) -> str:
+    raw = str(value or "").strip().lower().replace("：", ":")
+    return _normalize_choice(raw, SUPPORTED_ASPECT_RATIOS, DEFAULT_ASPECT_RATIO)
+
+
+def _normalize_image_format(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    if raw == "jpg":
+        raw = "jpeg"
+    return _normalize_choice(raw, SUPPORTED_IMAGE_FORMATS, DEFAULT_IMAGE_FORMAT)
+
+
+def _parse_generation_args(args: list[str], ctx: PluginContext) -> tuple[str, dict[str, str]]:
+    """解析命令级覆盖项，返回清理后的 prompt 和图片选项。"""
+    opts = {
+        "image_size": _normalize_size(_get_config_value(ctx, "image_size", DEFAULT_IMAGE_SIZE)),
+        "aspect_ratio": _normalize_aspect_ratio(_get_config_value(ctx, "aspect_ratio", DEFAULT_ASPECT_RATIO)),
+        "image_format": _normalize_image_format(_get_config_value(ctx, "image_format", DEFAULT_IMAGE_FORMAT)),
+    }
+    key_map = {
+        "--size": "image_size",
+        "-s": "image_size",
+        "--resolution": "image_size",
+        "--分辨率": "image_size",
+        "size": "image_size",
+        "resolution": "image_size",
+        "分辨率": "image_size",
+        "--ratio": "aspect_ratio",
+        "-r": "aspect_ratio",
+        "--aspect": "aspect_ratio",
+        "--比例": "aspect_ratio",
+        "ratio": "aspect_ratio",
+        "aspect": "aspect_ratio",
+        "比例": "aspect_ratio",
+        "--format": "image_format",
+        "-f": "image_format",
+        "--格式": "image_format",
+        "format": "image_format",
+        "格式": "image_format",
+    }
+    prompt_parts: list[str] = []
+    i = 0
+    while i < len(args):
+        token = args[i]
+        key = token
+        value: str | None = None
+        if "=" in token:
+            key, value = token.split("=", 1)
+        normalized_key = key_map.get(key.lower())
+        if normalized_key:
+            if value is None and i + 1 < len(args):
+                value = args[i + 1]
+                i += 1
+            if value:
+                if normalized_key == "image_size":
+                    opts["image_size"] = _normalize_size(value)
+                elif normalized_key == "aspect_ratio":
+                    opts["aspect_ratio"] = _normalize_aspect_ratio(value)
+                elif normalized_key == "image_format":
+                    opts["image_format"] = _normalize_image_format(value)
+            i += 1
+            continue
+        prompt_parts.append(token)
+        i += 1
+    return " ".join(prompt_parts).strip(), opts
+
+
+def _effective_prompt(prompt: str, aspect_ratio: str) -> str:
+    if not aspect_ratio or aspect_ratio == "auto":
+        return prompt
+    return f"{prompt}\n\n画面比例要求：{aspect_ratio}。"
+
+
+def _render_message(template: str, values: dict[str, Any], *, limit: int = 4000) -> str:
+    """渲染用户消息模板；只转义占位符值，保留模板里的 HTML 标签。"""
+    from app.services.llm_format import render_output
+
+    text = render_output(template or DEFAULT_MESSAGE_TEMPLATE, values, escape_format="html")
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)] + "…"
+
+
+def _image_ext_from_bytes(data: bytes, preferred_format: str = DEFAULT_IMAGE_FORMAT) -> str:
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ".webp"
+    if preferred_format == "jpeg":
+        return ".jpg"
+    if preferred_format == "webp":
+        return ".webp"
+    return ".png"
+
+
 async def _update_account_config(ctx: PluginContext, key: str, value: Any) -> None:
     """更新 account_feature.config 中的某个字段并持久化。"""
+    from sqlalchemy import select
+
     from ....db.base import AsyncSessionLocal
     from ....db.models.feature import AccountFeature
-    from sqlalchemy import select
 
     async with AsyncSessionLocal() as db:
         result = await db.execute(
@@ -104,6 +324,10 @@ async def _call_codex_image(
     reference_image: dict[str, str] | None = None,
     update_status: Any | None = None,
     max_wait: int = DEFAULT_MAX_WAIT,
+    instructions: str = DEFAULT_INSTRUCTIONS,
+    reasoning_effort: str = DEFAULT_REASONING_EFFORT,
+    image_size: str = DEFAULT_IMAGE_SIZE,
+    image_format: str = DEFAULT_IMAGE_FORMAT,
 ) -> dict[str, str | None]:
     """调用 Codex 图片生成 API。
 
@@ -131,13 +355,19 @@ async def _call_codex_image(
             },
         ]
 
+    image_tool: dict[str, Any] = {"type": "image_generation"}
+    if image_size and image_size != "auto":
+        image_tool["size"] = image_size
+    if image_format and image_format != "png":
+        image_tool["output_format"] = image_format
+
     payload = {
         "model": model,
-        "instructions": "You are a helpful assistant. Use tools when available.",
+        "instructions": instructions or DEFAULT_INSTRUCTIONS,
         "input": [{"role": "user", "content": content}],
         "store": False,
-        "tools": [{"type": "image_generation"}],
-        "reasoning": {"effort": "low"},
+        "tools": [image_tool],
+        "reasoning": {"effort": reasoning_effort or DEFAULT_REASONING_EFFORT},
         "include": [],
         "tool_choice": "auto",
         "parallel_tool_calls": True,
@@ -324,22 +554,36 @@ class CodexImagePlugin(Plugin):
     display_name = "Codex 图片生成"
     description = HELP_TEXT
     message_channels = {"incoming", "outgoing"}
+    owner_only = True
+    command_config_keys = {"command"}
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._command_name = DEFAULT_COMMAND
+
+    async def on_startup(self, ctx: PluginContext) -> None:
+        self._command_name = _command_name(ctx)
+        self.commands = {self._command_name: self._cmd_handler}
+        if ctx.log:
+            await ctx.log("info", f"[codex_image] 启动，指令名={self._command_name}")
 
     # ── 命令入口 ──────────────────────────────────────
 
-    async def on_command(
-        self, ctx: PluginContext, cmd: str, args: list[str], event
-    ) -> bool:
-        if cmd != "cximg":
-            return False
+    async def _cmd_handler(
+        self,
+        client: Any,
+        event: Any,
+        args: list[str],
+        account_id: int,
+        ctx: PluginContext,
+    ) -> None:
         try:
             await self._dispatch(ctx, args, event)
         except Exception as exc:
             try:
-                await event.edit(f"❌ 操作失败: {_html_escape(str(exc))}")
+                await _edit_html(event, f"❌ 操作失败: {_html_escape(_safe_error_text(str(exc)))}")
             except Exception:
                 pass
-        return True
 
     # ── 命令分发 ──────────────────────────────────────
 
@@ -348,19 +592,23 @@ class CodexImagePlugin(Plugin):
     ) -> None:
         sub = args[0].lower() if args else ""
 
-        if sub == "token":
+        if sub in {"token", "令牌"}:
             await self._cmd_token(ctx, args[1:], event)
             return
 
-        prompt = " ".join(args).strip()
+        prompt, image_opts = _parse_generation_args(args, ctx)
+        cmd = _command_name(ctx)
         if not prompt:
-            await event.edit(
-                f"❌ 请输入提示词，例如：<code>,cximg 一只戴墨镜的柴犬坐在跑车里</code>\n"
-                f"• 设置 Token：<code>,cximg token 你的codex access token</code>"
+            await _edit_html(
+                event,
+                f"❌ 请输入提示词，例如：<code>,{_html_escape(cmd)} 一只戴墨镜的柴犬坐在跑车里</code>\n"
+                f"• 指定比例：<code>,{_html_escape(cmd)} --比例 4:3 云海里的城市</code>\n"
+                f"• 指定尺寸/格式：<code>,{_html_escape(cmd)} --size 1536x1024 --format jpeg 海边日落</code>\n"
+                f"• 设置 Token：<code>,{_html_escape(cmd)} token 你的codex access token</code>"
             )
             return
 
-        await self._cmd_generate(ctx, prompt, event)
+        await self._cmd_generate(ctx, prompt, event, image_opts)
 
     # ── Token 管理 ────────────────────────────────────
 
@@ -369,11 +617,13 @@ class CodexImagePlugin(Plugin):
     ) -> None:
         token_value = " ".join(args).strip()
         current_token = _get_config_value(ctx, "access_token", "")
+        cmd = _command_name(ctx)
 
         if not token_value:
-            await event.edit(
+            await _edit_html(
+                event,
                 f"🔐 当前 Token：{_mask_token(current_token)}\n"
-                f"• 设置方式：<code>,cximg token 你的codex access token（通常在 .codex/auth.json）</code>"
+                f"• 设置方式：<code>,{_html_escape(cmd)} token 你的codex access token（通常在 .codex/auth.json）</code>"
             )
             return
 
@@ -385,18 +635,31 @@ class CodexImagePlugin(Plugin):
     # ── 图片生成 ──────────────────────────────────────
 
     async def _cmd_generate(
-        self, ctx: PluginContext, prompt: str, event
+        self, ctx: PluginContext, prompt: str, event, image_opts: dict[str, str] | None = None
     ) -> None:
         # 获取 token
         token = _get_config_value(ctx, "access_token", "")
+        cmd = _command_name(ctx)
         if not token:
-            await event.edit(
-                "❌ 缺少鉴权，请先使用 <code>,cximg token 你的codex access token（通常在 .codex/auth.json）</code> 保存 Token"
+            await _edit_html(
+                event,
+                f"❌ 缺少鉴权，请先使用 <code>,{_html_escape(cmd)} token 你的codex access token（通常在 .codex/auth.json）</code> 保存 Token"
             )
             return
 
         model = _get_config_value(ctx, "model", DEFAULT_MODEL)
         max_wait = int(_get_config_value(ctx, "max_wait_seconds", DEFAULT_MAX_WAIT))
+        status_interval = int(_get_config_value(ctx, "status_interval_seconds", DEFAULT_STATUS_INTERVAL))
+        status_interval = max(10, min(300, status_interval))
+        delete_command_message = bool(_get_config_value(ctx, "delete_command_message", True))
+        show_revised_prompt = bool(_get_config_value(ctx, "show_revised_prompt", True))
+        instructions = str(_get_config_value(ctx, "custom_instructions", "") or DEFAULT_INSTRUCTIONS)
+        reasoning_effort = str(_get_config_value(ctx, "reasoning_effort", DEFAULT_REASONING_EFFORT) or DEFAULT_REASONING_EFFORT)
+        message_template = str(_get_config_value(ctx, "message_template", DEFAULT_MESSAGE_TEMPLATE) or DEFAULT_MESSAGE_TEMPLATE)
+        image_opts = image_opts or {}
+        image_size = _normalize_size(image_opts.get("image_size") or _get_config_value(ctx, "image_size", DEFAULT_IMAGE_SIZE))
+        aspect_ratio = _normalize_aspect_ratio(image_opts.get("aspect_ratio") or _get_config_value(ctx, "aspect_ratio", DEFAULT_ASPECT_RATIO))
+        image_format = _normalize_image_format(image_opts.get("image_format") or _get_config_value(ctx, "image_format", DEFAULT_IMAGE_FORMAT))
 
         # 检查参考图
         reference_image = None
@@ -405,21 +668,39 @@ class CodexImagePlugin(Plugin):
             try:
                 reference_image = await self._download_reference_image(ctx, reply_msg)
             except Exception as exc:
-                await event.edit(f"❌ 参考图下载失败：{_html_escape(str(exc))}")
+                await _edit_html(event, f"❌ 参考图下载失败：{_html_escape(_safe_error_text(str(exc)))}")
                 return
 
-        # 发送初始状态
-        initial_status = (
-            "🖼️ 已检测到参考图，正在生成图片..."
-            if reference_image
-            else "🎨 正在根据提示词生成图片..."
-        )
-        await event.edit(initial_status)
-
-        # 生成图片
         started_at = time.monotonic()
         last_status_at = 0.0
-        current_phase = initial_status
+        current_phase = "已检测到参考图，正在生成图片" if reference_image else "正在根据提示词生成图片"
+
+        def render_status(
+            status: str,
+            elapsed: str,
+            revised_prompt: str = "",
+            response_id: str = "",
+            limit: int = 4000,
+        ) -> str:
+            return _render_message(
+                message_template,
+                {
+                    "status": status,
+                    "prompt": prompt,
+                    "elapsed": elapsed,
+                    "model": model,
+                    "command": cmd,
+                    "image_size": image_size,
+                    "aspect_ratio": aspect_ratio,
+                    "image_format": image_format,
+                    "has_reference": "是" if reference_image else "",
+                    "revised_prompt": revised_prompt if show_revised_prompt else "",
+                    "response_id": response_id,
+                },
+                limit=limit,
+            )
+
+        await _edit_html(event, render_status(current_phase, "0秒"))
 
         async def update_status(phase: str) -> None:
             nonlocal last_status_at, current_phase
@@ -430,7 +711,7 @@ class CodexImagePlugin(Plugin):
             last_status_at = now
             elapsed = _format_duration((now - started_at) * 1000)
             try:
-                await event.edit(f"{phase}\n⏱️ 已耗时：{elapsed}")
+                await _edit_html(event, render_status(phase, elapsed))
             except Exception:
                 pass
 
@@ -440,7 +721,7 @@ class CodexImagePlugin(Plugin):
         async def heartbeat() -> None:
             nonlocal heartbeat_stop
             while not heartbeat_stop:
-                await asyncio.sleep(20)
+                await asyncio.sleep(status_interval)
                 if heartbeat_stop:
                     break
                 await update_status(current_phase)
@@ -449,32 +730,37 @@ class CodexImagePlugin(Plugin):
 
         try:
             result = await _call_codex_image(
-                prompt=prompt,
+                prompt=_effective_prompt(prompt, aspect_ratio),
                 token=token,
                 model=model,
                 reference_image=reference_image,
                 update_status=update_status,
                 max_wait=max_wait,
+                instructions=instructions,
+                reasoning_effort=reasoning_effort,
+                image_size=image_size,
+                image_format=image_format,
             )
         except CodexApiError as exc:
             heartbeat_stop = True
             hb_task.cancel()
             elapsed = _format_duration((time.monotonic() - started_at) * 1000)
-            await event.edit(
-                f"❌ Codex 请求失败 ({exc.status_code})：{_html_escape(exc.detail)}\n⏱️ 耗时：{elapsed}"
+            await _edit_html(
+                event,
+                f"❌ {_html_escape(_humanize_codex_error(exc.status_code, exc.detail))}\n⏱️ 耗时：{elapsed}"
             )
             return
         except TimeoutError as exc:
             heartbeat_stop = True
             hb_task.cancel()
             elapsed = _format_duration((time.monotonic() - started_at) * 1000)
-            await event.edit(f"❌ {_html_escape(str(exc))}\n⏱️ 耗时：{elapsed}")
+            await _edit_html(event, f"❌ {_html_escape(_safe_error_text(str(exc)))}\n⏱️ 耗时：{elapsed}")
             return
         except Exception as exc:
             heartbeat_stop = True
             hb_task.cancel()
             elapsed = _format_duration((time.monotonic() - started_at) * 1000)
-            await event.edit(f"❌ 生成失败：{_html_escape(str(exc))}\n⏱️ 耗时：{elapsed}")
+            await _edit_html(event, f"❌ 生成失败：{_html_escape(_safe_error_text(str(exc)))}\n⏱️ 耗时：{elapsed}")
             return
 
         heartbeat_stop = True
@@ -484,40 +770,60 @@ class CodexImagePlugin(Plugin):
         if not result.get("image_base64"):
             status_info = result.get("status", "")
             status_text = f"（status: {_html_escape(status_info)}）" if status_info else ""
-            await event.edit(f"❌ 未收到生成图片{status_text}\n⏱️ 耗时：{elapsed}")
+            await _edit_html(event, f"❌ 未收到生成图片{status_text}\n⏱️ 耗时：{elapsed}")
             return
 
         # 发送图片
         try:
             image_bytes = base64.b64decode(result["image_base64"])
-            caption_parts = [
-                f"<b>提示词:</b> {_html_escape(prompt)}",
-                f"<b>耗时:</b> {_html_escape(elapsed)}",
-            ]
-            if result.get("revised_prompt"):
-                caption_parts.append(f"<b>修订提示词:</b> {_html_escape(result['revised_prompt'])}")
+            caption = render_status(
+                "已完成",
+                elapsed,
+                revised_prompt=str(result.get("revised_prompt") or ""),
+                response_id=str(result.get("response_id") or ""),
+                limit=1024,
+            )
 
             client = ctx.client
             if not client:
-                await event.edit("❌ 客户端未初始化")
+                await _edit_html(event, "❌ 客户端未初始化")
                 return
+            ext = _image_ext_from_bytes(image_bytes, image_format)
+            file_name = f"codex_image_{int(time.time())}{ext}"
 
-            await client.send_file(
-                event.chat_id,
-                image_bytes,
-                caption="\n".join(caption_parts),
-                parse_mode="html",
-                reply_to=reply_msg.id if reply_msg else event.id,
-            )
+            try:
+                image_file = io.BytesIO(image_bytes)
+                image_file.name = file_name
+                await client.send_file(
+                    event.chat_id,
+                    image_file,
+                    caption=caption,
+                    parse_mode="html",
+                    reply_to=reply_msg.id if reply_msg else event.id,
+                    force_document=False,
+                )
+            except Exception:
+                image_file = io.BytesIO(image_bytes)
+                image_file.name = file_name
+                await client.send_file(
+                    event.chat_id,
+                    image_file,
+                    caption=_strip_html_tags(caption)[:1024],
+                    reply_to=reply_msg.id if reply_msg else event.id,
+                    force_document=False,
+                )
 
             # 删除原命令消息
-            try:
-                await event.delete()
-            except Exception:
+            if delete_command_message:
+                try:
+                    await event.delete()
+                except Exception:
+                    await event.edit("✅ 图片生成完成")
+            else:
                 await event.edit("✅ 图片生成完成")
 
         except Exception as exc:
-            await event.edit(f"❌ 图片发送失败：{_html_escape(str(exc))}")
+            await _edit_html(event, f"❌ 图片发送失败：{_html_escape(_safe_error_text(str(exc)))}")
 
     # ── 参考图下载 ────────────────────────────────────
 
@@ -566,8 +872,13 @@ def _dry_run_match(
     return True, f"[dry-run] 将使用提示词「{text[:50]}」调用 Codex API 生成图片"
 
 
+PLUGIN_CLASS = CodexImagePlugin
+
+
 __all__ = [
     "CodexImagePlugin",
     "PLUGIN_CLASS",
     "_dry_run_match",
+    "_image_ext_from_bytes",
+    "_parse_generation_args",
 ]

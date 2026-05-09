@@ -9,12 +9,11 @@
 """
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.worker.command import CommandContext, _check_sudo_permission, set_command_context
-
+from app.worker.command import CommandContext, _check_sudo_permission
 
 # ════════════════════════════════════════════════════════════
 # 1) CommandContext sudo 字段

@@ -21,6 +21,7 @@ MANIFEST = Manifest(
     #   - "account": 账号级配置，按账号隔离（默认）
     config_schema={
         "type": "object",
+        "x-ui-mode": "single",
         "properties": {
             "time_limit": {
                 "type": "integer", "title": "答题时间（秒）", "default": 30,

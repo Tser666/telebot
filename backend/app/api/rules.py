@@ -532,7 +532,7 @@ async def execute_rule(
     import asyncio
     import secrets
 
-    from ..worker.ipc import CMD_EXECUTE_RULE, IPCMessage, cmd_channel, make_cmd
+    from ..worker.ipc import CMD_EXECUTE_RULE, IPCMessage
 
     reply_channel = f"worker_reply:{aid}:exec_rule:{secrets.token_hex(8)}"
     redis = get_redis()

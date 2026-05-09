@@ -3,6 +3,9 @@
 配置模式：单配置对象（模式 B），无规则列表。
 account_feature.config 字段：
   - access_token: str   Codex Access Token（通常在 .codex/auth.json 中获取）
+  - command: str        触发命令名，默认 cximg，支持中文
+  - message_template: str 最终 caption / 生成中状态消息模板
+  - image_size / aspect_ratio / image_format: 图片尺寸、比例和输出格式
 """
 
 from __future__ import annotations
@@ -18,7 +21,14 @@ MANIFEST = Manifest(
     permissions=["send_message", "edit_message", "read_chat"],
     config_schema={
         "type": "object",
+        "x-ui-mode": "single",
         "properties": {
+            "command": {
+                "type": "string",
+                "title": "触发指令名",
+                "default": "cximg",
+                "description": "在系统命令前缀后输入此指令触发图片生成，支持中文，如 画图",
+            },
             "access_token": {
                 "type": "string",
                 "title": "Codex Access Token",
@@ -35,6 +45,71 @@ MANIFEST = Manifest(
                 "title": "最大等待时间（秒）",
                 "default": 600,
                 "description": "图片生成最大等待时间，默认 600（10分钟）",
+            },
+            "status_interval_seconds": {
+                "type": "integer",
+                "title": "状态刷新间隔（秒）",
+                "default": 20,
+                "description": "长时间生成时编辑状态消息的间隔，默认 20 秒，建议 10 秒以上以减少风控",
+            },
+            "message_template": {
+                "type": "string",
+                "title": "消息模板",
+                "default": (
+                    "<b>🎨 Codex 图片生成</b>\n"
+                    "<b>状态:</b> {status}\n"
+                    "<b>提示词:</b> {prompt}\n"
+                    "<b>尺寸:</b> {image_size} · <b>比例:</b> {aspect_ratio} · <b>格式:</b> {image_format}\n"
+                    "<b>耗时:</b> {elapsed}"
+                    "{?revised_prompt}\n<b>修订提示词:</b> {revised_prompt}{/?}"
+                ),
+                "description": "支持 {status}/{prompt}/{elapsed}/{model}/{image_size}/{aspect_ratio}/{image_format}/{revised_prompt} 等占位符",
+            },
+            "image_size": {
+                "type": "string",
+                "title": "默认分辨率",
+                "default": "1024x1024",
+                "enum": ["auto", "1024x1024", "1536x1024", "1024x1536"],
+                "description": "默认生成尺寸；命令中可用 --size 临时覆盖",
+            },
+            "aspect_ratio": {
+                "type": "string",
+                "title": "默认画面比例",
+                "default": "1:1",
+                "enum": ["auto", "1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"],
+                "description": "默认构图比例；命令中可用 --比例 或 --ratio 临时覆盖",
+            },
+            "image_format": {
+                "type": "string",
+                "title": "默认图片格式",
+                "default": "png",
+                "enum": ["png", "jpeg", "webp"],
+                "description": "默认输出格式；命令中可用 --format 或 --格式 临时覆盖",
+            },
+            "delete_command_message": {
+                "type": "boolean",
+                "title": "完成后删除命令消息",
+                "default": True,
+                "description": "图片发送成功后删除原触发命令消息",
+            },
+            "show_revised_prompt": {
+                "type": "boolean",
+                "title": "显示模型修订提示词",
+                "default": True,
+                "description": "Codex 返回 revised_prompt 时是否显示在图片说明中",
+            },
+            "reasoning_effort": {
+                "type": "string",
+                "title": "推理强度",
+                "default": "low",
+                "enum": ["low", "medium", "high"],
+                "description": "传给 Codex API 的 reasoning.effort",
+            },
+            "custom_instructions": {
+                "type": "string",
+                "title": "自定义系统指令",
+                "default": "",
+                "description": "留空使用默认指令；可要求风格、构图、安全边界等",
             },
         },
     },

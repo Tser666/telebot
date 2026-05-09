@@ -21,6 +21,7 @@ from ..schemas.feature import (
     AccountFeatureConfigUpdate,
     AccountFeatureItem,
     AccountFeatureToggle,
+    ConfigValidationResponse,
     FeatureMatrixResponse,
     PluginGlobalConfigResponse,
     PluginGlobalConfigUpdate,
@@ -234,7 +235,7 @@ async def set_plugin_global_config(
             db, key, payload.config
         )
     except ValueError as e:
-        raise _bad("CONFIG_VALIDATION_ERROR", str(e))
+        raise _bad("CONFIG_VALIDATION_ERROR", str(e)) from e
 
     await audit.write(
         db,
@@ -285,14 +286,14 @@ async def get_effective_config(
 # ─────────────────────────────────────────────────────
 @router.post(
     "/api/plugins/{key}/config/validate",
-    response_model="ConfigValidationResponse",
+    response_model=ConfigValidationResponse,
 )
 async def validate_plugin_config(
     key: str,
     payload: PluginGlobalConfigUpdate,
     db: DBSession,
     _user: CurrentUser,
-) -> "ConfigValidationResponse":
+) -> ConfigValidationResponse:
     """验证配置是否符合插件的 config_schema。"""
     await feature_service.seed_builtin_features(db)
     feature = await db.get(Feature, key)

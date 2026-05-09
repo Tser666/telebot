@@ -181,6 +181,7 @@ class Game24Plugin(Plugin):
     key = "game24"
     display_name = "24点游戏"
     owner_only = False
+    command_config_keys = {"command"}
 
     def __init__(self) -> None:
         super().__init__()

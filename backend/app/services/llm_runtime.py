@@ -16,23 +16,24 @@ Fallback 优先级（从高到低）：
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
+from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-import inspect
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Coroutine
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import func, select
 
 if TYPE_CHECKING:
-    from .llm_client import LLMClient, LLMResult
+    from .llm_client import LLMResult
     from .llm_dto import LLMProviderDTO
 
-from .llm_client import build_client_from_dto
 from ..db.base import AsyncSessionLocal
 from ..db.models.llm_usage import LLMUsage
 from ..db.models.system import SystemSetting
 from ..settings import settings
+from .llm_client import build_client_from_dto
 
 log = logging.getLogger(__name__)
 
@@ -108,7 +109,7 @@ def _is_retryable_error(exc: Exception, status_code: int | None = None) -> bool:
     可重试：timeout / ConnectError / 网络错误 / 429 / 5xx
     不可重试：400 / 401 / 403 / 404（认证/配置错误，重试无意义）
     """
-    from .llm_client import LLMError, LLMCallFailed
+    from .llm_client import LLMCallFailed, LLMError
 
     if isinstance(exc, LLMCallFailed):
         return exc.retryable
@@ -134,7 +135,7 @@ def _is_retryable_error(exc: Exception, status_code: int | None = None) -> bool:
 
 def _classify_error(exc: Exception) -> str:
     """分类错误类型（用于日志）。"""
-    from .llm_client import LLMError, LLMCallFailed
+    from .llm_client import LLMCallFailed, LLMError
 
     if isinstance(exc, LLMCallFailed):
         return exc.error_type or "unknown"
@@ -328,7 +329,7 @@ async def call_with_fallback(
                     provider_name=provider_dto.name,
                     error_type=error_type,
                     retryable=False,
-                )
+                ) from last_error
 
     # 理论上不会走到这里
     raise LLMCallFailed(
@@ -349,7 +350,7 @@ def _apply_output_token_cap(max_tokens: int) -> int:
     return min(max_tokens, cap)
 
 
-async def _check_budget(account_id: int | None, provider_dto: "LLMProviderDTO") -> str | None:
+async def _check_budget(account_id: int | None, provider_dto: LLMProviderDTO) -> str | None:
     """检查账号级 LLM 预算。
 
     这是成本控制的硬门禁：限制命中时不再调用任何 provider。DB 查询失败时
@@ -446,7 +447,7 @@ def _non_negative_int(value: Any, default: int) -> int:
 
 
 async def _call_with_retry(
-    provider_dto: "LLMProviderDTO",
+    provider_dto: LLMProviderDTO,
     system: str,
     user: str,
     override_model: str | None,
@@ -455,7 +456,7 @@ async def _call_with_retry(
     log_prompt_preview: bool,
     client_factory: Callable[..., Any | Awaitable[Any]] | None = None,
     max_retries: int = _MAX_RETRIES,
-) -> "LLMResult":
+) -> LLMResult:
     """使用指数退避重试调用单个 provider。"""
     import time
 
@@ -464,7 +465,6 @@ async def _call_with_retry(
     )
 
     last_error: Exception | None = None
-    last_status_code: int | None = None
 
     for attempt in range(max_retries + 1):
         start_time = time.monotonic()
@@ -505,7 +505,6 @@ async def _call_with_retry(
                 if part.isdigit() and 100 <= int(part) < 600:
                     status_code = int(part)
                     break
-            last_status_code = status_code
 
             if not _is_retryable_error(exc, status_code):
                 # 不可重试的错误（如 401/403）直接抛出

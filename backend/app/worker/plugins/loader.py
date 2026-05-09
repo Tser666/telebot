@@ -684,7 +684,7 @@ def _make_logger(redis: Any, account_id: int):
 # 配置合并：_merge_plugin_config
 # ─────────────────────────────────────────────────────
 async def _merge_plugin_config(
-    db: "AsyncSessionLocal",
+    db: AsyncSessionLocal,
     account_id: int,
     feature_key: str,
     account_config: dict[str, Any],
@@ -857,7 +857,26 @@ async def reload_account_config(account_id: int, payload: dict | None = None) ->
             ctx = state.contexts[fkey]
 
             # 合并配置：schema defaults < global config < account config
-            ctx.config = await _merge_plugin_config(db, account_id, fkey, dict(af.config or {}))
+            old_config = dict(ctx.config or {})
+            new_config = await _merge_plugin_config(db, account_id, fkey, dict(af.config or {}))
+            command_config_keys = set(getattr(inst, "command_config_keys", set()) or set())
+            command_config_changed = any(
+                old_config.get(k) != new_config.get(k) for k in command_config_keys
+            )
+            if command_config_changed:
+                cmds = getattr(inst, "commands", None) or cls.commands or {}
+                for cname in cmds.keys():
+                    unregister_plugin_command(cname, owner_plugin_key=fkey)
+                try:
+                    await inst.on_shutdown(ctx)
+                except Exception:  # noqa: BLE001
+                    log.exception("命令配置变化后 on_shutdown 失败 feature=%s", fkey)
+                state.instances.pop(fkey, None)
+                state.contexts.pop(fkey, None)
+                await _activate(db, state, af, redis)
+                continue
+
+            ctx.config = new_config
             ctx.rules = list(rules)
 
         # 2) 处理新增的 enabled feature

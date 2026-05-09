@@ -18,12 +18,24 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/misc";
+import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { getErrMsg } from "@/lib/api";
 
 interface CodexImageConfig {
+  command: string;
   access_token: string;
   model: string;
   max_wait_seconds: number;
+  status_interval_seconds: number;
+  message_template: string;
+  image_size: string;
+  aspect_ratio: string;
+  image_format: string;
+  delete_command_message: boolean;
+  show_revised_prompt: boolean;
+  reasoning_effort: string;
+  custom_instructions: string;
 }
 
 function clampInt(s: string, min: number, max: number): number {
@@ -34,10 +46,43 @@ function clampInt(s: string, min: number, max: number): number {
 }
 
 const DEFAULT_CONFIG: CodexImageConfig = {
+  command: "cximg",
   access_token: "",
   model: "gpt-5.4",
   max_wait_seconds: 600,
+  status_interval_seconds: 20,
+  message_template:
+    "<b>🎨 Codex 图片生成</b>\n<b>状态:</b> {status}\n<b>提示词:</b> {prompt}\n<b>尺寸:</b> {image_size} · <b>比例:</b> {aspect_ratio} · <b>格式:</b> {image_format}\n<b>耗时:</b> {elapsed}{?revised_prompt}\n<b>修订提示词:</b> {revised_prompt}{/?}",
+  image_size: "1024x1024",
+  aspect_ratio: "1:1",
+  image_format: "png",
+  delete_command_message: true,
+  show_revised_prompt: true,
+  reasoning_effort: "low",
+  custom_instructions: "",
 };
+
+const TEMPLATE_PLACEHOLDERS = [
+  { key: "{status}", label: "状态" },
+  { key: "{prompt}", label: "提示词" },
+  { key: "{elapsed}", label: "耗时" },
+  { key: "{model}", label: "模型" },
+  { key: "{command}", label: "命令" },
+  { key: "{image_size}", label: "分辨率" },
+  { key: "{aspect_ratio}", label: "比例" },
+  { key: "{image_format}", label: "格式" },
+  { key: "{has_reference}", label: "参考图" },
+  { key: "{revised_prompt}", label: "修订提示词" },
+];
+
+function renderTemplate(template: string, values: Record<string, string>): string {
+  let out = template || DEFAULT_CONFIG.message_template;
+  out = out.replace(/\{\?([a-zA-Z0-9_]+)\}([\s\S]*?)\{\/\?\}/g, (_, key: string, inner: string) =>
+    values[key] ? inner : "",
+  );
+  out = out.replace(/\{([a-zA-Z0-9_]+)\}/g, (_, key: string) => values[key] ?? "");
+  return out;
+}
 
 export function CodexImageConfigPage() {
   const params = useParams();
@@ -62,13 +107,24 @@ export function CodexImageConfigPage() {
   );
   const currentConfig = (feature?.config ?? {}) as Partial<CodexImageConfig>;
 
+  const [command, setCommand] = useState(DEFAULT_CONFIG.command);
   const [accessToken, setAccessToken] = useState(DEFAULT_CONFIG.access_token);
   const [model, setModel] = useState(DEFAULT_CONFIG.model);
   const [maxWait, setMaxWait] = useState(DEFAULT_CONFIG.max_wait_seconds);
+  const [statusInterval, setStatusInterval] = useState(DEFAULT_CONFIG.status_interval_seconds);
+  const [messageTemplate, setMessageTemplate] = useState(DEFAULT_CONFIG.message_template);
+  const [imageSize, setImageSize] = useState(DEFAULT_CONFIG.image_size);
+  const [aspectRatio, setAspectRatio] = useState(DEFAULT_CONFIG.aspect_ratio);
+  const [imageFormat, setImageFormat] = useState(DEFAULT_CONFIG.image_format);
+  const [deleteCommandMessage, setDeleteCommandMessage] = useState(DEFAULT_CONFIG.delete_command_message);
+  const [showRevisedPrompt, setShowRevisedPrompt] = useState(DEFAULT_CONFIG.show_revised_prompt);
+  const [reasoningEffort, setReasoningEffort] = useState(DEFAULT_CONFIG.reasoning_effort);
+  const [customInstructions, setCustomInstructions] = useState(DEFAULT_CONFIG.custom_instructions);
   const [dirty, setDirty] = useState(false);
   const [showToken, setShowToken] = useState(false);
 
   useEffect(() => {
+    setCommand(currentConfig.command ?? DEFAULT_CONFIG.command);
     if (currentConfig.access_token !== undefined) {
       setAccessToken(currentConfig.access_token);
     }
@@ -78,6 +134,15 @@ export function CodexImageConfigPage() {
     if (currentConfig.max_wait_seconds !== undefined) {
       setMaxWait(currentConfig.max_wait_seconds);
     }
+    setStatusInterval(currentConfig.status_interval_seconds ?? DEFAULT_CONFIG.status_interval_seconds);
+    setMessageTemplate(currentConfig.message_template ?? DEFAULT_CONFIG.message_template);
+    setImageSize(currentConfig.image_size ?? DEFAULT_CONFIG.image_size);
+    setAspectRatio(currentConfig.aspect_ratio ?? DEFAULT_CONFIG.aspect_ratio);
+    setImageFormat(currentConfig.image_format ?? DEFAULT_CONFIG.image_format);
+    setDeleteCommandMessage(currentConfig.delete_command_message ?? DEFAULT_CONFIG.delete_command_message);
+    setShowRevisedPrompt(currentConfig.show_revised_prompt ?? DEFAULT_CONFIG.show_revised_prompt);
+    setReasoningEffort(currentConfig.reasoning_effort ?? DEFAULT_CONFIG.reasoning_effort);
+    setCustomInstructions(currentConfig.custom_instructions ?? DEFAULT_CONFIG.custom_instructions);
     setDirty(false);
   }, [feature?.config]);
 
@@ -99,8 +164,36 @@ export function CodexImageConfigPage() {
   });
 
   function handleSave() {
-    saveMut.mutate({ access_token: accessToken, model, max_wait_seconds: maxWait });
+    saveMut.mutate({
+      command: command.trim() || DEFAULT_CONFIG.command,
+      access_token: accessToken,
+      model,
+      max_wait_seconds: maxWait,
+      status_interval_seconds: statusInterval,
+      message_template: messageTemplate || DEFAULT_CONFIG.message_template,
+      image_size: imageSize,
+      aspect_ratio: aspectRatio,
+      image_format: imageFormat,
+      delete_command_message: deleteCommandMessage,
+      show_revised_prompt: showRevisedPrompt,
+      reasoning_effort: reasoningEffort,
+      custom_instructions: customInstructions,
+    });
   }
+
+  const effectiveCommand = command || DEFAULT_CONFIG.command;
+  const previewValues = {
+    status: "正在生成图片",
+    prompt: "云海里的未来城市，电影感光影",
+    elapsed: "20秒",
+    model,
+    command: effectiveCommand,
+    image_size: imageSize,
+    aspect_ratio: aspectRatio,
+    image_format: imageFormat,
+    has_reference: "是",
+    revised_prompt: "A cinematic futuristic city above a sea of clouds.",
+  };
 
   function maskToken(token: string): string {
     if (!token) return "(未配置)";
@@ -141,6 +234,67 @@ export function CodexImageConfigPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6 max-w-lg">
+          {/* 状态 */}
+          {feature && (
+            <div className="rounded-md border bg-muted/30 p-3 text-xs">
+              <div className="font-medium">当前状态</div>
+              <div className="mt-1 text-muted-foreground">
+                启用：{feature.enabled ? "是" : "否"} ·
+                状态：{feature.state}
+                {feature.last_error
+                  ? ` · 最近错误：${feature.last_error}`
+                  : ""}
+              </div>
+            </div>
+          )}
+
+          {/* 使用说明 */}
+          <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
+            <div className="font-medium text-foreground">使用说明</div>
+            <ul className="mt-1.5 list-inside list-disc space-y-0.5">
+              <li>
+                发送 <code>{cmdPrefix}{effectiveCommand} 提示词</code> 纯文本生成图片
+              </li>
+              <li>
+                回复图片后发送{" "}
+                <code>{cmdPrefix}{effectiveCommand} 提示词</code> 进行参考图生成
+              </li>
+              <li>
+                临时指定比例/尺寸/格式：{" "}
+                <code>{cmdPrefix}{effectiveCommand} --比例 4:3 --size 1536x1024 --format jpeg 云海里的城市</code>
+              </li>
+              <li>
+                也可通过命令{" "}
+                <code>
+                  {cmdPrefix}{effectiveCommand} token 你的access_token
+                </code>{" "}
+                直接设置 Token
+              </li>
+              <li>
+                触发指令名支持中文，例如设置为 <code>画图</code> 后发送 <code>{cmdPrefix}画图 云海里的城市</code>
+              </li>
+            </ul>
+          </div>
+
+          {/* 指令名 */}
+          <div className="space-y-1.5">
+            <Label htmlFor="command">触发指令名</Label>
+            <p className="text-xs text-muted-foreground">
+              在系统命令前缀后输入此指令触发图片生成。默认
+              <code className="mx-1">cximg</code>
+              ，支持中文，如 <code>画图</code>。
+            </p>
+            <Input
+              id="command"
+              className="font-mono w-40"
+              value={command}
+              onChange={(e) => {
+                setCommand(e.target.value.trim());
+                setDirty(true);
+              }}
+            />
+          </div>
+
           {/* Access Token */}
           <div className="space-y-1.5">
             <Label htmlFor="access-token">Codex Access Token</Label>
@@ -216,42 +370,189 @@ export function CodexImageConfigPage() {
             />
           </div>
 
-          {/* 状态 */}
-          {feature && (
-            <div className="rounded-md border bg-muted/30 p-3 text-xs">
-              <div className="font-medium">当前状态</div>
-              <div className="mt-1 text-muted-foreground">
-                启用：{feature.enabled ? "是" : "否"} ·
-                状态：{feature.state}
-                {feature.last_error
-                  ? ` · 最近错误：${feature.last_error}`
-                  : ""}
-              </div>
-            </div>
-          )}
+          {/* Status interval */}
+          <div className="space-y-1.5">
+            <Label htmlFor="status-interval">状态刷新间隔（秒）</Label>
+            <p className="text-xs text-muted-foreground">
+              生成耗时较长时编辑状态消息的间隔。默认 20 秒。
+            </p>
+            <Input
+              id="status-interval"
+              inputMode="numeric"
+              className="w-32"
+              value={String(statusInterval)}
+              onChange={(e) => {
+                setStatusInterval(clampInt(e.target.value, 10, 300));
+                setDirty(true);
+              }}
+            />
+          </div>
 
-          {/* 使用说明 */}
-          <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
-            <div className="font-medium text-foreground">使用说明</div>
-            <ul className="mt-1.5 list-inside list-disc space-y-0.5">
-              <li>
-                发送 <code>{cmdPrefix}cximg 提示词</code> 纯文本生成图片
-              </li>
-              <li>
-                回复图片后发送{" "}
-                <code>{cmdPrefix}cximg 提示词</code> 进行参考图生成
-              </li>
-              <li>
-                也可通过命令{" "}
-                <code>
-                  {cmdPrefix}cximg token 你的access_token
-                </code>{" "}
-                直接设置 Token
-              </li>
-              <li>
-                Token 通常在 <code>.codex/auth.json</code> 文件中获取
-              </li>
-            </ul>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="image-size">默认分辨率</Label>
+              <Select
+                id="image-size"
+                value={imageSize}
+                onChange={(e) => {
+                  setImageSize(e.target.value);
+                  setDirty(true);
+                }}
+              >
+                <option value="auto">auto</option>
+                <option value="1024x1024">1024x1024</option>
+                <option value="1536x1024">1536x1024</option>
+                <option value="1024x1536">1024x1536</option>
+              </Select>
+              <p className="text-xs text-muted-foreground">命令可用 --size 覆盖。</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="aspect-ratio">默认画面比例</Label>
+              <Select
+                id="aspect-ratio"
+                value={aspectRatio}
+                onChange={(e) => {
+                  setAspectRatio(e.target.value);
+                  setDirty(true);
+                }}
+              >
+                <option value="auto">auto</option>
+                <option value="1:1">1:1</option>
+                <option value="3:2">3:2</option>
+                <option value="2:3">2:3</option>
+                <option value="4:3">4:3</option>
+                <option value="3:4">3:4</option>
+                <option value="16:9">16:9</option>
+                <option value="9:16">9:16</option>
+              </Select>
+              <p className="text-xs text-muted-foreground">命令可用 --比例 或 --ratio 覆盖。</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="image-format">默认图片格式</Label>
+              <Select
+                id="image-format"
+                value={imageFormat}
+                onChange={(e) => {
+                  setImageFormat(e.target.value);
+                  setDirty(true);
+                }}
+              >
+                <option value="png">png</option>
+                <option value="jpeg">jpeg</option>
+                <option value="webp">webp</option>
+              </Select>
+              <p className="text-xs text-muted-foreground">命令可用 --format 或 --格式 覆盖。</p>
+            </div>
+          </div>
+
+          <div className="space-y-2 rounded-md border bg-muted/30 p-3">
+            <div>
+              <Label htmlFor="message-template">消息模板</Label>
+              <p className="text-xs text-muted-foreground">
+                同一个模板用于生成中的状态编辑和最终图片 caption。状态刷新间隔建议 10 秒以上，减少频繁编辑。
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {TEMPLATE_PLACEHOLDERS.map((p) => (
+                <button
+                  key={p.key}
+                  type="button"
+                  className="rounded border px-1.5 py-0.5 text-[11px] font-mono hover:bg-background"
+                  title={p.key}
+                  onClick={() => {
+                    setMessageTemplate((v) => `${v}${p.key}`);
+                    setDirty(true);
+                  }}
+                >
+                  {p.label}
+                </button>
+              ))}
+              <button
+                type="button"
+                className="rounded border px-1.5 py-0.5 text-[11px] font-mono hover:bg-background"
+                onClick={() => {
+                  setMessageTemplate((v) => `${v}{?revised_prompt}\n{revised_prompt}{/?}`);
+                  setDirty(true);
+                }}
+              >
+                条件:修订提示词
+              </button>
+            </div>
+            <Textarea
+              id="message-template"
+              rows={8}
+              maxLength={1000}
+              className="font-mono text-xs"
+              value={messageTemplate}
+              onChange={(e) => {
+                setMessageTemplate(e.target.value);
+                setDirty(true);
+              }}
+            />
+            <div className="rounded-md border bg-background p-3 text-xs">
+              <div className="mb-1 font-medium">预览</div>
+              <pre className="whitespace-pre-wrap break-words font-sans text-muted-foreground">
+                {renderTemplate(messageTemplate, previewValues)}
+              </pre>
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+              <input
+                type="checkbox"
+                checked={deleteCommandMessage}
+                onChange={(e) => {
+                  setDeleteCommandMessage(e.target.checked);
+                  setDirty(true);
+                }}
+              />
+              完成后删除命令消息
+            </label>
+            <label className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+              <input
+                type="checkbox"
+                checked={showRevisedPrompt}
+                onChange={(e) => {
+                  setShowRevisedPrompt(e.target.checked);
+                  setDirty(true);
+                }}
+              />
+              显示修订提示词
+            </label>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="reasoning-effort">推理强度</Label>
+            <select
+              id="reasoning-effort"
+              className="h-9 w-36 rounded-md border bg-background px-3 text-sm"
+              value={reasoningEffort}
+              onChange={(e) => {
+                setReasoningEffort(e.target.value);
+                setDirty(true);
+              }}
+            >
+              <option value="low">low</option>
+              <option value="medium">medium</option>
+              <option value="high">high</option>
+            </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="custom-instructions">自定义系统指令</Label>
+            <p className="text-xs text-muted-foreground">
+              留空使用默认指令；可指定图片风格、构图偏好或安全边界。
+            </p>
+            <textarea
+              id="custom-instructions"
+              className="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm"
+              value={customInstructions}
+              onChange={(e) => {
+                setCustomInstructions(e.target.value);
+                setDirty(true);
+              }}
+            />
           </div>
 
           <div className="flex items-center gap-3 pt-2">
@@ -266,6 +567,7 @@ export function CodexImageConfigPage() {
                 size="sm"
                 variant="ghost"
                 onClick={() => {
+                  setCommand(currentConfig.command ?? DEFAULT_CONFIG.command);
                   if (currentConfig.access_token !== undefined) {
                     setAccessToken(currentConfig.access_token);
                   }
@@ -275,6 +577,15 @@ export function CodexImageConfigPage() {
                   if (currentConfig.max_wait_seconds !== undefined) {
                     setMaxWait(currentConfig.max_wait_seconds);
                   }
+                  setStatusInterval(currentConfig.status_interval_seconds ?? DEFAULT_CONFIG.status_interval_seconds);
+                  setMessageTemplate(currentConfig.message_template ?? DEFAULT_CONFIG.message_template);
+                  setImageSize(currentConfig.image_size ?? DEFAULT_CONFIG.image_size);
+                  setAspectRatio(currentConfig.aspect_ratio ?? DEFAULT_CONFIG.aspect_ratio);
+                  setImageFormat(currentConfig.image_format ?? DEFAULT_CONFIG.image_format);
+                  setDeleteCommandMessage(currentConfig.delete_command_message ?? DEFAULT_CONFIG.delete_command_message);
+                  setShowRevisedPrompt(currentConfig.show_revised_prompt ?? DEFAULT_CONFIG.show_revised_prompt);
+                  setReasoningEffort(currentConfig.reasoning_effort ?? DEFAULT_CONFIG.reasoning_effort);
+                  setCustomInstructions(currentConfig.custom_instructions ?? DEFAULT_CONFIG.custom_instructions);
                   setDirty(false);
                 }}
               >

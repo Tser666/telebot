@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { ConfigDialog } from "@/components/plugin/ConfigDialog";
 
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -72,6 +73,7 @@ import {
 import { getFeatureMatrix } from "@/api/features";
 import { getErrMsg } from "@/lib/api";
 import { cn, formatDateTime } from "@/lib/utils";
+import { isPlatformFeature, pluginMode, PLUGIN_MODE_META, type PluginMode } from "@/lib/plugin-modes";
 import { Select } from "@/components/ui/select";
 import type { HumanizeConfig, ProxyTestResult } from "@/api/types";
 import { actionHint, actionLabel } from "@/lib/rate-actions";
@@ -394,74 +396,165 @@ export function AccountDetail() {
                   <Spinner className="text-primary" />
                 </div>
               ) : (
-                <ul className="divide-y">
-                  {(featureListQ.data ?? []).map((f) => {
-                    const item = featuresQ.data?.find(
-                      (x) => x.feature_key === f.key,
-                    );
-                    const enabled = !!item?.enabled;
+                <div className="space-y-6">
+                  {(() => {
+                    const platformFeatures = (featureListQ.data ?? []).filter((f) => isPlatformFeature(f));
+                    if (platformFeatures.length === 0) return null;
                     return (
-                      <li
-                        key={f.key}
-                        className="flex items-center justify-between py-3"
-                      >
+                      <section className="space-y-2">
                         <div>
-                          <div className="font-medium">{f.display_name}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {item?.state ? `状态：${item.state}` : "未启用"}
-                            {item?.last_error
-                              ? ` · 最近错误：${item.last_error}`
-                              : ""}
-                          </div>
+                          <div className="text-sm font-medium">基础能力 · 平台内置</div>
+                          <p className="text-xs text-muted-foreground">
+                            不像普通插件那样按开关决定是否运行；它随 worker 初始化，为插件和系统页面提供底层能力。
+                          </p>
                         </div>
-                        <div className="flex items-center gap-3">
-                          <Switch
-                            checked={enabled}
-                            onCheckedChange={(v) =>
-                              featureMut.mutate({ key: f.key, enabled: v })
-                            }
-                          />
-                          {enabled && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                const path = featureConfigPath(aid, f.key);
-                                if (path) {
-                                  nav(path);
-                                  return;
-                                }
-                                // 打开配置弹窗时同时获取 global config
-                                getPluginGlobalConfig(f.key)
-                                  .then((gc) => {
-                                    setConfigDialog({
-                                      key: f.key,
-                                      name: f.display_name,
-                                      schema: (f.config_schema as Record<string, unknown>) ?? null,
-                                      globalConfig: gc,
-                                      accountConfig: item?.config ?? {},
-                                    });
-                                  })
-                                  .catch(() => {
-                                    // 如果获取失败，使用空配置
-                                    setConfigDialog({
-                                      key: f.key,
-                                      name: f.display_name,
-                                      schema: (f.config_schema as Record<string, unknown>) ?? null,
-                                      globalConfig: {},
-                                      accountConfig: item?.config ?? {},
-                                    });
-                                  });
-                              }}
-                            >
-                              配置 →
-                            </Button>
-                          )}
+                        <Table className="table-fixed">
+                          <colgroup>
+                            <col className="w-[46%]" />
+                            <col className="w-[18%]" />
+                            <col className="w-[18%]" />
+                            <col className="w-[18%]" />
+                          </colgroup>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>功能</TableHead>
+                              <TableHead>来源</TableHead>
+                              <TableHead className="text-center">运行方式</TableHead>
+                              <TableHead className="text-right">操作</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {platformFeatures.map((f) => (
+                              <TableRow key={f.key}>
+                                <TableCell>
+                                  <div className="font-medium">{f.display_name}</div>
+                                  <div className="font-mono text-xs text-muted-foreground">{f.key}</div>
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant="secondary">基础</Badge>
+                                </TableCell>
+                                <TableCell className="text-center text-xs text-muted-foreground">
+                                  随 worker 启动
+                                </TableCell>
+                                <TableCell className="text-right">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-9 px-3"
+                                    onClick={() => nav(`/accounts/${aid}/features/${f.key}`)}
+                                  >
+                                    配置 →
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </section>
+                    );
+                  })()}
+                  {(["rules", "single", "schema"] as PluginMode[]).map((mode) => {
+                    const grouped = (featureListQ.data ?? []).filter((f) => !isPlatformFeature(f) && pluginMode(f) === mode);
+                    if (grouped.length === 0) return null;
+                    return (
+                      <section key={mode} className="space-y-2">
+                        <div>
+                          <div className="text-sm font-medium">{PLUGIN_MODE_META[mode].label}</div>
+                          <p className="text-xs text-muted-foreground">{PLUGIN_MODE_META[mode].plain}</p>
                         </div>
-                      </li>
+                        <Table className="table-fixed">
+                          <colgroup>
+                            <col className="w-[46%]" />
+                            <col className="w-[18%]" />
+                            <col className="w-[18%]" />
+                            <col className="w-[18%]" />
+                          </colgroup>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>功能</TableHead>
+                              <TableHead>来源</TableHead>
+                              <TableHead className="text-center">启用</TableHead>
+                              <TableHead className="text-right">操作</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {grouped.map((f) => {
+                              const item = featuresQ.data?.find(
+                                (x) => x.feature_key === f.key,
+                              );
+                              const enabled = !!item?.enabled;
+                              return (
+                                <TableRow key={f.key}>
+                                  <TableCell>
+                                    <div className="font-medium">{f.display_name}</div>
+                                    <div className="font-mono text-xs text-muted-foreground">
+                                      {f.key}
+                                      {" · "}
+                                      {item?.state ? `状态：${item.state}` : "未启用"}
+                                      {item?.last_error
+                                        ? ` · 最近错误：${item.last_error}`
+                                        : ""}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell>
+                                    <Badge variant={f.is_builtin ? "secondary" : "outline"}>
+                                      {f.is_builtin ? "内置" : "第三方"}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell className="text-center">
+                                    <Switch
+                                      checked={enabled}
+                                      onCheckedChange={(v) =>
+                                        featureMut.mutate({ key: f.key, enabled: v })
+                                      }
+                                    />
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-9 px-3"
+                                      onClick={() => {
+                                        const path = featureConfigPath(aid, f.key);
+                                        if (path) {
+                                          nav(path);
+                                          return;
+                                        }
+                                        // 打开配置弹窗时同时获取 global config
+                                        getPluginGlobalConfig(f.key)
+                                          .then((gc) => {
+                                            setConfigDialog({
+                                              key: f.key,
+                                              name: f.display_name,
+                                              schema: (f.config_schema as Record<string, unknown>) ?? null,
+                                              globalConfig: gc,
+                                              accountConfig: item?.config ?? {},
+                                            });
+                                          })
+                                          .catch(() => {
+                                            // 如果获取失败，使用空配置
+                                            setConfigDialog({
+                                              key: f.key,
+                                              name: f.display_name,
+                                              schema: (f.config_schema as Record<string, unknown>) ?? null,
+                                              globalConfig: {},
+                                              accountConfig: item?.config ?? {},
+                                            });
+                                          });
+                                      }}
+                                    >
+                                      配置 →
+                                    </Button>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </section>
                     );
                   })}
-                </ul>
+                </div>
               )}
             </CardContent>
           </Card>
