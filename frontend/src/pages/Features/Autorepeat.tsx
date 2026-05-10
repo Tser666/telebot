@@ -200,7 +200,7 @@ export function AutorepeatConfig() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Button variant="ghost" size="sm" onClick={() => nav(`/accounts/${aid}?tab=features`)}>
           <ArrowLeft className="mr-1 h-4 w-4" /> 返回账号
         </Button>
@@ -210,7 +210,7 @@ export function AutorepeatConfig() {
       </div>
 
       {/* 提示条 */}
-      <div className="rounded-md border border-blue-200 bg-blue-50/60 px-3 py-2 text-xs text-blue-800 space-y-1">
+      <div className="rounded-md border px-3 py-2 text-xs alert-info space-y-1">
         <div>✅ 保存后立即生效，无需重启 worker。</div>
         <div>
           📋 每条规则对应一个群组的复读配置。当 <b>指定时间内</b> 有 <b>指定人数</b> 的不同用户发送

@@ -161,7 +161,7 @@ export function Login() {
                 </button>
               </div>
               {showPassword && (
-                <p className="text-[11px] text-amber-600">
+                <p className="text-[11px] text-amber-600 dark:text-amber-300">
                   ⚠ 密码已显示；输完后建议点击眼睛图标隐藏
                 </p>
               )}

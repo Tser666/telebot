@@ -225,7 +225,7 @@ export function SchedulerConfig() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Button variant="ghost" size="sm" onClick={() => nav(`/accounts/${aid}?tab=features`)}>
           <ArrowLeft className="mr-1 h-4 w-4" /> 返回账号
         </Button>
@@ -241,7 +241,7 @@ export function SchedulerConfig() {
                 定时任务调度器随 worker 初始化运行；是否执行由每条规则自己的启用状态控制。
               </CardDescription>
             </div>
-            <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
+            <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
               随 worker 启动
             </span>
           </div>
@@ -521,7 +521,7 @@ export function SchedulerConfig() {
             <Button onClick={() => execMut.mutate()} disabled={!execRule || execMut.isPending}>{execMut.isPending ? "执行中..." : "立即执行"}</Button>
             {execResult ? (
               <div className="rounded-md border p-3 space-y-1">
-                <div>结果：<b className={execResult.ok ? "text-green-600" : "text-destructive"}>{execResult.ok ? "成功" : "失败"}</b></div>
+                <div>结果：<b className={execResult.ok ? "text-emerald-600 dark:text-emerald-300" : "text-destructive"}>{execResult.ok ? "成功" : "失败"}</b></div>
                 {execResult.error && (
                   <div className="text-xs text-destructive">错误：{execResult.error}</div>
                 )}

@@ -20,14 +20,14 @@ interface AccountAvatarProps {
 
 // 8 个柔和背景色，按 id 取模分配；保证同一账号始终拿到同一颜色
 const PALETTE = [
-  "bg-rose-200 text-rose-800",
-  "bg-orange-200 text-orange-800",
-  "bg-amber-200 text-amber-800",
-  "bg-emerald-200 text-emerald-800",
-  "bg-sky-200 text-sky-800",
-  "bg-indigo-200 text-indigo-800",
-  "bg-fuchsia-200 text-fuchsia-800",
-  "bg-slate-200 text-slate-800",
+  "bg-rose-200 text-rose-800 dark:bg-rose-950/60 dark:text-rose-200",
+  "bg-orange-200 text-orange-800 dark:bg-orange-950/60 dark:text-orange-200",
+  "bg-amber-200 text-amber-800 dark:bg-amber-950/60 dark:text-amber-200",
+  "bg-emerald-200 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200",
+  "bg-sky-200 text-sky-800 dark:bg-sky-950/60 dark:text-sky-200",
+  "bg-indigo-200 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-200",
+  "bg-fuchsia-200 text-fuchsia-800 dark:bg-fuchsia-950/60 dark:text-fuchsia-200",
+  "bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-200",
 ];
 
 export function AccountAvatar({

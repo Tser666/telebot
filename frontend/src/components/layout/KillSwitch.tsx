@@ -41,6 +41,7 @@ export function KillSwitch() {
     <Button
       variant={enabled ? "outline" : "destructive"}
       size="sm"
+      className="h-10 w-10 px-0 sm:h-9 sm:w-auto sm:px-3"
       onClick={() => {
         if (mut.isPending) return;
         const next = !enabled;
@@ -50,11 +51,13 @@ export function KillSwitch() {
     >
       {enabled ? (
         <>
-          <ShieldCheck className="mr-1 h-4 w-4" /> 恢复运行
+          <ShieldCheck className="h-4 w-4 sm:mr-1" />
+          <span className="hidden sm:inline">恢复运行</span>
         </>
       ) : (
         <>
-          <ShieldAlert className="mr-1 h-4 w-4" /> 紧急停用
+          <ShieldAlert className="h-4 w-4 sm:mr-1" />
+          <span className="hidden sm:inline">紧急停用</span>
         </>
       )}
     </Button>

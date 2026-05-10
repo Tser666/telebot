@@ -9,6 +9,7 @@ import type {
   HumanizeConfig,
   HumanizeUpdate,
   PullUpdateResult,
+  ResourceDashboard,
   RateLimitRuleConfig,
   RestartResult,
   StrictRequest,
@@ -150,6 +151,11 @@ export async function patchHumanize(
 // ===================== 系统健康概览（Dashboard 用）=====================
 export async function getHealthOverview(): Promise<HealthOverview> {
   const { data } = await api.get<HealthOverview>("/api/system/health-overview");
+  return data;
+}
+
+export async function getResourceDashboard(): Promise<ResourceDashboard> {
+  const { data } = await api.get<ResourceDashboard>("/api/system/resource-dashboard");
   return data;
 }
 

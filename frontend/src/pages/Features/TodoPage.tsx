@@ -21,7 +21,7 @@ export function FeatureTodoPage({ title, description }: TodoPageProps) {
   const { aid } = useParams();
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Button variant="ghost" size="sm" onClick={() => nav(`/accounts/${aid}?tab=features`)}>
           <ArrowLeft className="mr-1 h-4 w-4" /> 返回账号
         </Button>

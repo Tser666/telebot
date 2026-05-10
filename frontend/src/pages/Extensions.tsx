@@ -100,7 +100,7 @@ export function Extensions() {
   const [tab, setTab] = useState<TabValue>("accounts");
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">插件中心</h1>
         <p className="text-sm text-muted-foreground">
@@ -220,12 +220,12 @@ function AccountPluginsTab() {
         ) : (
           <>
             {/* 账号选择 */}
-            <div className="mb-4 flex items-center gap-3">
-              <label className="text-sm text-muted-foreground">选择账号：</label>
+            <div className="mb-4 flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:gap-3">
+              <label className="keep-words shrink-0 text-sm text-muted-foreground">选择账号：</label>
               <Select
                 value={selectedAid?.toString() ?? ""}
                 onChange={(e) => setSelectedAid(Number(e.target.value))}
-                className="w-48"
+                className="w-full sm:w-56"
               >
                 {data.accounts.map((a) => (
                   <option key={a.id} value={a.id}>
@@ -234,7 +234,7 @@ function AccountPluginsTab() {
                 ))}
               </Select>
               {selectedAccount && (
-                <span className="text-xs text-muted-foreground">
+                <span className="keep-words shrink-0 text-xs text-muted-foreground">
                   {pluginFeatures.filter((f) => selectedAccount.features[f.key] === "active").length} / {pluginFeatures.length} 插件已启用
                 </span>
               )}
@@ -248,7 +248,7 @@ function AccountPluginsTab() {
                     不像普通插件那样按开关决定是否运行；它随 worker 初始化，为插件和系统页面提供底层能力。
                   </p>
                 </div>
-                <Table className="table-fixed">
+                <Table className="min-w-[42rem] table-fixed">
                   <colgroup>
                     <col className="w-[46%]" />
                     <col className="w-[18%]" />
@@ -305,7 +305,7 @@ function AccountPluginsTab() {
                         <div className="text-sm font-medium">{PLUGIN_MODE_META[mode].label}</div>
                         <p className="text-xs text-muted-foreground">{PLUGIN_MODE_META[mode].plain}</p>
                       </div>
-                      <Table className="table-fixed">
+                      <Table className="min-w-[42rem] table-fixed">
                         <colgroup>
                           <col className="w-[46%]" />
                           <col className="w-[18%]" />
@@ -339,7 +339,7 @@ function AccountPluginsTab() {
                                   <button
                                     className={cn(
                                       "relative inline-flex h-6 w-11 items-center rounded-full transition-colors",
-                                      isActive ? "bg-primary" : "bg-gray-600"
+                                      isActive ? "bg-primary" : "bg-muted-foreground/55 dark:bg-muted"
                                     )}
                                     onClick={() =>
                                       toggleMut.mutate({
@@ -460,7 +460,7 @@ function AccountPluginsTab() {
 // ═══════════════════════════════════════════════════════════════════
 function PluginsManagementTab({ onManageAccounts }: { onManageAccounts: () => void }) {
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <RemoteInstallCard />
       <InstalledPluginsSection onManageAccounts={onManageAccounts} />
     </div>

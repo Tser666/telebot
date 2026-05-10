@@ -2,7 +2,7 @@
 // 高度用 100dvh：iOS Safari 浏览器模式下避免 100vh 把内容塞到地址栏后面；
 //                PWA 全屏模式下行为与 100vh 一致。
 import { useState } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
 import { MobileSidebar, Sidebar } from "./Sidebar";
@@ -13,6 +13,7 @@ import { Spinner } from "@/components/ui/misc";
 
 export function AppShell() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const location = useLocation();
 
   // 主体框架内顺手取一次当前用户用于顶栏展示
   const { data, isLoading } = useQuery({
@@ -49,7 +50,9 @@ export function AppShell() {
             md:pl-6 md:pr-6
           "
         >
-          <Outlet />
+          <div key={location.pathname} className="min-h-full animate-page-enter">
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>

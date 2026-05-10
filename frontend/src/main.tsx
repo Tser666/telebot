@@ -8,6 +8,7 @@ import { Toaster } from "sonner";
 import App, { AppErrorBoundary } from "./App";
 import "./index.css";
 import { registerPWA } from "./pwa";
+import { ThemeProvider, useTheme } from "@/lib/theme";
 
 // 全局 query client：默认 30s 缓存、失焦不刷新（避免与 401 跳转冲突）
 const qc = new QueryClient({
@@ -20,16 +21,23 @@ const qc = new QueryClient({
   },
 });
 
+function ThemedToaster() {
+  const { resolvedTheme } = useTheme();
+  return <Toaster richColors closeButton position="top-right" theme={resolvedTheme} />;
+}
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <QueryClientProvider client={qc}>
-      <BrowserRouter>
-        <AppErrorBoundary>
-          <App />
-        </AppErrorBoundary>
-      </BrowserRouter>
-      <Toaster richColors closeButton position="top-right" />
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={qc}>
+        <BrowserRouter>
+          <AppErrorBoundary>
+            <App />
+          </AppErrorBoundary>
+        </BrowserRouter>
+        <ThemedToaster />
+      </QueryClientProvider>
+    </ThemeProvider>
   </React.StrictMode>,
 );
 

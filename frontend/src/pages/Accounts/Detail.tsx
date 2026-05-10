@@ -292,7 +292,7 @@ export function AccountDetail() {
             </CardHeader>
             <CardContent className="space-y-4">
               {idMissing ? (
-                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <div className="rounded-md border px-3 py-2 text-xs alert-warning">
                   <div className="mb-1.5">
                     ⚠ 该账号尚未同步 Telegram 用户 ID 与用户名。worker 启动时会
                     自动通过 <code>client.get_me()</code> 回填——但只在那一刻执行一次。
@@ -304,7 +304,7 @@ export function AccountDetail() {
                   <Button
                     size="sm"
                     variant="outline"
-                    className="bg-amber-100 hover:bg-amber-200 border-amber-300"
+                    className="border-amber-300 bg-amber-100 hover:bg-amber-200 dark:border-amber-800 dark:bg-amber-950/50 dark:hover:bg-amber-900/50"
                     disabled={restartWorkerMut.isPending}
                     onClick={() => restartWorkerMut.mutate()}
                   >
@@ -413,7 +413,7 @@ export function AccountDetail() {
                             不像普通插件那样按开关决定是否运行；它随 worker 初始化，为插件和系统页面提供底层能力。
                           </p>
                         </div>
-                        <Table className="table-fixed">
+                        <Table className="min-w-[42rem] table-fixed">
                           <colgroup>
                             <col className="w-[46%]" />
                             <col className="w-[18%]" />
@@ -467,7 +467,7 @@ export function AccountDetail() {
                           <div className="text-sm font-medium">{PLUGIN_MODE_META[mode].label}</div>
                           <p className="text-xs text-muted-foreground">{PLUGIN_MODE_META[mode].plain}</p>
                         </div>
-                        <Table className="table-fixed">
+                        <Table className="min-w-[42rem] table-fixed">
                           <colgroup>
                             <col className="w-[46%]" />
                             <col className="w-[18%]" />
@@ -806,7 +806,7 @@ function ProxyTab({
         {/* 测试结果 */}
         {result ? (
           result.ok ? (
-            <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+            <div className="rounded-md border px-3 py-2 text-xs alert-success">
               ✓ 通过 · {result.latency_ms}ms · {result.country || "?"}
               {result.city ? ` · ${result.city}` : ""}
               {result.exit_ip ? ` · 出口 IP ${result.exit_ip}` : ""}

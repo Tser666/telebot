@@ -109,22 +109,22 @@ export function HealthDot() {
           <span className="hidden text-xs sm:inline">{label}</span>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-[280px] p-3">
+      <DropdownMenuContent align="end" className="w-[min(280px,calc(100vw-2rem))] p-3">
         <div className="space-y-2 text-xs">
           <div className="flex items-center gap-2 border-b pb-2">
             {tone === "ok" ? (
-              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+              <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
             ) : tone === "err" ? (
-              <AlertTriangle className="h-4 w-4 text-rose-600" />
+              <AlertTriangle className="h-4 w-4 text-rose-600 dark:text-rose-300" />
             ) : (
-              <AlertTriangle className="h-4 w-4 text-amber-600" />
+              <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-300" />
             )}
             <span className="text-sm font-medium">系统状态：{label}</span>
           </div>
           {q.isLoading ? (
             <div className="text-muted-foreground">读取中…</div>
           ) : q.error ? (
-            <div className="text-rose-700">
+            <div className="text-rose-700 dark:text-rose-300">
               ⚠ 读取失败：{(q.error as Error).message}
             </div>
           ) : issues.length === 0 ? (

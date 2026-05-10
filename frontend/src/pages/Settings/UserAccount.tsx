@@ -96,11 +96,11 @@ export function UserAccount() {
             <>
               当前已登录：<span className="font-mono">{meQ.data.username}</span>
               {meQ.data.has_totp ? (
-                <span className="ml-2 inline-flex items-center gap-1 text-emerald-700">
+                <span className="ml-2 inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-300">
                   <ShieldCheck className="h-3.5 w-3.5" /> 动态验证码（TOTP）已启用
                 </span>
               ) : (
-                <span className="ml-2 text-amber-700">动态验证码（TOTP）未启用</span>
+                <span className="ml-2 text-amber-700 dark:text-amber-300">动态验证码（TOTP）未启用</span>
               )}
             </>
           ) : (

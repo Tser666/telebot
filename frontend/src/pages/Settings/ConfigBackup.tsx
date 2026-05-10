@@ -155,7 +155,7 @@ export function ConfigBackup() {
                   <div className="flex items-center gap-1.5">
                     <span className="text-sm font-medium">{cat.label}</span>
                     {cat.sensitive && (
-                      <span className="text-[10px] text-amber-600 bg-amber-50 px-1 rounded">
+                      <span className="rounded bg-amber-50 px-1 text-[10px] text-amber-600 dark:bg-amber-950/40 dark:text-amber-300">
                         含敏感数据
                       </span>
                     )}
@@ -181,7 +181,7 @@ export function ConfigBackup() {
           </div>
 
           {includeSensitive && (
-            <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+            <div className="flex items-start gap-2 rounded-md border px-3 py-2 text-xs alert-warning">
               <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
               <span>导出后请妥善保管文件。导入端需使用相同的 MASTER_KEY 才能解密敏感数据。</span>
             </div>
@@ -229,7 +229,7 @@ export function ConfigBackup() {
           {importResult && (
             <div className="rounded-md border px-3 py-2 space-y-2">
               <div className="flex items-center gap-4 text-sm">
-                <span className="flex items-center gap-1 text-green-600">
+                <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-300">
                   <CheckCircle2 className="h-4 w-4" />
                   成功 {importResult.imported}
                 </span>
@@ -239,7 +239,7 @@ export function ConfigBackup() {
                 </span>
               </div>
               {importResult.warnings.length > 0 && (
-                <div className="text-xs text-amber-600 space-y-1">
+                <div className="space-y-1 text-xs text-amber-600 dark:text-amber-300">
                   {importResult.warnings.slice(0, 5).map((w, i) => (
                     <p key={i}>{w}</p>
                   ))}

@@ -152,7 +152,7 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
           )}
 
           {step?.kind === "up_to_date" && (
-            <div className="flex items-center gap-3 text-green-600">
+            <div className="flex items-center gap-3 text-emerald-600 dark:text-emerald-300">
               <CheckCircle2 className="h-5 w-5" />
               <div className="text-sm space-y-1">
                 <p>当前版本 <code className="bg-muted px-1 rounded">{step.commit}</code></p>
@@ -163,7 +163,7 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
 
           {step?.kind === "has_update" && (
             <div className="space-y-2 text-sm">
-              <div className="flex items-center gap-2 text-amber-600">
+              <div className="flex items-center gap-2 text-amber-600 dark:text-amber-300">
                 <AlertCircle className="h-5 w-5" />
                 <span>远程有 {step.ahead} 个新 commit</span>
               </div>
@@ -182,14 +182,14 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
           )}
 
           {step?.kind === "pulled" && (
-            <div className="flex items-center gap-3 text-green-600">
+            <div className="flex items-center gap-3 text-emerald-600 dark:text-emerald-300">
               <CheckCircle2 className="h-5 w-5" />
               <div className="text-sm space-y-1">
                 <p>已拉取到 <code className="bg-muted px-1 rounded">{step.newCommit}</code></p>
                 {step.summary && (
                   <p className="text-muted-foreground">{step.summary}</p>
                 )}
-                <p className="text-amber-600">需要重启应用才能生效</p>
+                <p className="text-amber-600 dark:text-amber-300">需要重启应用才能生效</p>
               </div>
             </div>
           )}

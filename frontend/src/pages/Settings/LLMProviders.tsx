@@ -278,7 +278,7 @@ export function LLMProviders() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <Card>
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
@@ -735,7 +735,7 @@ function ProviderEditDialog({
             {!proxiesQ.isLoading &&
               llmUsableProxies.length === 0 &&
               form.proxy_id === "" && (
-                <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                <p className="rounded-md border px-3 py-2 text-xs alert-warning">
                   代理库为空。如果你在中国大陆访问 OpenAI / Anthropic，记得先到
                   「系统设置 → 代理」添加一条 socks5 / http 代理，再回来选上。
                 </p>
@@ -1040,7 +1040,7 @@ function ProviderModelsSection({
       </div>
 
       {fetchDisabledHint && !fetchMut.isPending ? (
-        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-700">
+        <p className="rounded-md border px-3 py-1.5 text-xs alert-warning">
           {fetchDisabledHint}
         </p>
       ) : null}

@@ -4,7 +4,16 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { LogOut, Menu, RefreshCw, UserCircle } from "lucide-react";
+import {
+  Check,
+  LogOut,
+  Menu,
+  Monitor,
+  Moon,
+  RefreshCw,
+  Sun,
+  UserCircle,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +24,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { logout } from "@/lib/auth";
+import { useTheme, type Theme } from "@/lib/theme";
 import { HealthDot } from "@/components/HealthDot";
 import { KillSwitch } from "./KillSwitch";
 import { UpdateDialog } from "./UpdateDialog";
@@ -73,10 +83,11 @@ export function TopBar({ username, onMenuClick }: TopBarProps) {
           <RefreshCw className="h-4 w-4" />
         </Button>
         <UpdateDialog open={updateOpen} onOpenChange={setUpdateOpen} />
+        <ThemeSwitcher />
         <KillSwitch />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="max-w-[8rem]">
+            <Button variant="ghost" size="sm" className="max-w-[6.75rem] sm:max-w-[8rem]">
               <UserCircle className="mr-1 h-4 w-4 shrink-0" />
               <span className="truncate">{username}</span>
             </Button>
@@ -91,5 +102,46 @@ export function TopBar({ username, onMenuClick }: TopBarProps) {
         </DropdownMenu>
       </div>
     </header>
+  );
+}
+
+function ThemeSwitcher() {
+  const { theme, resolvedTheme, setTheme } = useTheme();
+  const Icon = theme === "system" ? Monitor : resolvedTheme === "dark" ? Moon : Sun;
+
+  const options: Array<{ value: Theme; label: string; icon: typeof Sun }> = [
+    { value: "light", label: "浅色", icon: Sun },
+    { value: "dark", label: "深色", icon: Moon },
+    { value: "system", label: "跟随系统", icon: Monitor },
+  ];
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="切换主题"
+          title="切换主题"
+        >
+          <Icon className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-36">
+        {options.map((item) => (
+          <DropdownMenuItem
+            key={item.value}
+            onSelect={() => setTheme(item.value)}
+            className="gap-2"
+          >
+            <item.icon className="h-4 w-4" />
+            <span className="flex-1">{item.label}</span>
+            <Check
+              className={theme === item.value ? "h-4 w-4" : "h-4 w-4 opacity-0"}
+            />
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

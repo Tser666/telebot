@@ -32,9 +32,9 @@ export function DryRunDetail({ detail }: DryRunDetailProps) {
   if (!logs || logs.length === 0) {
     // 无 logs 时 fallback 到展示 detail 的 JSON
     return (
-      <div className="rounded-md border border-amber-200 bg-amber-50/60 p-3 text-xs space-y-1">
-        <div className="font-medium text-amber-800">详细信息</div>
-        <pre className="whitespace-pre-wrap text-amber-700">
+      <div className="rounded-md border p-3 text-xs alert-warning space-y-1">
+        <div className="font-medium">详细信息</div>
+        <pre className="whitespace-pre-wrap">
           {JSON.stringify(detail, null, 2)}
         </pre>
       </div>

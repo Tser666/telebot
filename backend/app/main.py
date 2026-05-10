@@ -124,13 +124,13 @@ async def lifespan(app: FastAPI):
     # 1) 启动登录会话清理后台任务（每 60s 扫一次）
     cleanup_task = asyncio.create_task(cleanup_expired_loop())
 
-    # 2) 拉起 worker supervisor（B Agent 提供）；若尚未实现则跳过
+    # 2) 拉起 worker supervisor；导入失败时跳过，服务仍启动以便排查。
     stop_all_workers = None
     try:
         from .worker.supervisor import start_supervisor
         from .worker.supervisor import stop_all_workers as _stop_all
     except ImportError:
-        logging.warning("worker.supervisor 尚未实现，本进程不会拉起 worker 子进程")
+        logging.warning("worker.supervisor 导入失败，本进程不会拉起 worker 子进程")
     else:
         try:
             await start_supervisor()

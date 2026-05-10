@@ -227,7 +227,7 @@ function RecentCard({
             workerAlive ? (
               <Badge
                 variant="outline"
-                className="border-emerald-300 text-emerald-700"
+                className="border-emerald-300 text-emerald-700 dark:border-emerald-800 dark:text-emerald-300"
               >
                 worker 在线
               </Badge>

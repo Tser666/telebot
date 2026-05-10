@@ -237,7 +237,7 @@ export function CodexImageConfigPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Button
           variant="ghost"
           size="sm"
@@ -368,7 +368,7 @@ export function CodexImageConfigPage() {
             </p>
             <Input
               id="model"
-              className="font-mono w-48"
+              className="w-full font-mono sm:w-48"
               value={model}
               onChange={(e) => {
                 setModel(e.target.value.trim());
@@ -578,7 +578,7 @@ export function CodexImageConfigPage() {
             />
           </div>
 
-          <div className="flex items-center gap-3 pt-2">
+          <div className="flex flex-wrap items-center gap-3 pt-2">
             <Button disabled={!dirty || saveMut.isPending} onClick={handleSave}>
               {saveMut.isPending && (
                 <Loader2 className="mr-1 h-3 w-3 animate-spin" />

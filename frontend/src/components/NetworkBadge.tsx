@@ -51,14 +51,14 @@ export function NetworkBadge() {
           {q.isLoading ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
           ) : hasError ? (
-            <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
+            <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-300" />
           ) : (
             <span className="text-base leading-none">{flag}</span>
           )}
           <span
             className={cn(
               "font-mono",
-              hasError && "text-amber-700",
+              hasError && "text-amber-700 dark:text-amber-300",
             )}
           >
             {q.isLoading
@@ -74,19 +74,19 @@ export function NetworkBadge() {
           ) : null}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-[280px] p-3">
+      <DropdownMenuContent align="end" className="w-[min(280px,calc(100vw-2rem))] p-3">
         <div className="space-y-2 text-xs">
           <div className="flex items-center gap-2 border-b pb-2">
             <Globe2 className="h-4 w-4 text-muted-foreground" />
             <span className="text-sm font-medium">主进程出网环境</span>
           </div>
-          <div className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-800">
+          <div className="rounded-md border px-2 py-1.5 text-[11px] alert-warning">
             ⚠ 这里只代表 web 后端进程的直连出口；每个 TG 账号若绑定了代理，
             出口走的是该代理（详见每张账号卡上的"代理"行）。
           </div>
           {hasError ? (
             <div className="space-y-1">
-              <div className="text-amber-700">⚠ 探测失败</div>
+              <div className="font-medium">⚠ 探测失败</div>
               <div className="text-muted-foreground break-all">
                 {data?.error || "未拿到出口 IP（可能后端无外网）"}
               </div>

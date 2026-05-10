@@ -110,7 +110,7 @@ function HowItWorksCard({ cmdPrefix }: { cmdPrefix: string }) {
             的模板（命名为 <code>ai</code>），最后在账号详情勾选启用
           </li>
         </ol>
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <div className="rounded-md border px-3 py-2 text-xs alert-warning">
           安全说明：所有 API Key 经主密钥 Fernet 加密落库；GET 接口永远不返明文，
           调用错误的异常消息也会自动剥离 sk- / Bearer 等敏感串。
         </div>
@@ -323,7 +323,7 @@ function RecommendedSetupCard({ cmdPrefix }: { cmdPrefix: string }) {
           </TableBody>
         </Table>
 
-        <div className="mt-4 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+        <div className="mt-4 rounded-md border px-3 py-2 text-xs alert-info">
           <p className="font-semibold">推荐落地组合（最省 token + 答主力都顾上）：</p>
           <ul className="mt-1 list-disc space-y-0.5 pl-5">
             <li>

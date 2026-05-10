@@ -456,7 +456,7 @@ export function CommandTemplates() {
   });
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <BuiltinCommandsPanel cmdPrefix={cmdPrefix} />
       <Card>
         <CardHeader>
@@ -1089,7 +1089,7 @@ function ProviderSelect({
   }
   if (!providers || providers.length === 0) {
     return (
-      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+      <div className="rounded-md border px-3 py-2 text-xs alert-warning">
         尚未配置 Provider。先到「AI 设置 → 模型提供商」新建一个
       </div>
     );
@@ -1140,7 +1140,7 @@ function ProviderModelSelect({
   }
   if (!providers || providers.length === 0) {
     return (
-      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+      <div className="rounded-md border px-3 py-2 text-xs alert-warning">
         尚未配置模型提供商。先到「AI 设置」新建一个，并在编辑里 Fetch + 启用至少一个模型
       </div>
     );
@@ -1195,7 +1195,7 @@ function ProviderModelSelect({
 
   if (rows.length === 0) {
     return (
-      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+      <div className="rounded-md border px-3 py-2 text-xs alert-warning">
         所有提供商都没启用任何模型。在「AI 设置」编辑某个提供商，启用至少一条模型再来
       </div>
     );
@@ -1327,7 +1327,7 @@ function MessageFormatSection({
         </div>
       </div>
       {!escapeValues && (
-        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-700">
+        <p className="rounded-md border px-3 py-1.5 text-xs alert-warning">
           ⚠ 关闭自动转义后，{"{answer}"} 里的 markdown 字符会被 TG 解析为格式（高级用法）；
           解析失败时本条命令会回落为纯文本展示
         </p>

@@ -51,6 +51,41 @@ export default {
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
       },
+      keyframes: {
+        "page-enter": {
+          "0%": { opacity: "0", transform: "translateY(6px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
+        "fade-in": {
+          "0%": { opacity: "0" },
+          "100%": { opacity: "1" },
+        },
+        "fade-out": {
+          "0%": { opacity: "1" },
+          "100%": { opacity: "0" },
+        },
+        "scale-in": {
+          "0%": { opacity: "0", transform: "scale(0.98)" },
+          "100%": { opacity: "1", transform: "scale(1)" },
+        },
+        "dialog-in": {
+          "0%": {
+            opacity: "0",
+            transform: "translate(-50%, -48%) scale(0.98)",
+          },
+          "100%": {
+            opacity: "1",
+            transform: "translate(-50%, -50%) scale(1)",
+          },
+        },
+      },
+      animation: {
+        "page-enter": "page-enter 180ms ease-out both",
+        "fade-in": "fade-in 160ms ease-out both",
+        "fade-out": "fade-out 120ms ease-in both",
+        "scale-in": "scale-in 160ms ease-out both",
+        "dialog-in": "dialog-in 180ms ease-out both",
+      },
     },
   },
   plugins: [typography],

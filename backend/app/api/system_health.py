@@ -13,7 +13,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import shutil
 import subprocess
+import time
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -126,6 +129,46 @@ class HealthOverview(BaseModel):
     providers: ProvidersStatus
     proxies: ProxiesStatus
     workers: WorkersStatus
+
+
+class HostResource(BaseModel):
+    cpu_percent: float | None = None
+    memory_used_percent: float | None = None
+    memory_total_mb: int | None = None
+    disk_used_percent: float | None = None
+    disk_free_gb: float | None = None
+    sampled_at: int
+
+
+class ProcessResource(BaseModel):
+    pid: int | None = None
+    cpu_percent: float | None = None
+    rss_mb: float | None = None
+
+
+class WorkerRuntimeResource(BaseModel):
+    account_id: int
+    pid: int | None = None
+    alive: bool
+    desired: str
+    fail_count: int
+    cpu_percent: float | None = None
+    rss_mb: float | None = None
+
+
+class RuntimeLogStats(BaseModel):
+    last_5m_total: int = 0
+    last_5m_warn: int = 0
+    last_5m_error: int = 0
+
+
+class ResourceDashboard(BaseModel):
+    host: HostResource
+    main_process: ProcessResource
+    workers: list[WorkerRuntimeResource] = Field(default_factory=list)
+    worker_alive: int = 0
+    worker_desired_running: int = 0
+    logs: RuntimeLogStats
 
 
 # ════════════════════════════════════════════════════════════
@@ -274,6 +317,171 @@ async def _probe_workers() -> WorkersStatus:
         return WorkersStatus()
 
 
+def _read_memory_percent() -> tuple[float | None, int | None]:
+    """读取系统内存占用百分比与总内存（MB），优先 Linux /proc，macOS 回退 vm_stat。"""
+
+    meminfo = Path("/proc/meminfo")
+    if meminfo.exists():
+        try:
+            rows: dict[str, int] = {}
+            for line in meminfo.read_text(encoding="utf-8").splitlines():
+                if ":" not in line:
+                    continue
+                key, value = line.split(":", 1)
+                raw = value.strip().split()[0]
+                rows[key] = int(raw)  # kB
+            total_kb = rows.get("MemTotal")
+            avail_kb = rows.get("MemAvailable")
+            if total_kb and avail_kb is not None and total_kb > 0:
+                used_percent = (1.0 - (avail_kb / total_kb)) * 100.0
+                return round(max(0.0, min(100.0, used_percent)), 2), int(total_kb // 1024)
+        except Exception:
+            pass
+
+    try:
+        out = subprocess.check_output(
+            ["vm_stat"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=1.5,
+        )
+        page_size = 4096
+        total_pages = 0
+        free_pages = 0
+        for line in out.splitlines():
+            if "page size of" in line:
+                parts = line.split("page size of", 1)[1].strip().split()
+                page_size = int(parts[0])
+            elif ":" in line:
+                k, v = line.split(":", 1)
+                num = int(v.strip().rstrip(".").replace(".", ""))
+                if k.startswith("Pages free") or k.startswith("Pages inactive"):
+                    free_pages += num
+                total_pages += num
+        if total_pages > 0:
+            total_bytes = total_pages * page_size
+            free_bytes = free_pages * page_size
+            used_percent = (1.0 - (free_bytes / total_bytes)) * 100.0
+            return round(max(0.0, min(100.0, used_percent)), 2), int(total_bytes // (1024 * 1024))
+    except Exception:
+        pass
+
+    return None, None
+
+
+def _read_process_stats(pids: list[int]) -> dict[int, tuple[float | None, float | None]]:
+    """读取 PID -> (cpu%, rssMB)。"""
+
+    if not pids:
+        return {}
+    try:
+        args = ["ps", "-o", "pid=,pcpu=,rss=", "-p", ",".join(str(p) for p in pids)]
+        out = subprocess.check_output(args, stderr=subprocess.DEVNULL, text=True, timeout=2.0)
+    except Exception:
+        return {}
+    rows: dict[int, tuple[float | None, float | None]] = {}
+    for line in out.splitlines():
+        parts = line.strip().split()
+        if len(parts) < 3:
+            continue
+        try:
+            pid = int(parts[0])
+            cpu = float(parts[1])
+            rss_mb = float(parts[2]) / 1024.0
+            rows[pid] = (round(cpu, 2), round(rss_mb, 2))
+        except Exception:
+            continue
+    return rows
+
+
+def _snapshot_dashboard_host() -> HostResource:
+    cpu_percent: float | None = None
+    try:
+        if hasattr(os, "getloadavg"):
+            load1, _, _ = os.getloadavg()
+            cpus = os.cpu_count() or 1
+            cpu_percent = round(max(0.0, min(100.0, (load1 / cpus) * 100.0)), 2)
+    except Exception:
+        cpu_percent = None
+
+    mem_percent, mem_total_mb = _read_memory_percent()
+    du = shutil.disk_usage("/")
+    disk_used_percent = round((du.used / du.total) * 100.0, 2) if du.total > 0 else None
+    disk_free_gb = round(du.free / (1024 ** 3), 2)
+
+    return HostResource(
+        cpu_percent=cpu_percent,
+        memory_used_percent=mem_percent,
+        memory_total_mb=mem_total_mb,
+        disk_used_percent=disk_used_percent,
+        disk_free_gb=disk_free_gb,
+        sampled_at=int(time.time()),
+    )
+
+
+async def _snapshot_dashboard_workers() -> tuple[list[WorkerRuntimeResource], ProcessResource]:
+    try:
+        from ..worker.supervisor import get_worker_runtime_snapshot
+
+        runtime = get_worker_runtime_snapshot()
+    except Exception:
+        runtime = []
+
+    main_pid = os.getpid()
+    worker_pids = [int(r["pid"]) for r in runtime if isinstance(r.get("pid"), int)]
+    stats = _read_process_stats([main_pid, *worker_pids])
+
+    main_cpu, main_rss = stats.get(main_pid, (None, None))
+    main = ProcessResource(pid=main_pid, cpu_percent=main_cpu, rss_mb=main_rss)
+
+    workers: list[WorkerRuntimeResource] = []
+    for row in runtime:
+        pid = int(row["pid"]) if isinstance(row.get("pid"), int) else None
+        cpu, rss = stats.get(pid, (None, None)) if pid is not None else (None, None)
+        workers.append(
+            WorkerRuntimeResource(
+                account_id=int(row.get("account_id") or 0),
+                pid=pid,
+                alive=bool(row.get("alive")),
+                desired=str(row.get("desired") or "running"),
+                fail_count=int(row.get("fail_count") or 0),
+                cpu_percent=cpu,
+                rss_mb=rss,
+            )
+        )
+
+    workers.sort(
+        key=lambda w: (0.0 if w.rss_mb is None else w.rss_mb),
+        reverse=True,
+    )
+    return workers, main
+
+
+async def _snapshot_runtime_log_stats() -> RuntimeLogStats:
+    try:
+        from datetime import UTC, timedelta
+
+        from ..db.models.log import RuntimeLog
+
+        since = datetime.now(UTC) - timedelta(minutes=5)
+        async with AsyncSessionLocal() as db:
+            total_stmt = select(func.count(RuntimeLog.id)).where(RuntimeLog.ts >= since)
+            warn_stmt = select(func.count(RuntimeLog.id)).where(
+                RuntimeLog.ts >= since,
+                RuntimeLog.level.in_(("warn", "warning")),
+            )
+            err_stmt = select(func.count(RuntimeLog.id)).where(
+                RuntimeLog.ts >= since,
+                RuntimeLog.level == "error",
+            )
+            total = int((await db.execute(total_stmt)).scalar() or 0)
+            warn = int((await db.execute(warn_stmt)).scalar() or 0)
+            err = int((await db.execute(err_stmt)).scalar() or 0)
+        return RuntimeLogStats(last_5m_total=total, last_5m_warn=warn, last_5m_error=err)
+    except Exception:
+        return RuntimeLogStats()
+
+
 # ════════════════════════════════════════════════════════════
 # 路由
 # ════════════════════════════════════════════════════════════
@@ -307,6 +515,23 @@ async def get_health_overview(_user: CurrentUser) -> HealthOverview:
         providers=providers,
         proxies=proxies,
         workers=workers,
+    )
+
+
+@router.get("/resource-dashboard", response_model=ResourceDashboard)
+async def get_resource_dashboard(_user: CurrentUser) -> ResourceDashboard:
+    """V1 资源占用概览：主机 + 进程 + worker + 5 分钟日志量。"""
+
+    host = _snapshot_dashboard_host()
+    workers, main = await _snapshot_dashboard_workers()
+    logs = await _snapshot_runtime_log_stats()
+    return ResourceDashboard(
+        host=host,
+        main_process=main,
+        workers=workers[:8],
+        worker_alive=sum(1 for w in workers if w.alive),
+        worker_desired_running=sum(1 for w in workers if w.desired == "running"),
+        logs=logs,
     )
 
 

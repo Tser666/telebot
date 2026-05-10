@@ -181,7 +181,7 @@ export function BotTab({ aid }: { aid: number }) {
   const users = usersQ.data ?? [];
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
         <Card>
           <CardHeader>

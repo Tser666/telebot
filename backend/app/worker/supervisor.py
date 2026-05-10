@@ -343,6 +343,24 @@ _WORKER_LOCKS: dict[int, asyncio.Lock] = {}
 _BG_TASKS: list[asyncio.Task] = []
 
 
+def get_worker_runtime_snapshot() -> list[dict[str, int | str | bool | None]]:
+    """返回当前 worker 运行时快照（只读）。"""
+
+    rows: list[dict[str, int | str | bool | None]] = []
+    for aid, handle in _WORKERS.items():
+        proc = handle.process
+        rows.append(
+            {
+                "account_id": int(aid),
+                "pid": int(proc.pid) if proc and proc.pid else None,
+                "alive": bool(proc and proc.is_alive()),
+                "desired": handle.desired,
+                "fail_count": int(handle.fail_count),
+            }
+        )
+    return rows
+
+
 async def start_supervisor() -> None:
     """FastAPI lifespan startup 调用。"""
     # 0. 清理上次留下的孤儿 worker（kill -9 uvicorn 等情况下产生）。

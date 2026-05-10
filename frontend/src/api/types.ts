@@ -549,6 +549,43 @@ export interface HealthOverview {
   workers: WorkersHealthStatus;
 }
 
+export interface HostResourceStatus {
+  cpu_percent?: number | null;
+  memory_used_percent?: number | null;
+  memory_total_mb?: number | null;
+  disk_used_percent?: number | null;
+  disk_free_gb?: number | null;
+  sampled_at: number;
+}
+
+export interface ProcessResourceStatus {
+  pid?: number | null;
+  cpu_percent?: number | null;
+  rss_mb?: number | null;
+}
+
+export interface WorkerRuntimeResourceStatus extends ProcessResourceStatus {
+  account_id: number;
+  alive: boolean;
+  desired: string;
+  fail_count: number;
+}
+
+export interface RuntimeLogStatsStatus {
+  last_5m_total: number;
+  last_5m_warn: number;
+  last_5m_error: number;
+}
+
+export interface ResourceDashboard {
+  host: HostResourceStatus;
+  main_process: ProcessResourceStatus;
+  workers: WorkerRuntimeResourceStatus[];
+  worker_alive: number;
+  worker_desired_running: number;
+  logs: RuntimeLogStatsStatus;
+}
+
 // 通用 list 包装（部分接口直接返数组，但为了后续兼容预留）
 export interface ListResponse<T> {
   items: T[];

@@ -3,10 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
 
     <!-- PWA 主题色（Android Chrome 顶栏 + iOS Safari 状态栏底色） -->
-    <meta name="theme-color" content="#26a6de" />
+    <meta name="theme-color" content="#2563eb" />
     <meta name="color-scheme" content="dark light" />
 
     <!-- iOS 全屏 PWA：从主屏幕启动时隐藏 Safari UI -->
@@ -16,6 +16,20 @@
     <!-- iOS 状态栏：black-translucent 让内容延伸到刘海/灵动岛区域，配合 viewport-fit=cover 使用 -->
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="format-detection" content="telephone=no" />
+
+    <script>
+      (function () {
+        try {
+          var theme = localStorage.getItem("telebot-theme") || "system";
+          var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+          var dark = theme === "dark" || (theme === "system" && prefersDark);
+          document.documentElement.classList.toggle("dark", dark);
+          document.documentElement.style.colorScheme = dark ? "dark" : "light";
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute("content", dark ? "#0b1120" : "#2563eb");
+        } catch (e) {}
+      })();
+    </script>
 
     <!-- iOS 主屏幕图标（必须 PNG，180x180 是当前推荐尺寸） -->
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />

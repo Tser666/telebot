@@ -41,14 +41,15 @@ function Dot({ tone }: { tone: Tone }) {
 // 大白话状态文案——首屏只看这一句就够了
 function ToneText({ tone, text }: { tone: Tone; text: string }) {
   const cls = {
-    ok: "text-emerald-700",
-    warn: "text-amber-700",
-    err: "text-rose-700",
+    ok: "text-emerald-700 dark:text-emerald-300",
+    warn: "text-amber-700 dark:text-amber-300",
+    err: "text-rose-700 dark:text-rose-300",
   }[tone];
   return <span className={`text-sm font-medium ${cls}`}>{text}</span>;
 }
 
 export function SystemHealthCard() {
+  const [open, setOpen] = useState(false);
   const q = useQuery({
     queryKey: ["system", "health-overview"],
     queryFn: getHealthOverview,
@@ -59,7 +60,28 @@ export function SystemHealthCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">系统状态</CardTitle>
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-base">系统状态</CardTitle>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            onClick={() => setOpen((v) => !v)}
+          >
+            {open ? (
+              <>
+                <ChevronDown className="mr-1 h-3.5 w-3.5" />
+                收起
+              </>
+            ) : (
+              <>
+                <ChevronRight className="mr-1 h-3.5 w-3.5" />
+                展开
+              </>
+            )}
+          </Button>
+        </div>
       </CardHeader>
       <CardContent>
         {q.isLoading ? (
@@ -67,8 +89,12 @@ export function SystemHealthCard() {
             <Spinner className="text-primary" />
           </div>
         ) : q.error || !q.data ? (
-          <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+          <div className="rounded-md border px-3 py-2 text-xs alert-danger">
             读取失败：{(q.error as Error)?.message || "未知错误"}
+          </div>
+        ) : !open ? (
+          <div className="rounded-md border bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
+            已收起系统状态详情，点击右上角“展开”查看。
           </div>
         ) : (
           <HealthGrid data={q.data} />
@@ -105,7 +131,7 @@ function HealthGrid({ data }: { data: HealthOverview }) {
             一切正常；这里存了你的全部账号配置和历史。
           </div>
         ) : (
-          <div className="mt-1 text-xs text-rose-700">
+          <div className="mt-1 text-xs text-rose-700 dark:text-rose-300">
             {data.db.error || "连接失败"}
             <br />
             <span className="text-muted-foreground">
@@ -147,7 +173,7 @@ function HealthGrid({ data }: { data: HealthOverview }) {
         ) : data.alembic.error ? (
           <>
             <ToneText tone="err" text="✗ 探测失败" />
-            <div className="mt-1 text-xs text-rose-700">{data.alembic.error}</div>
+            <div className="mt-1 text-xs text-rose-700 dark:text-rose-300">{data.alembic.error}</div>
           </>
         ) : (
           <>
@@ -203,7 +229,7 @@ function HealthGrid({ data }: { data: HealthOverview }) {
             启停账号、热加载模板、风控告警都通这里——通畅就一切如常。
           </div>
         ) : (
-          <div className="mt-1 text-xs text-rose-700">
+          <div className="mt-1 text-xs text-rose-700 dark:text-rose-300">
             {data.redis.error || "PING 失败"}
             <br />
             <span className="text-muted-foreground">

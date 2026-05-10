@@ -250,7 +250,7 @@ export function ForwardConfig() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Button variant="ghost" size="sm" onClick={() => nav(`/accounts/${aid}?tab=features`)}>
           <ArrowLeft className="mr-1 h-4 w-4" /> 返回账号
         </Button>
@@ -260,7 +260,7 @@ export function ForwardConfig() {
       </div>
 
       {/* 提示条 */}
-      <div className="rounded-md border border-blue-200 bg-blue-50/60 px-3 py-2 text-xs text-blue-800 space-y-1">
+      <div className="rounded-md border px-3 py-2 text-xs alert-info space-y-1">
         <div>✅ 保存后立即生效，无需重启 worker。</div>
         <div>
           ⚠ <b>仅响应别人发来的消息</b>（incoming）。本账号自己发的消息不会被转发。
@@ -473,7 +473,7 @@ export function ForwardConfig() {
             )}
 
             {form.config.source_kind === "duplicate" && (
-              <div className="rounded-md border border-amber-200 bg-amber-50/60 px-3 py-2 text-xs text-amber-800 space-y-1">
+              <div className="rounded-md border px-3 py-2 text-xs alert-warning space-y-1">
                 <div>
                   <b>复读检测</b>：当同一群内 ≥N 个<b>不同用户</b>发送相同文本时触发转发（同一用户发多次只算 1 人）。
                 </div>
