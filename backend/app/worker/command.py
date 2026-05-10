@@ -21,6 +21,15 @@ from telethon import TelegramClient, events
 
 from ..redis_client import get_redis
 from ..settings import settings
+from ..util.sudo_permissions import (
+    build_sudo_chat_scope,
+    build_sudo_command_scope,
+    normalize_sudo_chat_ids,
+    normalize_sudo_commands,
+    sudo_chat_allowed,
+    sudo_command_allowed,
+    sudo_scope_all,
+)
 from .ipc import CMD_PAUSE, CMD_RESUME, cmd_channel, make_cmd
 
 log = logging.getLogger(__name__)
@@ -101,6 +110,20 @@ def set_command_context(ctx: CommandContext) -> None:
 def get_command_context() -> CommandContext | None:
     """主要供测试 / 调试使用。"""
     return _ctx
+
+
+def _format_sudo_chat_scope(values: Any) -> str:
+    if sudo_scope_all(values):
+        return "全部（显式）"
+    chat_ids = normalize_sudo_chat_ids(values)
+    return ",".join(str(chat_id) for chat_id in chat_ids) or "未授权"
+
+
+def _format_sudo_command_scope(values: Any) -> str:
+    if sudo_scope_all(values):
+        return "全部（显式）"
+    commands = normalize_sudo_commands(values)
+    return ",".join(commands) or "未授权"
 
 
 def builtin(name: str, *, aliases: tuple[str, ...] = (), doc: str = ""):
@@ -414,20 +437,37 @@ async def _check_sudo_permission(event, cmd: str, account_id: int) -> tuple[bool
     if sudo_config is None:
         return False, f"TG 用户 {tg_user_id} 不在 sudo 列表中"
     
-    # 检查 chat_id 白名单
+    # 检查 chat_id 白名单：空列表/NULL 不再表示全部，而是默认拒绝。
     allowed_chats = sudo_config.get("allowed_chat_ids", [])
-    if allowed_chats:  # 空列表 = 所有对话
-        chat_id = event.chat_id
-        if chat_id not in allowed_chats:
-            return False, f"此对话（chat_id={chat_id}）不在白名单中"
+    chat_id = getattr(event, "chat_id", None)
+    if not sudo_chat_allowed(allowed_chats, chat_id):
+        if not sudo_scope_all(allowed_chats) and not normalize_sudo_chat_ids(allowed_chats):
+            return False, "未配置允许对话，sudo 默认拒绝"
+        return False, f"此对话（chat_id={chat_id}）不在白名单中"
     
-    # 检查命令白名单
+    # 检查命令白名单：空列表/NULL 不再表示全部，而是默认拒绝。
     allowed_cmds = sudo_config.get("allowed_commands", [])
-    if allowed_cmds:  # 空列表 = 所有命令
-        if cmd not in allowed_cmds:
-            return False, f"命令 `{cmd}` 不在白名单中"
+    if not sudo_command_allowed(allowed_cmds, cmd):
+        if not sudo_scope_all(allowed_cmds) and not normalize_sudo_commands(allowed_cmds):
+            return False, "未配置允许命令，sudo 默认拒绝"
+        return False, f"命令 `{cmd}` 不在白名单中"
     
     return True, ""
+
+
+def _should_report_incoming_sudo_denial(error_msg: str) -> bool:
+    """incoming sudo 拒绝是否需要在群里回提示。
+
+    未开启 sudo、发送者不是 sudo 用户、或 sudo 用户还没配置作用域时，静默忽略。
+    这样普通群友发了类似 ``.xxx`` 的消息时，不会莫名收到 userbot 的拒绝提示。
+    """
+    silent_fragments = (
+        "sudo 系统未配置",
+        "不在 sudo 列表中",
+        "未配置允许对话",
+        "未配置允许命令",
+    )
+    return not any(fragment in error_msg for fragment in silent_fragments)
 
 
 def _replied_media_placeholder(msg: Any) -> str:
@@ -781,9 +821,13 @@ async def _cmd_sudo(client, event, args, account_id):
     from ..db.models.account import SudoUser
 
     if not args:
-        await event.edit("用法：,sudo add <tg_user_id> [--display-name <name>] [--chat-ids <id1,id2>] [--commands <cmd1,cmd2>]\n"
-                       "     ,sudo del <tg_user_id>\n"
-                       "     ,sudo ls")
+        await event.edit(
+            "用法：,sudo add <tg_user_id> [--display-name <name>] "
+            "[--chat-ids <id1,id2>|--all-chats] [--commands <cmd1,cmd2>|--all-commands]\n"
+            "     ,sudo del <tg_user_id>\n"
+            "     ,sudo ls\n"
+            "说明：默认不授予任何对话/命令权限，必须显式配置白名单或全部。"
+        )
         return
 
     sub = args[0]
@@ -800,8 +844,8 @@ async def _cmd_sudo(client, event, args, account_id):
             return
         lines = []
         for r in rows:
-            chat_str = ",".join(str(c) for c in (r.allowed_chat_ids or [])) or "全部"
-            cmd_str = ",".join(r.allowed_commands or []) or "全部"
+            chat_str = _format_sudo_chat_scope(r.allowed_chat_ids)
+            cmd_str = _format_sudo_command_scope(r.allowed_commands)
             lines.append(f"• TG用户 {r.tg_user_id}（{r.display_name or '无'}）\n"
                          f"  允许对话：{chat_str}\n"
                          f"  允许命令：{cmd_str}")
@@ -835,7 +879,10 @@ async def _cmd_sudo(client, event, args, account_id):
 
     if sub == "add":
         if len(args) < 2:
-            await event.edit("用法：,sudo add <tg_user_id> [--display-name <name>] [--chat-ids <id1,id2>] [--commands <cmd1,cmd2>]")
+            await event.edit(
+                "用法：,sudo add <tg_user_id> [--display-name <name>] "
+                "[--chat-ids <id1,id2>|--all-chats] [--commands <cmd1,cmd2>|--all-commands]"
+            )
             return
         try:
             tg_user_id = int(args[1])
@@ -847,6 +894,8 @@ async def _cmd_sudo(client, event, args, account_id):
         display_name = None
         allowed_chat_ids: list[int] = []
         allowed_commands: list[str] = []
+        allow_all_chats = False
+        allow_all_commands = False
         
         rest_args = args[2:]
         i = 0
@@ -857,17 +906,38 @@ async def _cmd_sudo(client, event, args, account_id):
             elif rest_args[i] == "--chat-ids" and i + 1 < len(rest_args):
                 chat_str = rest_args[i + 1]
                 try:
-                    allowed_chat_ids = [int(x.strip()) for x in chat_str.split(",")]
+                    allowed_chat_ids = [
+                        int(x.strip()) for x in chat_str.split(",") if x.strip()
+                    ]
                 except ValueError:
                     await event.edit(f"无效的 chat_ids：{chat_str}")
                     return
+                allow_all_chats = False
                 i += 2
+            elif rest_args[i] == "--all-chats":
+                allow_all_chats = True
+                allowed_chat_ids = []
+                i += 1
             elif rest_args[i] == "--commands" and i + 1 < len(rest_args):
                 cmd_str = rest_args[i + 1]
-                allowed_commands = [x.strip() for x in cmd_str.split(",")]
+                allowed_commands = [x.strip() for x in cmd_str.split(",") if x.strip()]
+                allow_all_commands = False
                 i += 2
+            elif rest_args[i] == "--all-commands":
+                allow_all_commands = True
+                allowed_commands = []
+                i += 1
             else:
                 i += 1
+
+        stored_chat_scope = build_sudo_chat_scope(
+            allowed_chat_ids,
+            allow_all=allow_all_chats,
+        )
+        stored_command_scope = build_sudo_command_scope(
+            allowed_commands,
+            allow_all=allow_all_commands,
+        )
         
         async with AsyncSessionLocal() as db:
             existing = (
@@ -880,19 +950,30 @@ async def _cmd_sudo(client, event, args, account_id):
             ).scalar_one_or_none()
             if existing:
                 existing.display_name = display_name
-                existing.allowed_chat_ids = allowed_chat_ids
-                existing.allowed_commands = allowed_commands
+                existing.allowed_chat_ids = stored_chat_scope
+                existing.allowed_commands = stored_command_scope
             else:
                 db.add(SudoUser(
                     account_id=account_id,
                     tg_user_id=tg_user_id,
                     display_name=display_name,
-                    allowed_chat_ids=allowed_chat_ids,
-                    allowed_commands=allowed_commands,
+                    allowed_chat_ids=stored_chat_scope,
+                    allowed_commands=stored_command_scope,
                 ))
             await db.commit()
-        
-        await event.edit(f"已添加/更新 sudo 用户：TG用户 {tg_user_id}（{display_name or '无'}）")
+
+        if _ctx is not None:
+            _ctx.sudo_users[tg_user_id] = {
+                "display_name": display_name,
+                "allowed_chat_ids": stored_chat_scope,
+                "allowed_commands": stored_command_scope,
+            }
+
+        await event.edit(
+            f"已添加/更新 sudo 用户：TG用户 {tg_user_id}（{display_name or '无'}）\n"
+            f"允许对话：{_format_sudo_chat_scope(stored_chat_scope)}\n"
+            f"允许命令：{_format_sudo_command_scope(stored_command_scope)}"
+        )
         return
 
     await event.edit(f"未知子命令：{sub}（支持 add/del/ls）")
@@ -1967,6 +2048,8 @@ def make_command_handler(client: TelegramClient, account_id: int, prefix: str | 
             allowed, error_msg = await _check_sudo_permission(event, cmd, account_id)
             if not allowed:
                 if incoming_sudo:
+                    if not _should_report_incoming_sudo_denial(error_msg):
+                        return
                     try:
                         await event.respond(f"✗ Sudo 权限拒绝：{error_msg}")
                     except Exception:

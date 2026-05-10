@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from . import __version__
+from .api import account_bots as account_bots_api
 from .api import accounts as accounts_api
 from .api import alias as alias_api
 from .api import auth as auth_api
@@ -22,7 +23,7 @@ from .api import notify_bots as notify_bots_api
 from .api import proxies as proxies_api
 from .api import rate_limit as rate_limit_api
 from .api import sudo as sudo_api
-from .services import notify_service
+from .services import account_bot_runtime, notify_service
 from .services.login_service import cleanup_expired_loop
 from .settings import settings
 
@@ -143,10 +144,20 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001
         logging.exception("发送启动通知失败")
 
+    # 2-E: 账号绑定普通 Bot polling runtime（每账号独立 Bot）。
+    try:
+        await account_bot_runtime.start_account_bot_manager()
+    except Exception:  # noqa: BLE001
+        logging.exception("启动 account bot manager 失败")
+
     try:
         yield
     finally:
         # 3) 退出：取消清理任务 + 关停所有 worker
+        try:
+            await account_bot_runtime.stop_account_bot_manager()
+        except Exception:  # noqa: BLE001
+            logging.exception("停止 account bot manager 失败")
         cleanup_task.cancel()
         try:
             await cleanup_task
@@ -218,6 +229,7 @@ async def unhandled_exc_handler(request: Request, exc: Exception):
 # ── Router ────────────────────────────────────────────────────────
 app.include_router(auth_api.router)
 app.include_router(accounts_api.router)
+app.include_router(account_bots_api.router)
 app.include_router(rate_limit_api.router)   # C Agent：风控 + 拟人化 + 全局总闸
 app.include_router(logs_api.router)         # 主会话补：审计日志 + 运行日志
 app.include_router(proxies_api.router)      # 主会话补：代理 CRUD + 连通性测试

@@ -167,3 +167,57 @@ async def test_reliable_consumer_ack_after_commit(monkeypatch: pytest.MonkeyPatc
     assert redis.data["runtime_log_stream:inflight"] == []
     assert factory.last_session is not None
     assert len(factory.last_session.rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_runtime_log_row_applies_retention_truncation(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _fake_cfg():
+        return {
+            "runtime_log_retention_days": 30,
+            "runtime_log_max_message_chars": 20,
+            "runtime_log_max_detail_chars": 30,
+            "runtime_log_min_level": "info",
+        }
+
+    monkeypatch.setattr(supervisor, "_get_log_retention_config", _fake_cfg)
+    payload = json.dumps(
+        {
+            "account_id": 3,
+            "level": "info",
+            "source": "plugin",
+            "message": "x" * 80,
+            "detail": {"plugin_key": "game24", "traceback": "y" * 100},
+        }
+    )
+
+    row = await supervisor._build_runtime_log_row_with_retention(payload)
+
+    assert row is not None
+    assert len(row.message) < 80
+    assert "已截断" in row.message
+    assert row.detail["_truncated"] is True
+
+
+@pytest.mark.asyncio
+async def test_runtime_log_row_respects_min_level_filter(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _fake_cfg():
+        return {
+            "runtime_log_retention_days": 30,
+            "runtime_log_max_message_chars": 2000,
+            "runtime_log_max_detail_chars": 8000,
+            "runtime_log_min_level": "warn",
+        }
+
+    monkeypatch.setattr(supervisor, "_get_log_retention_config", _fake_cfg)
+    payload = json.dumps(
+        {
+            "account_id": 3,
+            "level": "info",
+            "source": "plugin",
+            "message": "hello",
+            "detail": {"plugin_key": "game24"},
+        }
+    )
+
+    row = await supervisor._build_runtime_log_row_with_retention(payload)
+    assert row is None

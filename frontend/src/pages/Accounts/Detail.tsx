@@ -11,6 +11,7 @@ import {
   Gauge,
   LayoutDashboard,
   Loader2,
+  MessageCircle,
   Network,
   Power,
   Shield,
@@ -46,6 +47,7 @@ import { AccountStatusBadge } from "@/components/AccountStatusBadge";
 import { MaskedPhone } from "@/components/MaskedPhone";
 import { IgnoredTab } from "@/pages/Accounts/IgnoredTab";
 import { CommandsTab } from "@/pages/Accounts/CommandsTab";
+import { BotTab } from "@/pages/Accounts/BotTab";
 import {
   deleteAccount,
   getAccount,
@@ -266,6 +268,9 @@ export function AccountDetail() {
           </TabsTrigger>
           <TabsTrigger value="commands" className="gap-1.5">
             <Shield className="h-4 w-4" /> 命令
+          </TabsTrigger>
+          <TabsTrigger value="bot" className="gap-1.5">
+            <MessageCircle className="h-4 w-4" /> Bot 联动
           </TabsTrigger>
           <TabsTrigger value="rate" className="gap-1.5">
             <Gauge className="h-4 w-4" /> 风控基础
@@ -607,6 +612,11 @@ export function AccountDetail() {
         {/* 自定义命令（账号 × 模板 启用关系） */}
         <TabsContent value="commands">
           <CommandsTab aid={aid} />
+        </TabsContent>
+
+        {/* 账号绑定普通 Bot 联动 */}
+        <TabsContent value="bot">
+          <BotTab aid={aid} />
         </TabsContent>
 
         {/* 风控基础 */}

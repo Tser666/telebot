@@ -1,0 +1,465 @@
+import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  Bell,
+  Bot,
+  KeyRound,
+  Loader2,
+  RefreshCw,
+  Send,
+  ShieldCheck,
+  Trash2,
+  UserPlus,
+} from "lucide-react";
+import { toast } from "sonner";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
+import { Spinner } from "@/components/ui/misc";
+import { Switch } from "@/components/ui/switch";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  createAccountBotUser,
+  deleteAccountBotUser,
+  getAccountBot,
+  listAccountBotUsers,
+  restartAccountBotRuntime,
+  testAccountBot,
+  updateAccountBot,
+  updateAccountBotUser,
+} from "@/api/accountBots";
+import type { AccountBotRole, AccountBotUserCreate } from "@/api/types";
+import { getErrMsg } from "@/lib/api";
+import { formatDateTime } from "@/lib/utils";
+
+const ROLE_META: Record<AccountBotRole, { label: string; desc: string }> = {
+  viewer: { label: "viewer", desc: "只读查看" },
+  operator: { label: "operator", desc: "启停常用功能" },
+  admin: { label: "admin", desc: "危险操作确认" },
+};
+
+const HELP_PREVIEW = `/start  打开主菜单
+/status 查看账号、worker 与最近错误
+/features 查看并启停账号功能
+/commands 查看并启停自定义命令模板
+/plugins 查看插件入口
+/rules 查看规则，scheduler 规则可手动执行
+/logs 查看最近运行日志
+/pause /resume 暂停或恢复账号
+/restart 重启账号 worker（admin + 二次确认）`;
+
+export function BotTab({ aid }: { aid: number }) {
+  const qc = useQueryClient();
+  const [enabled, setEnabled] = useState(false);
+  const [token, setToken] = useState("");
+  const [clearToken, setClearToken] = useState(false);
+  const [newUser, setNewUser] = useState<AccountBotUserCreate>({
+    tg_user_id: 0,
+    display_name: "",
+    role: "viewer",
+    notify_enabled: true,
+    enabled: true,
+  });
+
+  const botQ = useQuery({
+    queryKey: ["account", aid, "bot"],
+    queryFn: () => getAccountBot(aid),
+    enabled: !!aid,
+  });
+  const usersQ = useQuery({
+    queryKey: ["account", aid, "bot", "users"],
+    queryFn: () => listAccountBotUsers(aid),
+    enabled: !!aid,
+  });
+
+  useEffect(() => {
+    if (botQ.data) {
+      setEnabled(botQ.data.enabled);
+      setClearToken(false);
+      setToken("");
+    }
+  }, [botQ.data?.enabled, botQ.data?.has_token]);
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["account", aid, "bot"] });
+    qc.invalidateQueries({ queryKey: ["account", aid, "bot", "users"] });
+  };
+
+  const saveMut = useMutation({
+    mutationFn: () =>
+      updateAccountBot(aid, {
+        enabled,
+        clear_token: clearToken,
+        bot_token: token.trim() || null,
+      }),
+    onSuccess: () => {
+      toast.success("Bot 配置已保存");
+      invalidate();
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
+  const testMut = useMutation({
+    mutationFn: () => testAccountBot(aid),
+    onSuccess: () => toast.success("测试消息已发送"),
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
+  const restartMut = useMutation({
+    mutationFn: () => restartAccountBotRuntime(aid),
+    onSuccess: () => {
+      toast.success("Bot polling runtime 已重启");
+      invalidate();
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
+  const addUserMut = useMutation({
+    mutationFn: () => {
+      if (!newUser.tg_user_id) throw new Error("请填写 Telegram 用户 ID");
+      return createAccountBotUser(aid, {
+        ...newUser,
+        display_name: newUser.display_name?.trim() || null,
+      });
+    },
+    onSuccess: () => {
+      toast.success("授权用户已添加");
+      setNewUser({
+        tg_user_id: 0,
+        display_name: "",
+        role: "viewer",
+        notify_enabled: true,
+        enabled: true,
+      });
+      invalidate();
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
+  const updateUserMut = useMutation({
+    mutationFn: (vars: { uid: number; patch: Partial<AccountBotUserCreate> }) =>
+      updateAccountBotUser(aid, vars.uid, vars.patch),
+    onSuccess: () => invalidate(),
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
+  const deleteUserMut = useMutation({
+    mutationFn: (uid: number) => deleteAccountBotUser(aid, uid),
+    onSuccess: () => {
+      toast.success("授权用户已删除");
+      invalidate();
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
+  if (botQ.isLoading || usersQ.isLoading) {
+    return (
+      <div className="flex h-28 items-center justify-center">
+        <Spinner className="text-primary" />
+      </div>
+    );
+  }
+
+  const bot = botQ.data;
+  const users = usersQ.data ?? [];
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Bot className="h-4 w-4" /> 账号 Bot 配置
+            </CardTitle>
+            <CardDescription>
+              每个账号绑定一个普通 Bot，互相隔离授权和通知。Bot Token 不会回显。
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>运行状态</Label>
+                <div className="flex h-10 items-center gap-2 rounded-md border px-3 text-sm">
+                  <Badge variant={bot?.enabled ? "default" : "secondary"}>
+                    {bot?.enabled ? "已启用" : "未启用"}
+                  </Badge>
+                  <span className="font-mono text-muted-foreground">
+                    {bot?.status ?? "disabled"}
+                  </span>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Bot 用户名</Label>
+                <div className="flex h-10 items-center rounded-md border px-3 text-sm">
+                  {bot?.username ? `@${bot.username}` : "保存 token 后自动读取"}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="account-bot-token">Bot Token</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="account-bot-token"
+                  type="password"
+                  autoComplete="off"
+                  placeholder={bot?.has_token ? "已保存；留空表示不修改" : "123456:ABC-DEF..."}
+                  value={token}
+                  onChange={(e) => setToken(e.target.value)}
+                />
+                <Button
+                  type="button"
+                  variant={clearToken ? "destructive" : "outline"}
+                  onClick={() => setClearToken((v) => !v)}
+                >
+                  <KeyRound className="mr-1 h-4 w-4" />
+                  {clearToken ? "将清空" : "清空"}
+                </Button>
+              </div>
+            </div>
+
+            {bot?.last_error ? (
+              <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                {bot.last_error}
+              </div>
+            ) : null}
+
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+              <label className="flex items-center gap-2 text-sm">
+                <Switch checked={enabled} onCheckedChange={setEnabled} />
+                启用 Bot polling
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => testMut.mutate()}
+                  disabled={testMut.isPending || !bot?.has_token}
+                >
+                  {testMut.isPending ? (
+                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="mr-1 h-4 w-4" />
+                  )}
+                  测试发送
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => restartMut.mutate()}
+                  disabled={restartMut.isPending}
+                >
+                  <RefreshCw className="mr-1 h-4 w-4" />
+                  重启 runtime
+                </Button>
+                <Button onClick={() => saveMut.mutate()} disabled={saveMut.isPending}>
+                  {saveMut.isPending ? (
+                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                  ) : null}
+                  保存配置
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <ShieldCheck className="h-4 w-4" /> 可操作范围
+            </CardTitle>
+            <CardDescription>GUI 是完整控制台，Bot 覆盖高频远程操作。</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <div className="grid gap-2">
+              {Object.entries(ROLE_META).map(([role, meta]) => (
+                <div key={role} className="flex items-center justify-between rounded-md border px-3 py-2">
+                  <span className="font-mono">{meta.label}</span>
+                  <span className="text-muted-foreground">{meta.desc}</span>
+                </div>
+              ))}
+            </div>
+            <pre className="overflow-x-auto rounded-md bg-muted px-3 py-2 text-xs leading-5">
+              {HELP_PREVIEW}
+            </pre>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Bell className="h-4 w-4" /> 授权用户
+          </CardTitle>
+          <CardDescription>
+            未授权用户默认无响应。授权用户发 /start 后会记录 last_chat_id，用于通知和测试发送。
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 rounded-md border p-3 md:grid-cols-[180px_minmax(0,1fr)_150px_120px]">
+            <div className="space-y-1.5">
+              <Label>Telegram 用户 ID</Label>
+              <Input
+                inputMode="numeric"
+                placeholder="123456789"
+                value={newUser.tg_user_id || ""}
+                onChange={(e) =>
+                  setNewUser((v) => ({ ...v, tg_user_id: Number(e.target.value) || 0 }))
+                }
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>备注名</Label>
+              <Input
+                placeholder="例如：我 / 运维同事"
+                value={newUser.display_name ?? ""}
+                onChange={(e) => setNewUser((v) => ({ ...v, display_name: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>角色</Label>
+              <Select
+                value={newUser.role}
+                onChange={(e) =>
+                  setNewUser((v) => ({ ...v, role: e.target.value as AccountBotRole }))
+                }
+              >
+                {Object.keys(ROLE_META).map((role) => (
+                  <option key={role} value={role}>
+                    {role}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="flex items-end">
+              <Button
+                className="w-full"
+                onClick={() => addUserMut.mutate()}
+                disabled={addUserMut.isPending}
+              >
+                <UserPlus className="mr-1 h-4 w-4" />
+                添加
+              </Button>
+            </div>
+          </div>
+
+          <Table className="table-fixed">
+            <colgroup>
+              <col className="w-[22%]" />
+              <col className="w-[18%]" />
+              <col className="w-[16%]" />
+              <col className="w-[12%]" />
+              <col className="w-[14%]" />
+              <col className="w-[18%]" />
+            </colgroup>
+            <TableHeader>
+              <TableRow>
+                <TableHead>用户</TableHead>
+                <TableHead>备注</TableHead>
+                <TableHead>角色</TableHead>
+                <TableHead className="text-center">通知</TableHead>
+                <TableHead className="text-center">启用</TableHead>
+                <TableHead className="text-right">操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {users.map((u) => (
+                <TableRow key={u.id}>
+                  <TableCell>
+                    <div className="font-mono">{u.tg_user_id}</div>
+                    <div className="text-xs text-muted-foreground">
+                      chat: {u.last_chat_id ?? "未记录"}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      defaultValue={u.display_name ?? ""}
+                      placeholder="无"
+                      onBlur={(e) => {
+                        if (e.target.value === (u.display_name ?? "")) return;
+                        updateUserMut.mutate({
+                          uid: u.id,
+                          patch: { display_name: e.target.value || null },
+                        });
+                      }}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Select
+                      value={u.role}
+                      onChange={(e) =>
+                        updateUserMut.mutate({
+                          uid: u.id,
+                          patch: { role: e.target.value as AccountBotRole },
+                        })
+                      }
+                    >
+                      {Object.keys(ROLE_META).map((role) => (
+                        <option key={role} value={role}>
+                          {role}
+                        </option>
+                      ))}
+                    </Select>
+                  </TableCell>
+                  <TableCell className="text-center">
+                    <Switch
+                      checked={u.notify_enabled}
+                      onCheckedChange={(v) =>
+                        updateUserMut.mutate({ uid: u.id, patch: { notify_enabled: v } })
+                      }
+                    />
+                  </TableCell>
+                  <TableCell className="text-center">
+                    <Switch
+                      checked={u.enabled}
+                      onCheckedChange={(v) =>
+                        updateUserMut.mutate({ uid: u.id, patch: { enabled: v } })
+                      }
+                    />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      <span className="hidden text-xs text-muted-foreground xl:inline">
+                        {formatDateTime(u.created_at)}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive"
+                        onClick={() => deleteUserMut.mutate(u.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {users.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="h-20 text-center text-muted-foreground">
+                    还没有授权用户
+                  </TableCell>
+                </TableRow>
+              ) : null}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

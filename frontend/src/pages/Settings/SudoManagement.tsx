@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Trash2 } from "lucide-react";
+import { Check, Pencil, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import {
   Card,
   CardContent,
@@ -22,6 +23,7 @@ import {
   getSudoUsers,
   updateSudoUser,
 } from "@/api/sudo";
+import { listAccountCommands, listBuiltinCommands } from "@/api/commands";
 import type { SudoUserResponse } from "@/types/sudo";
 import { listAccounts } from "@/api/accounts";
 import { getErrMsg } from "@/lib/api";
@@ -34,6 +36,14 @@ type FormState = {
   display_name: string;
   allowed_chat_ids: string;
   allowed_commands: string;
+  allow_all_chats: boolean;
+  allow_all_commands: boolean;
+};
+
+type CommandCatalogItem = {
+  name: string;
+  aliases: string[];
+  doc: string;
 };
 
 const EMPTY_FORM: FormState = {
@@ -42,6 +52,36 @@ const EMPTY_FORM: FormState = {
   display_name: "",
   allowed_chat_ids: "",
   allowed_commands: "",
+  allow_all_chats: false,
+  allow_all_commands: false,
+};
+
+const splitCsv = (value: string) =>
+  value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+const parseChatIds = (value: string) =>
+  splitCsv(value).map((item) => Number(item));
+
+const parseCommands = (value: string) => splitCsv(value);
+
+const hasInvalidChatIds = (value: string) =>
+  splitCsv(value).some((item) => !Number.isFinite(Number(item)));
+
+const formatChatScope = (user: SudoUserResponse) => {
+  if (user.allow_all_chats) return "全部（显式）";
+  return user.allowed_chat_ids?.length
+    ? user.allowed_chat_ids.join(", ")
+    : "未授权";
+};
+
+const formatCommandScope = (user: SudoUserResponse) => {
+  if (user.allow_all_commands) return "全部（显式）";
+  return user.allowed_commands?.length
+    ? user.allowed_commands.join(", ")
+    : "未授权";
 };
 
 export function SudoManagement() {
@@ -54,9 +94,49 @@ export function SudoManagement() {
     queryKey: ["accounts"],
     queryFn: () => listAccounts(),
   });
+  const builtinCommandsQ = useQuery({
+    queryKey: ["commands", "builtin"],
+    queryFn: () => listBuiltinCommands(),
+  });
 
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const selectedAccountId = useMemo(() => {
+    const id = Number(form.account_id);
+    return Number.isInteger(id) && id > 0 ? id : null;
+  }, [form.account_id]);
+  const accountCommandsQ = useQuery({
+    queryKey: ["account", selectedAccountId, "commands", "sudo"],
+    queryFn: () => listAccountCommands(selectedAccountId as number),
+    enabled: selectedAccountId !== null,
+  });
+
+  const builtinCommandItems = useMemo<CommandCatalogItem[]>(
+    () =>
+      (builtinCommandsQ.data || []).map((cmd) => ({
+        name: cmd.name,
+        aliases: cmd.aliases || [],
+        doc: cmd.doc || "内置命令",
+      })),
+    [builtinCommandsQ.data],
+  );
+  const enabledTemplateCommandItems = useMemo<CommandCatalogItem[]>(
+    () =>
+      (accountCommandsQ.data || [])
+        .filter((item) => item.enabled)
+        .map((item) => ({
+          name: item.template.name,
+          aliases: item.template.aliases || [],
+          doc:
+            item.template.description ||
+            `自定义模板：${item.template.type}`,
+        })),
+    [accountCommandsQ.data],
+  );
+  const selectedCommands = useMemo(
+    () => new Set(parseCommands(form.allowed_commands)),
+    [form.allowed_commands],
+  );
 
   const createMut = useMutation({
     mutationFn: () =>
@@ -64,12 +144,14 @@ export function SudoManagement() {
         account_id: Number(form.account_id),
         tg_user_id: Number(form.tg_user_id),
         display_name: form.display_name.trim() || undefined,
-        allowed_chat_ids: form.allowed_chat_ids.trim()
-          ? form.allowed_chat_ids.split(",").map((s) => Number(s.trim()))
-          : undefined,
-        allowed_commands: form.allowed_commands.trim()
-          ? form.allowed_commands.split(",").map((s) => s.trim())
-          : undefined,
+        allow_all_chats: form.allow_all_chats,
+        allow_all_commands: form.allow_all_commands,
+        allowed_chat_ids: form.allow_all_chats
+          ? []
+          : parseChatIds(form.allowed_chat_ids),
+        allowed_commands: form.allow_all_commands
+          ? []
+          : parseCommands(form.allowed_commands),
       }),
     onSuccess: () => {
       toast.success("已创建 Sudo 用户");
@@ -83,12 +165,14 @@ export function SudoManagement() {
     mutationFn: async (id: number) => {
       await updateSudoUser(id, {
         display_name: form.display_name.trim() || undefined,
-        allowed_chat_ids: form.allowed_chat_ids.trim()
-          ? form.allowed_chat_ids.split(",").map((s) => Number(s.trim()))
-          : undefined,
-        allowed_commands: form.allowed_commands.trim()
-          ? form.allowed_commands.split(",").map((s) => s.trim())
-          : undefined,
+        allow_all_chats: form.allow_all_chats,
+        allow_all_commands: form.allow_all_commands,
+        allowed_chat_ids: form.allow_all_chats
+          ? []
+          : parseChatIds(form.allowed_chat_ids),
+        allowed_commands: form.allow_all_commands
+          ? []
+          : parseCommands(form.allowed_commands),
       });
     },
     onSuccess: () => {
@@ -117,12 +201,28 @@ export function SudoManagement() {
       display_name: user.display_name || "",
       allowed_chat_ids: user.allowed_chat_ids?.join(", ") || "",
       allowed_commands: user.allowed_commands?.join(", ") || "",
+      allow_all_chats: user.allow_all_chats,
+      allow_all_commands: user.allow_all_commands,
     });
   };
 
   const cancelEdit = () => {
     setEditingId(null);
     setForm(EMPTY_FORM);
+  };
+
+  const toggleAllowedCommand = (command: string) => {
+    if (!command || form.allow_all_commands) return;
+    setForm((current) => {
+      const commands = parseCommands(current.allowed_commands);
+      const next = commands.includes(command)
+        ? commands.filter((item) => item !== command)
+        : [...commands, command];
+      return {
+        ...current,
+        allowed_commands: next.join(", "),
+      };
+    });
   };
 
   const handleDelete = (id: number) => {
@@ -134,6 +234,13 @@ export function SudoManagement() {
     if (!form.account_id || !form.tg_user_id) return false;
     if (isNaN(Number(form.account_id)) || isNaN(Number(form.tg_user_id)))
       return false;
+    if (!form.allow_all_chats && hasInvalidChatIds(form.allowed_chat_ids))
+      return false;
+    const hasChatScope =
+      form.allow_all_chats || parseChatIds(form.allowed_chat_ids).length > 0;
+    const hasCommandScope =
+      form.allow_all_commands || parseCommands(form.allowed_commands).length > 0;
+    if (!hasChatScope || !hasCommandScope) return false;
     return true;
   }, [form]);
 
@@ -150,7 +257,7 @@ export function SudoManagement() {
       <CardHeader>
         <CardTitle className="text-base">Sudo 用户管理</CardTitle>
         <CardDescription>
-          授权其他 Telegram 用户通过独立前缀触发命令。留空表示允许所有对话/命令。
+          授权其他 Telegram 用户通过独立前缀触发命令。默认不授予任何对话或命令权限。
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -163,8 +270,7 @@ export function SudoManagement() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label>账号 *</Label>
-              <select
-                className="w-full rounded-md border px-3 py-2 text-sm"
+              <Select
                 value={form.account_id}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, account_id: e.target.value }))
@@ -176,7 +282,7 @@ export function SudoManagement() {
                     {acc.display_name || acc.phone}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
 
             <div className="space-y-1.5">
@@ -203,7 +309,22 @@ export function SudoManagement() {
             </div>
 
             <div className="space-y-1.5">
-              <Label>允许的对话 ID（逗号分隔）</Label>
+              <div className="flex items-center justify-between gap-3">
+                <Label>允许的对话 ID（逗号分隔）</Label>
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={form.allow_all_chats}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        allow_all_chats: e.target.checked,
+                      }))
+                    }
+                  />
+                  允许所有对话
+                </label>
+              </div>
               <Input
                 value={form.allowed_chat_ids}
                 onChange={(e) =>
@@ -212,24 +333,99 @@ export function SudoManagement() {
                     allowed_chat_ids: e.target.value,
                   }))
                 }
-                placeholder="留空=所有对话, 如: -100123, -100456"
+                disabled={form.allow_all_chats}
+                placeholder="不填=不授权，如: -100123, -100456"
               />
             </div>
 
-            <div className="space-y-1.5 sm:col-span-2">
-              <Label>允许的命令（逗号分隔）</Label>
-              <Input
-                value={form.allowed_commands}
-                onChange={(e) =>
-                  setForm((f) => ({
-                    ...f,
-                    allowed_commands: e.target.value,
-                  }))
-                }
-                placeholder="留空=所有命令, 如: help, ping, fwd"
-              />
+            <div className="space-y-2 sm:col-span-2">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <Label>允许的命令</Label>
+                  <p className="text-xs text-muted-foreground">
+                    在下方命令卡片里点击即可启用/取消；已启用的卡片会高亮。
+                  </p>
+                </div>
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={form.allow_all_commands}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        allow_all_commands: e.target.checked,
+                      }))
+                    }
+                  />
+                  允许所有命令
+                </label>
+              </div>
             </div>
           </div>
+
+          <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-medium">允许的命令 / 当前可用的 sudo 命令</p>
+                <p className="text-xs text-muted-foreground">
+                  白名单填写不带前缀的触发词；别名触发也需要单独授权。
+                </p>
+              </div>
+              <Badge variant="outline">
+                {form.allow_all_commands
+                  ? "已允许全部"
+                  : `已选 ${selectedCommands.size} 个`}
+              </Badge>
+            </div>
+
+            <CommandCatalog
+              title="内置命令"
+              loading={builtinCommandsQ.isLoading}
+              items={builtinCommandItems}
+              disabled={form.allow_all_commands}
+              selectedCommands={selectedCommands}
+              onToggle={toggleAllowedCommand}
+              emptyText="暂无内置命令"
+            />
+
+            <CommandCatalog
+              title="该账号已启用的自定义命令"
+              loading={accountCommandsQ.isLoading}
+              items={enabledTemplateCommandItems}
+              disabled={form.allow_all_commands || selectedAccountId === null}
+              selectedCommands={selectedCommands}
+              onToggle={toggleAllowedCommand}
+              emptyText={
+                selectedAccountId === null
+                  ? "选择账号后显示该账号已启用的自定义命令"
+                  : "该账号暂无已启用的自定义命令"
+              }
+            />
+
+            <p className="text-xs text-muted-foreground">
+              插件配置页里的自定义触发词不一定属于命令模板；若没有出现在这里，可以先到对应插件配置页确认触发词。
+            </p>
+
+            {!form.allow_all_commands && selectedCommands.size > 0 && (
+              <div className="flex flex-wrap gap-1.5 border-t pt-3">
+                {[...selectedCommands].map((command) => (
+                  <button
+                    key={command}
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 font-mono text-xs hover:bg-muted"
+                    onClick={() => toggleAllowedCommand(command)}
+                  >
+                    {command}
+                    <X className="h-3 w-3" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <p className="text-xs text-muted-foreground">
+            需要同时配置对话范围和命令范围；勾选“允许所有”才会授予全部权限。
+          </p>
 
           <div className="flex gap-2">
             <Button
@@ -276,16 +472,12 @@ export function SudoManagement() {
                     <p className="text-xs text-muted-foreground">
                       账号 ID: {user.account_id}
                     </p>
-                    {user.allowed_chat_ids && user.allowed_chat_ids.length > 0 && (
-                      <p className="text-xs text-muted-foreground">
-                        允许对话: {user.allowed_chat_ids.join(", ")}
-                      </p>
-                    )}
-                    {user.allowed_commands && user.allowed_commands.length > 0 && (
-                      <p className="text-xs text-muted-foreground">
-                        允许命令: {user.allowed_commands.join(", ")}
-                      </p>
-                    )}
+                    <p className="text-xs text-muted-foreground">
+                      允许对话: {formatChatScope(user)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      允许命令: {formatCommandScope(user)}
+                    </p>
                   </div>
                   <div className="flex gap-1">
                     <Button
@@ -310,5 +502,78 @@ export function SudoManagement() {
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function CommandCatalog({
+  title,
+  loading,
+  items,
+  disabled,
+  emptyText,
+  selectedCommands,
+  onToggle,
+}: {
+  title: string;
+  loading: boolean;
+  items: CommandCatalogItem[];
+  disabled: boolean;
+  emptyText: string;
+  selectedCommands: Set<string>;
+  onToggle: (command: string) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <p className="text-xs font-medium text-muted-foreground">{title}</p>
+        <Badge variant="secondary">{items.length}</Badge>
+      </div>
+
+      {loading ? (
+        <p className="text-xs text-muted-foreground">正在加载命令...</p>
+      ) : items.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{emptyText}</p>
+      ) : (
+        <div className="grid gap-2 md:grid-cols-2">
+          {items.map((item) => (
+            <div
+              key={item.name}
+              className="rounded-md border bg-background p-2"
+            >
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={selectedCommands.has(item.name) ? "default" : "outline"}
+                  disabled={disabled}
+                  className="h-7 gap-1 px-2 font-mono text-xs"
+                  onClick={() => onToggle(item.name)}
+                >
+                  {selectedCommands.has(item.name) && <Check className="h-3 w-3" />}
+                  {item.name}
+                </Button>
+                {item.aliases.map((alias) => (
+                  <Button
+                    key={`${item.name}:${alias}`}
+                    type="button"
+                    size="sm"
+                    variant={selectedCommands.has(alias) ? "secondary" : "ghost"}
+                    disabled={disabled}
+                    className="h-7 gap-1 px-2 font-mono text-xs text-muted-foreground"
+                    onClick={() => onToggle(alias)}
+                  >
+                    {selectedCommands.has(alias) && <Check className="h-3 w-3" />}
+                    {alias}
+                  </Button>
+                ))}
+              </div>
+              <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                {item.doc}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

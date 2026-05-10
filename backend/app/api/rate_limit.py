@@ -595,8 +595,10 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
     qps_val = await _get_setting(db, "global_api_qps", {"api_qps_total": 0})
     tz_val = await _get_setting(db, "timezone", {"value": ""})
     llm_val = await _get_setting(db, "llm_limits", {})
+    log_val = await _get_setting(db, "log_retention", {})
     tz = str(tz_val.get("value", "")) if isinstance(tz_val, dict) else str(tz_val)
     llm_limits = llm_val if isinstance(llm_val, dict) else {}
+    log_retention = log_val if isinstance(log_val, dict) else {}
     return {
         "command_prefix": prefix,
         "kill_switch": bool(kill_val.get("enabled", False)) if isinstance(kill_val, dict) else bool(kill_val),
@@ -608,6 +610,23 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
             "daily_tokens": max(0, int(llm_limits.get("daily_tokens", 0) or 0)),
             "premium_daily": max(0, int(llm_limits.get("premium_daily", 0) or 0)),
         },
+        "log_retention": {
+            "runtime_log_retention_days": max(
+                0, int(log_retention.get("runtime_log_retention_days", 30) or 0)
+            ),
+            "runtime_log_max_message_chars": max(
+                200, int(log_retention.get("runtime_log_max_message_chars", 2000) or 2000)
+            ),
+            "runtime_log_max_detail_chars": max(
+                0, int(log_retention.get("runtime_log_max_detail_chars", 8000) or 0)
+            ),
+            "runtime_log_min_level": (
+                str(log_retention.get("runtime_log_min_level", "info") or "info").lower()
+                if str(log_retention.get("runtime_log_min_level", "info") or "info").lower()
+                in {"debug", "info", "warn", "error"}
+                else "info"
+            ),
+        },
     }
 
 
@@ -618,12 +637,20 @@ class _LLMLimitsPatch(BaseModel):
     premium_daily: int | None = None
 
 
+class _LogRetentionPatch(BaseModel):
+    runtime_log_retention_days: int | None = None
+    runtime_log_max_message_chars: int | None = None
+    runtime_log_max_detail_chars: int | None = None
+    runtime_log_min_level: str | None = None
+
+
 class _SettingsPatch(BaseModel):
     """前端只会传子集；未传字段保持不变。"""
 
     command_prefix: str | None = None
     timezone: str | None = None
     llm_limits: _LLMLimitsPatch | None = None
+    log_retention: _LogRetentionPatch | None = None
 
 
 @router.patch("/api/system/settings")
@@ -665,6 +692,52 @@ async def patch_system_settings(
             next_limits[key] = int(value)
         await _set_setting(db, "llm_limits", next_limits)
         await _audit(db, user.id, "set_llm_limits", target="system", detail=next_limits)
+    if payload.log_retention is not None:
+        current = await _get_setting(db, "log_retention", {})
+        if not isinstance(current, dict):
+            current = {}
+        data = payload.log_retention.model_dump(exclude_unset=True)
+        next_retention = {
+            "runtime_log_retention_days": max(
+                0, int(current.get("runtime_log_retention_days", 30) or 0)
+            ),
+            "runtime_log_max_message_chars": max(
+                200, int(current.get("runtime_log_max_message_chars", 2000) or 2000)
+            ),
+            "runtime_log_max_detail_chars": max(
+                0, int(current.get("runtime_log_max_detail_chars", 8000) or 0)
+            ),
+            "runtime_log_min_level": (
+                str(current.get("runtime_log_min_level", "info") or "info").lower()
+                if str(current.get("runtime_log_min_level", "info") or "info").lower()
+                in {"debug", "info", "warn", "error"}
+                else "info"
+            ),
+        }
+        bounds = {
+            "runtime_log_retention_days": (0, 3650),
+            "runtime_log_max_message_chars": (200, 20000),
+            "runtime_log_max_detail_chars": (0, 50000),
+        }
+        for key, value in data.items():
+            if value is None:
+                continue
+            if key == "runtime_log_min_level":
+                norm = str(value).strip().lower()
+                if norm not in {"debug", "info", "warn", "error"}:
+                    raise _bad(
+                        "invalid_log_retention",
+                        "runtime_log_min_level 必须是 debug/info/warn/error",
+                    )
+                next_retention[key] = norm
+                continue
+            lo, hi = bounds[key]
+            ivalue = int(value)
+            if ivalue < lo or ivalue > hi:
+                raise _bad("invalid_log_retention", f"{key} 必须在 {lo}~{hi} 之间")
+            next_retention[key] = ivalue
+        await _set_setting(db, "log_retention", next_retention)
+        await _audit(db, user.id, "set_log_retention", target="system", detail=next_retention)
     return await get_system_settings(db, user)
 
 

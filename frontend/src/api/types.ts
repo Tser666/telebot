@@ -100,6 +100,55 @@ export interface AccountUpdateRequest {
   device_profile_id?: number | null;
 }
 
+// ===================== 账号 Bot 联动 =====================
+export type AccountBotRole = "viewer" | "operator" | "admin";
+
+export interface AccountBotConfig {
+  account_id: number;
+  enabled: boolean;
+  status: string;
+  has_token: boolean;
+  username?: string | null;
+  last_update_id?: number | null;
+  last_error?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface AccountBotConfigUpdate {
+  bot_token?: string | null;
+  clear_token?: boolean;
+  enabled?: boolean | null;
+}
+
+export interface AccountBotUser {
+  id: number;
+  account_id: number;
+  tg_user_id: number;
+  display_name?: string | null;
+  role: AccountBotRole;
+  notify_enabled: boolean;
+  last_chat_id?: number | null;
+  enabled: boolean;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export interface AccountBotUserCreate {
+  tg_user_id: number;
+  display_name?: string | null;
+  role: AccountBotRole;
+  notify_enabled?: boolean;
+  enabled?: boolean;
+}
+
+export interface AccountBotUserUpdate {
+  display_name?: string | null;
+  role?: AccountBotRole;
+  notify_enabled?: boolean;
+  enabled?: boolean;
+}
+
 // ===================== 设备伪装 =====================
 export interface DeviceProfileOut {
   id: number;
@@ -406,6 +455,7 @@ export interface RuntimeLogItem {
   message: string;
   created_at: string;
   source?: string | null;
+  detail?: Record<string, unknown> | null;
 }
 
 // 操作日志（Web 端写操作）
@@ -430,6 +480,12 @@ export interface SystemSettings {
     daily_requests: number;
     daily_tokens: number;
     premium_daily: number;
+  };
+  log_retention?: {
+    runtime_log_retention_days: number;
+    runtime_log_max_message_chars: number;
+    runtime_log_max_detail_chars: number;
+    runtime_log_min_level: "debug" | "info" | "warn" | "error";
   };
 }
 

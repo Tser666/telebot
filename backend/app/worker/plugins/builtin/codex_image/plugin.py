@@ -55,6 +55,13 @@ DEFAULT_IMAGE_FORMAT = "png"
 SUPPORTED_IMAGE_SIZES = {"auto", "1024x1024", "1536x1024", "1024x1536"}
 SUPPORTED_ASPECT_RATIOS = {"auto", "1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"}
 SUPPORTED_IMAGE_FORMATS = {"png", "jpeg", "webp"}
+_STREAM_RECOVERABLE_ERRORS = (
+    httpx.RemoteProtocolError,
+    httpx.ReadError,
+    httpx.ReadTimeout,
+    httpx.ConnectError,
+    httpx.ConnectTimeout,
+)
 
 # ─── 工具函数 ───────────────────────────────────────────
 
@@ -147,6 +154,19 @@ def _humanize_codex_error(status_code: int, detail: str) -> str:
     if message:
         return f"Codex 请求失败：{message}"
     return f"Codex 请求失败（HTTP {status_code}）：{safe_detail}"
+
+
+def _humanize_codex_exception(exc: BaseException) -> str:
+    """把非 HTTP 状态类异常转成用户可执行提示。"""
+    raw = str(exc)
+    lowered = raw.lower()
+    if isinstance(exc, _STREAM_RECOVERABLE_ERRORS) or "incomplete chunked read" in lowered:
+        return "Codex 流式连接中断，未能完整接收响应。已尽量自动恢复；如果仍失败，请稍后重试或换网络。"
+    if "timeout" in lowered or isinstance(exc, TimeoutError):
+        return "Codex 响应超时。请稍后重试，或把最大等待时间调大。"
+    if "proxy" in lowered or "connect" in lowered or "network" in lowered or "ssl" in lowered:
+        return "连接 Codex 失败。请检查网络、代理或稍后重试。"
+    return f"生成失败：{_safe_error_text(raw)}"
 
 
 def _mask_token(token: str) -> str:
@@ -328,6 +348,7 @@ async def _call_codex_image(
     reasoning_effort: str = DEFAULT_REASONING_EFFORT,
     image_size: str = DEFAULT_IMAGE_SIZE,
     image_format: str = DEFAULT_IMAGE_FORMAT,
+    poll_interval: int = DEFAULT_STATUS_INTERVAL,
 ) -> dict[str, str | None]:
     """调用 Codex 图片生成 API。
 
@@ -343,6 +364,7 @@ async def _call_codex_image(
         {image_base64, revised_prompt, status, response_id}
     """
     deadline = time.monotonic() + max_wait
+    poll_interval = max(10, min(300, int(poll_interval or DEFAULT_STATUS_INTERVAL)))
 
     # 构建请求体
     content = prompt
@@ -386,54 +408,64 @@ async def _call_codex_image(
         "status": None,
         "response_id": None,
     }
+    stream_error: BaseException | None = None
 
     # ── 流式读取 SSE ──────────────────────────────────
     remaining_timeout = max(1.0, deadline - time.monotonic())
-    async with httpx.AsyncClient(timeout=httpx.Timeout(remaining_timeout)) as client:
-        async with client.stream("POST", CODEX_URL, json=payload, headers=headers) as resp:
-            if resp.status_code != 200:
-                body = await resp.aread()
-                raise CodexApiError(resp.status_code, body.decode("utf-8", errors="replace")[:500])
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(remaining_timeout)) as client:
+            async with client.stream("POST", CODEX_URL, json=payload, headers=headers) as resp:
+                if resp.status_code != 200:
+                    body = await resp.aread()
+                    raise CodexApiError(resp.status_code, body.decode("utf-8", errors="replace")[:500])
 
-            buffer = ""
-            async for raw_chunk in resp.aiter_text():
-                buffer += raw_chunk
+                buffer = ""
+                async for raw_chunk in resp.aiter_text():
+                    buffer += raw_chunk
 
-                while "\n\n" in buffer:
-                    raw_event, buffer = buffer.split("\n\n", 1)
-                    data_lines = [
-                        line[6:].strip()
-                        for line in raw_event.splitlines()
-                        if line.startswith("data: ") and line[6:].strip()
-                    ]
+                    while "\n\n" in buffer:
+                        raw_event, buffer = buffer.split("\n\n", 1)
+                        data_lines = [
+                            line[6:].strip()
+                            for line in raw_event.splitlines()
+                            if line.startswith("data: ") and line[6:].strip()
+                        ]
 
-                    for data_line in data_lines:
-                        if data_line == "[DONE]":
-                            continue
-                        try:
-                            obj = json.loads(data_line)
-                        except (json.JSONDecodeError, ValueError):
-                            continue
+                        for data_line in data_lines:
+                            if data_line == "[DONE]":
+                                continue
+                            try:
+                                obj = json.loads(data_line)
+                            except (json.JSONDecodeError, ValueError):
+                                continue
 
-                        event_type = obj.get("type", "")
-                        if event_type == "response.created":
-                            result["response_id"] = (obj.get("response") or {}).get("id") or result["response_id"]
-                            result["status"] = (obj.get("response") or {}).get("status") or result["status"]
-                        elif event_type == "response.image_generation_call.partial_image":
-                            result["image_base64"] = obj.get("partial_image_b64") or result["image_base64"]
-                            result["revised_prompt"] = obj.get("revised_prompt") or result["revised_prompt"]
-                            result["status"] = obj.get("status") or result["status"]
-                        elif event_type == "response.completed":
-                            resp_obj = obj.get("response", {})
-                            result["status"] = resp_obj.get("status") or result["status"]
-                            result["response_id"] = resp_obj.get("id") or result["response_id"]
+                            event_type = obj.get("type", "")
+                            if event_type == "response.created":
+                                result["response_id"] = (obj.get("response") or {}).get("id") or result["response_id"]
+                                result["status"] = (obj.get("response") or {}).get("status") or result["status"]
+                            elif event_type == "response.image_generation_call.partial_image":
+                                result["image_base64"] = obj.get("partial_image_b64") or result["image_base64"]
+                                result["revised_prompt"] = obj.get("revised_prompt") or result["revised_prompt"]
+                                result["status"] = obj.get("status") or result["status"]
+                            elif event_type == "response.completed":
+                                resp_obj = obj.get("response", {})
+                                result["status"] = resp_obj.get("status") or result["status"]
+                                result["response_id"] = resp_obj.get("id") or result["response_id"]
+    except _STREAM_RECOVERABLE_ERRORS as exc:
+        stream_error = exc
 
     # 如果流式结束后已经有图片，直接返回
     if result["image_base64"]:
         return result
 
-    # 如果没有 response_id 或状态不是 in_progress，直接返回
-    if not result["response_id"] or result["status"] != "in_progress":
+    # 如果流式连接中断但已经拿到 response_id，可继续轮询补全。
+    if stream_error is not None and result["response_id"] and update_status:
+        await update_status("Codex 流式连接中断，正在轮询补全结果...")
+
+    # 如果连 response_id 都没拿到，无法恢复这次任务。
+    if not result["response_id"]:
+        if stream_error is not None:
+            raise RuntimeError(_humanize_codex_exception(stream_error)) from stream_error
         return result
 
     # ── 轮询补全 ──────────────────────────────────────
@@ -444,7 +476,7 @@ async def _call_codex_image(
         if now >= deadline:
             raise TimeoutError("生成超时，已强制停止（超过10分钟）")
 
-        await asyncio.sleep(min(20.0, max(1.0, deadline - now)))
+        await asyncio.sleep(min(float(poll_interval), max(1.0, deadline - now)))
 
         if time.monotonic() >= deadline:
             raise TimeoutError("生成超时，已强制停止（超过10分钟）")
@@ -706,7 +738,7 @@ class CodexImagePlugin(Plugin):
             nonlocal last_status_at, current_phase
             current_phase = phase
             now = time.monotonic()
-            if now - last_status_at < 1.5:
+            if now - last_status_at < status_interval:
                 return
             last_status_at = now
             elapsed = _format_duration((now - started_at) * 1000)
@@ -729,6 +761,18 @@ class CodexImagePlugin(Plugin):
         hb_task = asyncio.create_task(heartbeat())
 
         try:
+            if ctx.log:
+                await ctx.log(
+                    "info",
+                    "[codex_image] generation started",
+                    model=str(model),
+                    image_size=image_size,
+                    aspect_ratio=aspect_ratio,
+                    image_format=image_format,
+                    has_reference=bool(reference_image),
+                    status_interval=status_interval,
+                    max_wait=max_wait,
+                )
             result = await _call_codex_image(
                 prompt=_effective_prompt(prompt, aspect_ratio),
                 token=token,
@@ -740,11 +784,19 @@ class CodexImagePlugin(Plugin):
                 reasoning_effort=reasoning_effort,
                 image_size=image_size,
                 image_format=image_format,
+                poll_interval=status_interval,
             )
         except CodexApiError as exc:
             heartbeat_stop = True
             hb_task.cancel()
             elapsed = _format_duration((time.monotonic() - started_at) * 1000)
+            if ctx.log:
+                await ctx.log(
+                    "warn",
+                    "[codex_image] api error",
+                    status_code=exc.status_code,
+                    elapsed=elapsed,
+                )
             await _edit_html(
                 event,
                 f"❌ {_html_escape(_humanize_codex_error(exc.status_code, exc.detail))}\n⏱️ 耗时：{elapsed}"
@@ -754,13 +806,22 @@ class CodexImagePlugin(Plugin):
             heartbeat_stop = True
             hb_task.cancel()
             elapsed = _format_duration((time.monotonic() - started_at) * 1000)
+            if ctx.log:
+                await ctx.log("warn", "[codex_image] timeout", elapsed=elapsed)
             await _edit_html(event, f"❌ {_html_escape(_safe_error_text(str(exc)))}\n⏱️ 耗时：{elapsed}")
             return
         except Exception as exc:
             heartbeat_stop = True
             hb_task.cancel()
             elapsed = _format_duration((time.monotonic() - started_at) * 1000)
-            await _edit_html(event, f"❌ 生成失败：{_html_escape(_safe_error_text(str(exc)))}\n⏱️ 耗时：{elapsed}")
+            if ctx.log:
+                await ctx.log(
+                    "warn",
+                    "[codex_image] generation failed",
+                    error=type(exc).__name__,
+                    elapsed=elapsed,
+                )
+            await _edit_html(event, f"❌ {_html_escape(_humanize_codex_exception(exc))}\n⏱️ 耗时：{elapsed}")
             return
 
         heartbeat_stop = True
@@ -770,6 +831,14 @@ class CodexImagePlugin(Plugin):
         if not result.get("image_base64"):
             status_info = result.get("status", "")
             status_text = f"（status: {_html_escape(status_info)}）" if status_info else ""
+            if ctx.log:
+                await ctx.log(
+                    "warn",
+                    "[codex_image] no image returned",
+                    status=str(status_info or ""),
+                    response_id=str(result.get("response_id") or ""),
+                    elapsed=elapsed,
+                )
             await _edit_html(event, f"❌ 未收到生成图片{status_text}\n⏱️ 耗时：{elapsed}")
             return
 
@@ -821,8 +890,23 @@ class CodexImagePlugin(Plugin):
                     await event.edit("✅ 图片生成完成")
             else:
                 await event.edit("✅ 图片生成完成")
+            if ctx.log:
+                await ctx.log(
+                    "info",
+                    "[codex_image] generation completed",
+                    elapsed=elapsed,
+                    response_id=str(result.get("response_id") or ""),
+                    image_format=image_format,
+                )
 
         except Exception as exc:
+            if ctx.log:
+                await ctx.log(
+                    "warn",
+                    "[codex_image] send image failed",
+                    error=type(exc).__name__,
+                    elapsed=elapsed,
+                )
             await _edit_html(event, f"❌ 图片发送失败：{_html_escape(_safe_error_text(str(exc)))}")
 
     # ── 参考图下载 ────────────────────────────────────

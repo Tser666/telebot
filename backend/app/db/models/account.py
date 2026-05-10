@@ -141,8 +141,8 @@ class HumanizeConfig(Base):
 class SudoUser(Base):
     """授权其他 TG 用户通过独立前缀触发命令。
 
-    - ``allowed_chat_ids``：白名单对话 ID 列表；NULL/空 = 所有对话均可
-    - ``allowed_commands``：白名单命令列表；NULL/空 = 所有命令均可
+    - ``allowed_chat_ids``：白名单对话 ID 列表；NULL/空 = 不允许，``["*"]`` = 显式允许全部
+    - ``allowed_commands``：白名单命令列表；NULL/空 = 不允许，``["*"]`` = 显式允许全部
     """
 
     __tablename__ = "sudo_user"

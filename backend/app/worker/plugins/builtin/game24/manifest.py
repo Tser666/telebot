@@ -12,33 +12,36 @@ from app.worker.plugins.manifest import Manifest
 MANIFEST = Manifest(
     key="game24",
     display_name="24点游戏",
-    version="1.0.0",
+    version="1.1.0",
     author="builtin",
     description="随机生成 24 点题目，群内竞速答题，第一名获得奖金",
     permissions=["send_message", "edit_message", "read_chat", "delete_message"],
-    # level 字段说明：
-    #   - "global": 全局配置，所有账号共享
-    #   - "account": 账号级配置，按账号隔离（默认）
     config_schema={
         "type": "object",
         "x-ui-mode": "single",
+        "additionalProperties": False,
         "properties": {
-            "time_limit": {
-                "type": "integer", "title": "答题时间（秒）", "default": 30,
-                "minimum": 10, "maximum": 300,
-                "level": "global",
+            "command": {
+                "type": "string",
+                "title": "触发指令名",
+                "description": "不含系统命令前缀，可使用中文；不要包含空格。例：24d、开24点",
+                "default": "24d",
+                "minLength": 1,
+                "maxLength": 32,
+                "pattern": "^\\S+$",
+                "level": "account",
             },
-            "prize": {
-                "type": "integer", "title": "奖金金额", "default": 100,
-                "minimum": 0,
-                "level": "global",
-            },
-            "max_players": {
-                "type": "integer", "title": "最大参与人数", "default": 50,
-                "minimum": 2, "maximum": 200,
-                "level": "global",
+            "timeout": {
+                "type": "integer",
+                "title": "答题限时（秒）",
+                "description": "超过此时间无人答对，游戏自动结束。",
+                "default": 500,
+                "minimum": 30,
+                "maximum": 3600,
+                "level": "account",
             },
         },
+        "required": ["command", "timeout"],
     },
 )
 

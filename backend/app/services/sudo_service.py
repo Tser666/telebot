@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.models.account import SudoUser
 from ..schemas.sudo import SudoUserCreate, SudoUserUpdate
+from ..util.sudo_permissions import build_sudo_chat_scope, build_sudo_command_scope
 
 
 async def get_sudo_users(db: AsyncSession, account_id: int | None = None) -> list[SudoUser]:
@@ -32,8 +33,14 @@ async def create_sudo_user(db: AsyncSession, data: SudoUserCreate) -> SudoUser:
         account_id=data.account_id,
         tg_user_id=data.tg_user_id,
         display_name=data.display_name,
-        allowed_chat_ids=data.allowed_chat_ids,
-        allowed_commands=data.allowed_commands,
+        allowed_chat_ids=build_sudo_chat_scope(
+            data.allowed_chat_ids,
+            allow_all=data.allow_all_chats,
+        ),
+        allowed_commands=build_sudo_command_scope(
+            data.allowed_commands,
+            allow_all=data.allow_all_commands,
+        ),
     )
     db.add(sudo_user)
     await db.commit()
@@ -51,10 +58,25 @@ async def update_sudo_user(
 
     if data.display_name is not None:
         sudo_user.display_name = data.display_name
-    if data.allowed_chat_ids is not None:
-        sudo_user.allowed_chat_ids = data.allowed_chat_ids
-    if data.allowed_commands is not None:
-        sudo_user.allowed_commands = data.allowed_commands
+    chat_scope_touched = (
+        "allowed_chat_ids" in data.model_fields_set
+        or "allow_all_chats" in data.model_fields_set
+    )
+    if chat_scope_touched:
+        sudo_user.allowed_chat_ids = build_sudo_chat_scope(
+            data.allowed_chat_ids,
+            allow_all=bool(data.allow_all_chats),
+        )
+
+    command_scope_touched = (
+        "allowed_commands" in data.model_fields_set
+        or "allow_all_commands" in data.model_fields_set
+    )
+    if command_scope_touched:
+        sudo_user.allowed_commands = build_sudo_command_scope(
+            data.allowed_commands,
+            allow_all=bool(data.allow_all_commands),
+        )
 
     await db.commit()
     await db.refresh(sudo_user)

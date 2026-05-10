@@ -4,12 +4,16 @@ export interface SudoUserCreate {
   display_name?: string;
   allowed_chat_ids?: number[];
   allowed_commands?: string[];
+  allow_all_chats?: boolean;
+  allow_all_commands?: boolean;
 }
 
 export interface SudoUserUpdate {
   display_name?: string;
   allowed_chat_ids?: number[];
   allowed_commands?: string[];
+  allow_all_chats?: boolean;
+  allow_all_commands?: boolean;
 }
 
 export interface SudoUserResponse {
@@ -19,5 +23,7 @@ export interface SudoUserResponse {
   display_name?: string;
   allowed_chat_ids?: number[];
   allowed_commands?: string[];
+  allow_all_chats: boolean;
+  allow_all_commands: boolean;
   created_at: string;
 }

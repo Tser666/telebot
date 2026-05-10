@@ -91,7 +91,8 @@ async def list_audit_logs(
 #   - 前端只暴露 "system" / "event" 两种 tab；这里把请求转换成对应集合
 _SOURCE_ALIAS: dict[str, tuple[str, ...]] = {
     "system": ("system", "worker"),
-    "event": ("event", "plugin"),
+    "event": ("event",),
+    "plugin": ("plugin",),
 }
 
 
@@ -101,9 +102,10 @@ async def list_runtime_logs(
     _user: CurrentUser,
     account_id: int | None = Query(None, description="按账号过滤"),
     level: str | None = Query(None, description="debug | info | warn | warning | error"),
+    plugin_key: str | None = Query(None, description="按插件 key 过滤，仅 source=plugin 时常用"),
     source: str | None = Query(
         None,
-        description='日志类别："system"（worker 启停/错误）或 "event"（消息事件/plugin 命中）',
+        description='日志类别："event"（消息事件）/"plugin"（插件内部日志）/"system"（worker 启停/错误）',
     ),
     since: datetime | None = Query(None),
     limit: int = Query(100, ge=1, le=500),
@@ -111,7 +113,7 @@ async def list_runtime_logs(
     """返回最近运行日志。
 
     兼容前端传 ``level=warning``：内部映射为 ``level >= 'warn'``（warn + error）。
-    ``source`` 支持 ``"system"`` / ``"event"`` 两种 tab，自动包含历史 ``worker`` / ``plugin`` 旧值。
+    ``source`` 支持 ``"event"`` / ``"plugin"`` / ``"system"`` 三种 tab。
     """
     stmt = select(RuntimeLog).order_by(RuntimeLog.ts.desc()).limit(limit)
     if account_id is not None:
@@ -130,5 +132,7 @@ async def list_runtime_logs(
             stmt = stmt.where(RuntimeLog.source.in_(aliases))
         else:
             stmt = stmt.where(RuntimeLog.source == source)
+    if plugin_key:
+        stmt = stmt.where(RuntimeLog.detail["plugin_key"].as_string() == plugin_key)
     rows = (await db.execute(stmt)).scalars().all()
     return [RuntimeLogItem.from_row(r) for r in rows]

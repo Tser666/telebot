@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import {
   Card,
@@ -32,6 +33,8 @@ interface KillSwitchState {
   enabled: boolean;
 }
 
+type RuntimeLogLevel = "debug" | "info" | "warn" | "error";
+
 export function SettingsIndex() {
   const qc = useQueryClient();
   const [tab, setTab] = useState<"global" | "security" | "sudo" | "notify">("global");
@@ -57,6 +60,12 @@ export function SettingsIndex() {
     daily_tokens: "0",
     premium_daily: "0",
   });
+  const [logRetention, setLogRetention] = useState({
+    runtime_log_retention_days: "30",
+    runtime_log_max_message_chars: "2000",
+    runtime_log_max_detail_chars: "8000",
+    runtime_log_min_level: "info" as RuntimeLogLevel,
+  });
   useEffect(() => {
     if (settingsQ.data) {
       setPrefix(settingsQ.data.command_prefix ?? ",");
@@ -66,6 +75,12 @@ export function SettingsIndex() {
         daily_requests: String(settingsQ.data.llm_limits?.daily_requests ?? 0),
         daily_tokens: String(settingsQ.data.llm_limits?.daily_tokens ?? 0),
         premium_daily: String(settingsQ.data.llm_limits?.premium_daily ?? 0),
+      });
+      setLogRetention({
+        runtime_log_retention_days: String(settingsQ.data.log_retention?.runtime_log_retention_days ?? 30),
+        runtime_log_max_message_chars: String(settingsQ.data.log_retention?.runtime_log_max_message_chars ?? 2000),
+        runtime_log_max_detail_chars: String(settingsQ.data.log_retention?.runtime_log_max_detail_chars ?? 8000),
+        runtime_log_min_level: (settingsQ.data.log_retention?.runtime_log_min_level ?? "info") as RuntimeLogLevel,
       });
     }
   }, [settingsQ.data]);
@@ -104,6 +119,22 @@ export function SettingsIndex() {
     }),
     onSuccess: () => {
       toast.success("LLM 限额已保存");
+      qc.invalidateQueries({ queryKey: ["system", "settings"] });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
+  const saveLogRetention = useMutation({
+    mutationFn: () => patchSystemSettings({
+      log_retention: {
+        runtime_log_retention_days: Number(logRetention.runtime_log_retention_days) || 0,
+        runtime_log_max_message_chars: Number(logRetention.runtime_log_max_message_chars) || 2000,
+        runtime_log_max_detail_chars: Number(logRetention.runtime_log_max_detail_chars) || 0,
+        runtime_log_min_level: logRetention.runtime_log_min_level,
+      },
+    }),
+    onSuccess: () => {
+      toast.success("日志保留策略已保存");
       qc.invalidateQueries({ queryKey: ["system", "settings"] });
     },
     onError: (err) => toast.error(getErrMsg(err)),
@@ -303,6 +334,86 @@ export function SettingsIndex() {
               </div>
               <div className="mt-3">
                 <Button onClick={() => saveLlmLimits.mutate()} disabled={saveLlmLimits.isPending}>
+                  保存
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">日志保留策略</CardTitle>
+              <CardDescription>
+                控制运行日志保存多久，以及单条日志内容最多保存多少字符。0 天表示不自动删除。
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-3 md:grid-cols-4">
+                <div className="space-y-1.5">
+                  <Label>保留天数</Label>
+                  <Input
+                    inputMode="numeric"
+                    value={logRetention.runtime_log_retention_days}
+                    onChange={(e) =>
+                      setLogRetention((v) => ({
+                        ...v,
+                        runtime_log_retention_days: e.target.value.replace(/[^0-9]/g, ""),
+                      }))
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">默认 30；0 = 不自动删除</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>消息正文最多字符</Label>
+                  <Input
+                    inputMode="numeric"
+                    value={logRetention.runtime_log_max_message_chars}
+                    onChange={(e) =>
+                      setLogRetention((v) => ({
+                        ...v,
+                        runtime_log_max_message_chars: e.target.value.replace(/[^0-9]/g, ""),
+                      }))
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">默认 2000，最小 200</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>结构化详情最多字符</Label>
+                  <Input
+                    inputMode="numeric"
+                    value={logRetention.runtime_log_max_detail_chars}
+                    onChange={(e) =>
+                      setLogRetention((v) => ({
+                        ...v,
+                        runtime_log_max_detail_chars: e.target.value.replace(/[^0-9]/g, ""),
+                      }))
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">默认 8000；0 = 不保存 detail</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>最小日志级别</Label>
+                  <Select
+                    value={logRetention.runtime_log_min_level}
+                    onChange={(e) =>
+                      setLogRetention((v) => ({
+                        ...v,
+                        runtime_log_min_level: e.target.value as RuntimeLogLevel,
+                      }))
+                    }
+                  >
+                    <option value="debug">debug（排障最详细）</option>
+                    <option value="info">info（默认）</option>
+                    <option value="warn">warn（只看告警和错误）</option>
+                    <option value="error">error（只看错误）</option>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    在主进程落库前过滤低级别日志，修改后对新日志生效。
+                  </p>
+                </div>
+              </div>
+              <div className="mt-3">
+                <Button onClick={() => saveLogRetention.mutate()} disabled={saveLogRetention.isPending}>
                   保存
                 </Button>
               </div>

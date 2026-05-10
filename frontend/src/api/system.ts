@@ -54,8 +54,9 @@ export async function strictRateLimit(
 export interface RuntimeLogQuery {
   account_id?: number | string;
   level?: string;
-  /** "system" = worker 启停 / 错误；"event" = 消息事件 / plugin 命中 */
-  source?: "system" | "event" | string;
+  /** event = 消息事件；plugin = 插件内部日志；system = worker 启停 / 错误 */
+  source?: "system" | "event" | "plugin" | string;
+  plugin_key?: string;
   since?: string;
   limit?: number;
 }

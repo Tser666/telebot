@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { listAccountFeatures } from "@/api/accounts";
 import { getSystemSettings } from "@/api/system";
 import { Button } from "@/components/ui/button";
+import { TelegramHtmlPreview } from "@/components/TelegramHtmlPreview";
 import {
   Card,
   CardContent,
@@ -38,11 +39,16 @@ interface CodexImageConfig {
   custom_instructions: string;
 }
 
-function clampInt(s: string, min: number, max: number): number {
+function parseClampedInt(
+  s: string,
+  min: number,
+  max: number,
+): number | null {
   const cleaned = s.replace(/[^0-9]/g, "");
-  if (!cleaned) return min;
+  if (!cleaned) return null;
   const n = parseInt(cleaned, 10);
-  return Math.max(min, Math.min(max, Number.isNaN(n) ? min : n));
+  if (Number.isNaN(n)) return null;
+  return Math.max(min, Math.min(max, n));
 }
 
 const DEFAULT_CONFIG: CodexImageConfig = {
@@ -110,8 +116,12 @@ export function CodexImageConfigPage() {
   const [command, setCommand] = useState(DEFAULT_CONFIG.command);
   const [accessToken, setAccessToken] = useState(DEFAULT_CONFIG.access_token);
   const [model, setModel] = useState(DEFAULT_CONFIG.model);
-  const [maxWait, setMaxWait] = useState(DEFAULT_CONFIG.max_wait_seconds);
-  const [statusInterval, setStatusInterval] = useState(DEFAULT_CONFIG.status_interval_seconds);
+  const [maxWaitInput, setMaxWaitInput] = useState(
+    String(DEFAULT_CONFIG.max_wait_seconds),
+  );
+  const [statusIntervalInput, setStatusIntervalInput] = useState(
+    String(DEFAULT_CONFIG.status_interval_seconds),
+  );
   const [messageTemplate, setMessageTemplate] = useState(DEFAULT_CONFIG.message_template);
   const [imageSize, setImageSize] = useState(DEFAULT_CONFIG.image_size);
   const [aspectRatio, setAspectRatio] = useState(DEFAULT_CONFIG.aspect_ratio);
@@ -132,9 +142,14 @@ export function CodexImageConfigPage() {
       setModel(currentConfig.model);
     }
     if (currentConfig.max_wait_seconds !== undefined) {
-      setMaxWait(currentConfig.max_wait_seconds);
+      setMaxWaitInput(String(currentConfig.max_wait_seconds));
     }
-    setStatusInterval(currentConfig.status_interval_seconds ?? DEFAULT_CONFIG.status_interval_seconds);
+    setStatusIntervalInput(
+      String(
+        currentConfig.status_interval_seconds ??
+          DEFAULT_CONFIG.status_interval_seconds,
+      ),
+    );
     setMessageTemplate(currentConfig.message_template ?? DEFAULT_CONFIG.message_template);
     setImageSize(currentConfig.image_size ?? DEFAULT_CONFIG.image_size);
     setAspectRatio(currentConfig.aspect_ratio ?? DEFAULT_CONFIG.aspect_ratio);
@@ -164,12 +179,22 @@ export function CodexImageConfigPage() {
   });
 
   function handleSave() {
+    const maxWaitSeconds = parseClampedInt(maxWaitInput, 60, 1800);
+    if (maxWaitSeconds === null) {
+      toast.error("最大等待时间不能为空");
+      return;
+    }
+    const statusIntervalSeconds = parseClampedInt(statusIntervalInput, 10, 300);
+    if (statusIntervalSeconds === null) {
+      toast.error("状态刷新间隔不能为空");
+      return;
+    }
     saveMut.mutate({
       command: command.trim() || DEFAULT_CONFIG.command,
       access_token: accessToken,
       model,
-      max_wait_seconds: maxWait,
-      status_interval_seconds: statusInterval,
+      max_wait_seconds: maxWaitSeconds,
+      status_interval_seconds: statusIntervalSeconds,
       message_template: messageTemplate || DEFAULT_CONFIG.message_template,
       image_size: imageSize,
       aspect_ratio: aspectRatio,
@@ -362,9 +387,9 @@ export function CodexImageConfigPage() {
               id="max-wait"
               inputMode="numeric"
               className="w-32"
-              value={String(maxWait)}
+              value={maxWaitInput}
               onChange={(e) => {
-                setMaxWait(clampInt(e.target.value, 60, 1800));
+                setMaxWaitInput(e.target.value.replace(/[^0-9]/g, ""));
                 setDirty(true);
               }}
             />
@@ -380,9 +405,9 @@ export function CodexImageConfigPage() {
               id="status-interval"
               inputMode="numeric"
               className="w-32"
-              value={String(statusInterval)}
+              value={statusIntervalInput}
               onChange={(e) => {
-                setStatusInterval(clampInt(e.target.value, 10, 300));
+                setStatusIntervalInput(e.target.value.replace(/[^0-9]/g, ""));
                 setDirty(true);
               }}
             />
@@ -491,9 +516,7 @@ export function CodexImageConfigPage() {
             />
             <div className="rounded-md border bg-background p-3 text-xs">
               <div className="mb-1 font-medium">预览</div>
-              <pre className="whitespace-pre-wrap break-words font-sans text-muted-foreground">
-                {renderTemplate(messageTemplate, previewValues)}
-              </pre>
+              <TelegramHtmlPreview value={renderTemplate(messageTemplate, previewValues)} />
             </div>
           </div>
 
@@ -575,9 +598,14 @@ export function CodexImageConfigPage() {
                     setModel(currentConfig.model);
                   }
                   if (currentConfig.max_wait_seconds !== undefined) {
-                    setMaxWait(currentConfig.max_wait_seconds);
+                    setMaxWaitInput(String(currentConfig.max_wait_seconds));
                   }
-                  setStatusInterval(currentConfig.status_interval_seconds ?? DEFAULT_CONFIG.status_interval_seconds);
+                  setStatusIntervalInput(
+                    String(
+                      currentConfig.status_interval_seconds ??
+                        DEFAULT_CONFIG.status_interval_seconds,
+                    ),
+                  );
                   setMessageTemplate(currentConfig.message_template ?? DEFAULT_CONFIG.message_template);
                   setImageSize(currentConfig.image_size ?? DEFAULT_CONFIG.image_size);
                   setAspectRatio(currentConfig.aspect_ratio ?? DEFAULT_CONFIG.aspect_ratio);

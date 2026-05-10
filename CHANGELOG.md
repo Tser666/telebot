@@ -10,6 +10,40 @@
 
 ---
 
+## [0.10.0] — 2026-05-10 · feature · 账号 Bot 联动 + 日志可观测性 + Sudo 收紧
+
+### Added
+- 新增账号绑定 Bot 联动系统（每账号独立 Bot Token、独立授权、独立运行）：
+  - 新增数据模型：`account_bot`、`account_bot_user`；
+  - 新增迁移：`backend/alembic/versions/0021_account_bot.py`；
+  - 新增 API：`/api/accounts/{aid}/bot`、`/bot/test`、`/bot/restart-runtime`、`/bot/users`；
+  - 新增运行时：`account_bot_runtime` polling manager，应用启动自动拉起、关闭自动停止；
+  - 新增前端账号详情页「Bot 联动」Tab，支持配置、测试、授权用户与角色管理。
+- 日志系统新增最小落库级别配置 `runtime_log_min_level`（`debug/info/warn/error`），支持在系统设置中切换排障与日常模式。
+- 日志中心新增“插件日志”独立视图与 `plugin_key` 过滤，支持按插件维度快速定位故障。
+- 新增 `TelegramHtmlPreview` 组件，用于消息模板 HTML 预览。
+
+### Changed
+- Sudo 权限模型改为默认拒绝：`allowed_chat_ids` / `allowed_commands` 空值不再等于“全部允许”，显式全部需设置 `*`（前端通过 `allow_all_*` 开关表达）。
+- Sudo 管理页合并“允许命令”与“当前可用命令”选择体验，支持点击卡片启停，减少手填。
+- 运行日志保留策略在原有“保留天数/长度截断”基础上增加“最小级别”控制，便于生产环境降噪。
+- 24 点插件完成结构化重构：配置解析、事件适配、判题、发奖、超时、公告拆分；同 chat 加锁避免并发双发奖。
+- 24 点插件 manifest 与运行时配置统一为 `command + timeout`，移除历史错位字段。
+- 24 点插件对“是否本人消息”判定改为优先 `sender_id == self_tg_user_id`，减少部分群组中 `outgoing` 标记不稳定导致的误跳过。
+- Codex 生图与 24 点配置页数值输入交互优化：允许先清空再输入，保存时再校验，避免输入框强制回弹。
+
+### Fixed
+- 修复插件日志与系统日志混叠：`source=event` 不再包含插件日志，插件日志独立归类为 `source=plugin`。
+- 修复 Codex 生图网络中断错误提示不友好问题，常见 chunked stream 断连改为可读提示并继续脱敏。
+- 修复 Sudo incoming 拒绝提示在群聊噪声过高的问题：对未配置/未授权场景默认静默。
+- 修复配置页部分数值输入无法删除为空再重输的问题（24 点、Codex 生图）。
+
+### Verification
+- 后端测试通过：`backend/app/tests/test_game24_plugin.py`、`backend/app/tests/test_supervisor_reliable_consumer.py`、`backend/app/tests/test_plugin_loader.py`、`backend/app/tests/test_sudo.py`。
+- 前端类型检查通过：`pnpm -C frontend exec tsc -b --noEmit`。
+
+---
+
 
 ## [0.9.8] — 2026-05-10 · feature · Codex 生图体验 + 插件模式与调度器收口
 

@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
+import { TelegramHtmlPreview } from "@/components/TelegramHtmlPreview";
 import { Spinner } from "@/components/ui/misc";
 import {
   Card,
@@ -1409,9 +1410,7 @@ function MessageFormatSection({
 
       <div className="rounded-md border bg-background p-3 text-xs">
         <div className="mb-1 font-medium">预览</div>
-        <pre className="whitespace-pre-wrap break-words font-sans text-muted-foreground">
-          {previewText}
-        </pre>
+        <TelegramHtmlPreview value={previewText} mode={outputFormat} />
       </div>
     </div>
   );

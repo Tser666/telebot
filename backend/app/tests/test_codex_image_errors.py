@@ -5,6 +5,7 @@ import json
 from app.worker.plugins.builtin.codex_image.plugin import (
     _edit_html,
     _humanize_codex_error,
+    _humanize_codex_exception,
     _image_ext_from_bytes,
     _parse_generation_args,
     _safe_error_text,
@@ -37,6 +38,14 @@ def test_codex_error_redacts_sensitive_values_and_paths() -> None:
     assert "abcdefghijklmnopqrstuvwxyz" not in msg
     assert "/Users/me" not in msg
     assert "<path>" in msg
+
+
+def test_codex_stream_error_is_human_readable() -> None:
+    msg = _humanize_codex_exception(
+        RuntimeError("peer closed connection without sending complete message body (incomplete chunked read)")
+    )
+    assert "流式连接中断" in msg
+    assert "incomplete chunked read" not in msg
 
 
 def test_codex_image_command_options_are_extracted() -> None:

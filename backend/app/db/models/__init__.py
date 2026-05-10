@@ -1,6 +1,7 @@
 """所有 ORM 模型集中导出，便于 alembic autogenerate 与外部 import。"""
 
 from .account import Account, HumanizeConfig, Proxy
+from .account_bot import AccountBot, AccountBotUser
 from .command import AccountCommandLink, CommandTemplate, LLMProvider
 from .feature import AccountFeature, Feature
 from .ignored_peer import IgnoredPeer
@@ -16,6 +17,8 @@ from .user import WebUser
 
 __all__ = [
     "Account",
+    "AccountBot",
+    "AccountBotUser",
     "AccountCommandLink",
     "AccountFeature",
     "AuditLog",

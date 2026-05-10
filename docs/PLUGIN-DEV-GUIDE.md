@@ -14,10 +14,11 @@
 6. [命令系统](#6-命令系统)
 7. [消息监听](#7-消息监听)
 8. [Conversation 工具](#8-conversation-工具)
-9. [远程插件](#9-远程插件)
-10. [清理生命周期（cleanup）](#10-清理生命周期cleanup)
-11. [安全边界](#11-安全边界)
-12. [前端集成](#12-前端集成)
+9. [插件日志](#9-插件日志)
+10. [远程插件](#10-远程插件)
+11. [清理生命周期（cleanup）](#11-清理生命周期cleanup)
+12. [安全边界](#12-安全边界)
+13. [前端集成](#13-前端集成)
     - [模式概览](#模式概览)
     - [模式 A：规则驱动配置页](#模式-a规则驱动配置页forward--autoreply--autorepeat)
     - [模式 A 补充：后端 Dry-Run 适配](#模式-a-补充后端-dry-run-适配)
@@ -25,9 +26,9 @@
     - [模式 C：Schema 驱动弹窗](#模式-cschema-驱动弹窗configdialog)
     - [基础能力：平台内置功能](#基础能力平台内置功能scheduler)
     - [适配自检清单](#适配自检清单)
-13. [调试建议](#13-调试建议)
-14. [安全与合规](#14-安全与合规)
-15. [完整示例](#15-完整示例)
+14. [调试建议](#14-调试建议)
+15. [安全与合规](#15-安全与合规)
+16. [完整示例](#16-完整示例)
 
 ---
 
@@ -138,7 +139,7 @@ class Plugin:
     display_name: str                 # 显示名
 
     # === 可选配置 ===
-    message_channels: list[str]       # 监听方向: ["group", "private", "channel", "outgoing"]
+    message_channels: set[str]        # 监听方向: {"incoming"} / {"outgoing"} / 二者都监听
     description: str = ""             # 描述（用于帮助系统）
 
     # === 生命周期钩子 ===
@@ -328,11 +329,13 @@ async def on_command(
 
 ```python
 class MyPlugin(Plugin):
-    message_channels = ["group", "private"]
+    message_channels = {"incoming"}
 
     async def on_message(self, ctx: PluginContext, event) -> None:
         """监听所有匹配方向的消息。"""
-        if event.outgoing:
+        # 兼容 NewMessage.Event 与裸 Message；不要直接 event.outgoing。
+        msg = getattr(event, "message", event)
+        if bool(getattr(event, "outgoing", getattr(msg, "out", False))):
             return  # 忽略自己发的
         # 处理逻辑
 ```
@@ -341,10 +344,29 @@ class MyPlugin(Plugin):
 
 | 值 | 说明 |
 |---|------|
-| `group` | 群组消息 |
-| `private` | 私聊消息 |
-| `channel` | 频道消息 |
-| `outgoing` | 自己发出的消息 |
+| `incoming` | 别人发给本账号、群、频道的消息 |
+| `outgoing` | 当前 UserBot 账号自己发出的消息 |
+
+> 注意：当前 loader 的方向过滤只有 `incoming/outgoing` 两类。群组、私聊、频道请在 hook 内用 `event.is_group` / `event.is_private` / `event.is_channel` 或 `chat_id` 判断。
+
+### 事件对象兼容写法
+
+插件收到的对象通常是 `events.NewMessage.Event`，但在测试、热重载、Telethon 代理属性等场景里，也可能表现得更像裸 `Message`。因此建议用 `getattr` 做兼容，不要直接假设 `event.outgoing`、`event.message.id` 一定存在：
+
+```python
+def event_message(event):
+    return getattr(event, "message", event)
+
+def event_text(event) -> str:
+    msg = event_message(event)
+    return str(getattr(event, "raw_text", None) or getattr(msg, "raw_text", None) or "").strip()
+
+def is_outgoing(event) -> bool:
+    msg = event_message(event)
+    return bool(getattr(event, "outgoing", getattr(msg, "out", False)))
+```
+
+这样可以避免类似 `'Message' object has no attribute 'outgoing'` 的运行时错误。
 
 ---
 
@@ -385,7 +407,73 @@ except ConversationTimeout:
 
 ---
 
-## 9. 远程插件
+## 9. 插件日志
+
+插件日志会进入后台的“日志中心 → 插件日志”分页，和“消息日志”“系统日志”分开显示。
+
+### 如何写日志
+
+插件运行时通过 `ctx.log(level, message, **detail)` 输出日志：
+
+```python
+await ctx.log(
+    "info",
+    "自动回复命中：关键词 hello，准备发送回复。",
+    chat_id=event.chat_id,
+    rule_id=rule.id,
+    keyword="hello",
+)
+```
+
+日志会自动带上：
+
+- `source="plugin"`
+- `plugin_key`
+- `account_id`
+- `level`
+- `message`
+- `detail`
+
+### 日志写法规范
+
+- `message` 写给人看：用一句通俗的话说明发生了什么。
+- `detail` 写给排障看：放 `chat_id`、`rule_id`、`sender_id`、`message_preview`、`elapsed_ms` 等结构化字段。
+- 不要在日志中写 API Key、Bot Token、session、完整文件路径、完整群聊长文本。
+- 错误日志要说明“哪一步失败 + 失败原因 + 是否已跳过/重试/继续运行”。
+
+推荐：
+
+```python
+await ctx.log(
+    "error",
+    f"图片生成失败：上游返回限额错误，本次任务已停止。原因：{err_type}",
+    chat_id=chat_id,
+    elapsed_ms=elapsed_ms,
+)
+```
+
+不推荐：
+
+```python
+await ctx.log("error", f"failed: {raw_exception_with_token}")
+```
+
+### loader 自动记录的插件异常
+
+如果插件 `on_message` 抛异常，loader 会自动写一条插件日志，并附带：
+
+- `plugin_key`
+- `direction`
+- `chat_id`
+- `sender_id`
+- `message_preview`
+- `traceback`
+
+这类异常不会让 worker 崩溃，当前消息会被跳过，其它插件继续运行。
+
+---
+
+## 10. 远程插件
 
 ### 安装方式
 
@@ -453,7 +541,7 @@ except ConversationTimeout:
 
 ---
 
-## 10. 清理生命周期（cleanup）
+## 11. 清理生命周期（cleanup）
 
 参考 TeleBox 的三种风格：
 
@@ -491,7 +579,7 @@ class MyPlugin(Plugin):
 
 ---
 
-## 11. 安全边界
+## 12. 安全边界
 
 ### 命令前缀
 
@@ -519,7 +607,7 @@ Manifest 中的 `permissions` 字段声明插件需要的能力：
 
 ---
 
-## 12. 前端集成
+## 13. 前端集成
 
 插件前端配置分三种插件模式，另有一类平台内置基础能力。后续新增插件时，优先通过 `manifest.py` 的 `config_schema["x-ui-mode"]` 声明分类，前端会自动归类展示。
 
@@ -875,7 +963,7 @@ config_schema={
 
 ---
 
-## 13. 调试建议
+## 14. 调试建议
 
 ### 快速自检
 
@@ -897,7 +985,7 @@ config_schema={
 
 ---
 
-## 14. 安全与合规
+## 15. 安全与合规
 
 - 不要把明文 key 写入日志
 - 不要把完整隐私消息持久化到外部系统
@@ -906,7 +994,7 @@ config_schema={
 
 ---
 
-## 15. 完整示例
+## 16. 完整示例
 
 ### 天气查询插件
 

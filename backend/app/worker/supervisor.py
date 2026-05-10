@@ -37,9 +37,10 @@ import subprocess
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 
 from ..db.base import AsyncSessionLocal
 from ..db.models.account import (
@@ -49,6 +50,7 @@ from ..db.models.account import (
 )
 from ..db.models.log import RuntimeLog
 from ..db.models.rate_limit import RateLimitEvent
+from ..db.models.system import SystemSetting
 from ..redis_client import get_redis
 from .ipc import (
     CMD_PAUSE,
@@ -64,6 +66,118 @@ from .ipc import (
 from .runtime import worker_main
 
 log = logging.getLogger(__name__)
+
+_LOG_RETENTION_CACHE: tuple[float, dict[str, int]] = (0.0, {})
+_LAST_RUNTIME_LOG_CLEANUP_AT = 0.0
+_RUNTIME_LOG_CLEANUP_INTERVAL = 3600.0
+
+
+async def _get_log_retention_config() -> dict[str, int]:
+    """读取运行日志保留设置；短缓存避免每条日志都查 system_setting。"""
+
+    global _LOG_RETENTION_CACHE
+    now = time.monotonic()
+    cached_at, cached = _LOG_RETENTION_CACHE
+    if cached and now - cached_at < 60:
+        return cached
+    defaults = {
+        "runtime_log_retention_days": 30,
+        "runtime_log_max_message_chars": 2000,
+        "runtime_log_max_detail_chars": 8000,
+        "runtime_log_min_level": "info",
+    }
+    try:
+        async with AsyncSessionLocal() as db:
+            row = await db.get(SystemSetting, "log_retention")
+        raw = row.value if row is not None and isinstance(row.value, dict) else {}
+        cfg = {
+            "runtime_log_retention_days": max(
+                0,
+                int(raw.get("runtime_log_retention_days", defaults["runtime_log_retention_days"]) or 0),
+            ),
+            "runtime_log_max_message_chars": max(
+                200,
+                int(
+                    raw.get(
+                        "runtime_log_max_message_chars",
+                        defaults["runtime_log_max_message_chars"],
+                    )
+                    or defaults["runtime_log_max_message_chars"]
+                ),
+            ),
+            "runtime_log_max_detail_chars": max(
+                0,
+                int(raw.get("runtime_log_max_detail_chars", defaults["runtime_log_max_detail_chars"]) or 0),
+            ),
+            "runtime_log_min_level": (
+                str(raw.get("runtime_log_min_level", defaults["runtime_log_min_level"]) or "info").lower()
+                if str(raw.get("runtime_log_min_level", defaults["runtime_log_min_level"]) or "info").lower()
+                in {"debug", "info", "warn", "error"}
+                else "info"
+            ),
+        }
+    except Exception:
+        log.debug("读取 log_retention 失败，使用默认值", exc_info=True)
+        cfg = defaults
+    _LOG_RETENTION_CACHE = (now, cfg)
+    return cfg
+
+
+def _truncate_text(value: str, max_chars: int) -> str:
+    if max_chars <= 0 or len(value) <= max_chars:
+        return value
+    return value[: max(0, max_chars - 40)] + f"...（已截断，原始长度 {len(value)} 字符）"
+
+
+def _truncate_detail(value: object, max_chars: int) -> object:
+    if max_chars <= 0 or value is None:
+        return None
+    try:
+        raw = json.dumps(value, ensure_ascii=False, default=str)
+    except Exception:
+        raw = str(value)
+    if len(raw) <= max_chars:
+        return value
+    return {
+        "_truncated": True,
+        "preview": raw[: max(0, max_chars - 80)],
+        "original_chars": len(raw),
+    }
+
+
+def _normalize_runtime_log_level(level: object) -> str:
+    raw = str(level or "info").strip().lower()
+    if raw == "warning":
+        return "warn"
+    if raw in {"debug", "info", "warn", "error"}:
+        return raw
+    return "info"
+
+
+def _runtime_log_level_allowed(level: str, min_level: str) -> bool:
+    order = {"debug": 10, "info": 20, "warn": 30, "error": 40}
+    return order.get(level, 20) >= order.get(min_level, 20)
+
+
+async def _cleanup_runtime_logs_if_due() -> None:
+    """按 log_retention 定期清理过期运行日志；0 天表示不自动删除。"""
+
+    global _LAST_RUNTIME_LOG_CLEANUP_AT
+    now = time.monotonic()
+    if now - _LAST_RUNTIME_LOG_CLEANUP_AT < _RUNTIME_LOG_CLEANUP_INTERVAL:
+        return
+    _LAST_RUNTIME_LOG_CLEANUP_AT = now
+    cfg = await _get_log_retention_config()
+    days = int(cfg.get("runtime_log_retention_days", 30) or 0)
+    if days <= 0:
+        return
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    try:
+        async with AsyncSessionLocal() as db:
+            await db.execute(delete(RuntimeLog).where(RuntimeLog.ts < cutoff))
+            await db.commit()
+    except Exception:
+        log.debug("清理过期 runtime_log 失败", exc_info=True)
 
 # ⚠ 强制 spawn 启动方式（不要 fork）
 #
@@ -454,6 +568,16 @@ async def _monitor_loop() -> None:
                         )
                     except Exception:
                         log.exception("发送 account dead 告警失败: aid=%d", aid)
+                    try:
+                        from ..services.account_bot_runtime import notify_account
+
+                        await notify_account(
+                            aid,
+                            f"⚠️ <b>账号 worker 已停止</b>\n账号：<code>{aid}</code>\n"
+                            f"连续失败：<code>{h.fail_count}</code> 次，状态已置为 dead。",
+                        )
+                    except Exception:
+                        log.exception("发送 account bot dead 告警失败: aid=%d", aid)
                     h.desired = "stopped"
                     continue
                 wait = _BACKOFF[min(h.fail_count - 1, len(_BACKOFF) - 1)]
@@ -474,7 +598,7 @@ async def _consume_runtime_log() -> None:
     await _consume_stream_reliable(
         stream_key=RUNTIME_LOG_STREAM,
         inflight_key=f"{RUNTIME_LOG_STREAM}:inflight",
-        build_row=_build_runtime_log_row,
+        build_row=_build_runtime_log_row_with_retention,
         consumer_name="runtime_log",
     )
 
@@ -499,6 +623,33 @@ def _build_runtime_log_row(raw: str) -> RuntimeLog | None:
             source=d.get("source"),
             message=d.get("message", ""),
             detail=d.get("detail"),
+        )
+    except Exception:
+        return None
+
+
+async def _build_runtime_log_row_with_retention(raw: str) -> RuntimeLog | None:
+    """把 runtime_log 原始 JSON 转为 ORM 行，并按设置截断内容。"""
+
+    try:
+        d = json.loads(raw)
+        cfg = await _get_log_retention_config()
+        level = _normalize_runtime_log_level(d.get("level", "info"))
+        min_level = str(cfg.get("runtime_log_min_level", "info") or "info")
+        if not _runtime_log_level_allowed(level, min_level):
+            return None
+        return RuntimeLog(
+            account_id=d.get("account_id"),
+            level=level,
+            source=d.get("source"),
+            message=_truncate_text(
+                str(d.get("message", "")),
+                int(cfg.get("runtime_log_max_message_chars", 2000) or 2000),
+            ),
+            detail=_truncate_detail(
+                d.get("detail"),
+                int(cfg.get("runtime_log_max_detail_chars", 8000) or 0),
+            ),
         )
     except Exception:
         return None
@@ -564,6 +715,8 @@ async def _consume_stream_reliable(
                 ack_items: list[str] = []
                 for raw in items:
                     row = build_row(raw)
+                    if hasattr(row, "__await__"):
+                        row = await row
                     if row is None:
                         # 无法解析的数据直接丢弃，避免毒消息永久阻塞队列。
                         await redis.lrem(inflight_key, 1, raw)
@@ -575,6 +728,17 @@ async def _consume_stream_reliable(
                 async with AsyncSessionLocal() as db:
                     db.add_all(rows)
                     await db.commit()
+                if consumer_name == "runtime_log":
+                    await _cleanup_runtime_logs_if_due()
+                if consumer_name == "runtime_log":
+                    try:
+                        from ..services.account_bot_runtime import notify_runtime_log
+
+                        for row in rows:
+                            if isinstance(row, RuntimeLog):
+                                asyncio.create_task(notify_runtime_log(row))
+                    except Exception:
+                        log.debug("account bot runtime log notify skipped", exc_info=True)
                 for raw in ack_items:
                     await redis.lrem(inflight_key, 1, raw)
             except asyncio.CancelledError:

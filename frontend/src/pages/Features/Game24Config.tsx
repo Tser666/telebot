@@ -24,11 +24,16 @@ interface Game24Config {
   timeout: number;
 }
 
-function clampInt(s: string, min: number, max: number): number {
+function parseClampedInt(
+  s: string,
+  min: number,
+  max: number,
+): number | null {
   const cleaned = s.replace(/[^0-9]/g, "");
-  if (!cleaned) return min;
+  if (!cleaned) return null;
   const n = parseInt(cleaned, 10);
-  return Math.max(min, Math.min(max, Number.isNaN(n) ? min : n));
+  if (Number.isNaN(n)) return null;
+  return Math.max(min, Math.min(max, n));
 }
 
 const DEFAULT_CONFIG: Game24Config = {
@@ -58,7 +63,9 @@ export function Game24ConfigPage() {
   const currentConfig = (game24Feature?.config ?? {}) as Partial<Game24Config>;
 
   const [command, setCommand] = useState(DEFAULT_CONFIG.command);
-  const [timeout, setTimeout_] = useState(DEFAULT_CONFIG.timeout);
+  const [timeoutInput, setTimeoutInput] = useState(
+    String(DEFAULT_CONFIG.timeout),
+  );
   const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
@@ -66,7 +73,7 @@ export function Game24ConfigPage() {
       setCommand(currentConfig.command);
     }
     if (currentConfig.timeout !== undefined) {
-      setTimeout_(currentConfig.timeout);
+      setTimeoutInput(String(currentConfig.timeout));
     }
     setDirty(false);
   }, [game24Feature?.config]);
@@ -89,6 +96,11 @@ export function Game24ConfigPage() {
   });
 
   function handleSave() {
+    const timeout = parseClampedInt(timeoutInput, 30, 3600);
+    if (timeout === null) {
+      toast.error("答题限时不能为空");
+      return;
+    }
     saveMut.mutate({ command, timeout });
   }
 
@@ -172,9 +184,9 @@ export function Game24ConfigPage() {
               id="timeout"
               inputMode="numeric"
               className="w-32"
-              value={String(timeout)}
+              value={timeoutInput}
               onChange={(e) => {
-                setTimeout_(clampInt(e.target.value, 30, 3600));
+                setTimeoutInput(e.target.value.replace(/[^0-9]/g, ""));
                 setDirty(true);
               }}
             />
@@ -197,7 +209,7 @@ export function Game24ConfigPage() {
                     setCommand(currentConfig.command);
                   }
                   if (currentConfig.timeout !== undefined) {
-                    setTimeout_(currentConfig.timeout);
+                    setTimeoutInput(String(currentConfig.timeout));
                   }
                   setDirty(false);
                 }}

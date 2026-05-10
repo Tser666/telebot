@@ -1,7 +1,10 @@
-// 日志中心：runtime_log 拆成两个 tab —— 消息日志 / 系统日志
+// 日志中心：runtime_log 拆成三个 tab —— 消息日志 / 插件日志 / 系统日志
 //
-// 消息日志（source=event）：incoming 消息进来、plugin 命中、命令派发等业务事件，
+// 消息日志（source=event）：incoming 消息进来、命令派发等业务事件，
 // 适合用于"为什么我的 auto_reply 没回复 / 转发到底有没有发出"这类问题排查。
+//
+// 插件日志（source=plugin）：插件自己的 ctx.log 输出、插件 on_message 异常、命中/跳过原因，
+// 适合用于"某个插件为什么没按预期工作"这类问题排查。
 //
 // 系统日志（source=system）：worker 启停、IPC reload、风控状态、技术异常，
 // 适合用于"账号是不是真的 active / kill switch 是不是真的下发了"这类问题排查。
@@ -52,7 +55,16 @@ const LEVEL_VARIANT: Record<
   error: "destructive",
 };
 
-type LogTab = "event" | "system";
+type LogTab = "event" | "plugin" | "system";
+
+const BUILTIN_PLUGIN_KEYS = [
+  "auto_reply",
+  "autorepeat",
+  "codex_image",
+  "forward",
+  "game24",
+  "scheduler",
+];
 
 export function Logs() {
   const [tab, setTab] = useState<LogTab>("event");
@@ -60,6 +72,7 @@ export function Logs() {
   const [level, setLevel] = useState("");
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [search, setSearch] = useState("");
+  const [pluginKey, setPluginKey] = useState("");
 
   const accountsQ = useQuery({
     queryKey: ["accounts"],
@@ -71,7 +84,7 @@ export function Logs() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">日志中心</h1>
         <p className="text-sm text-muted-foreground">
-          消息日志（业务事件）与系统日志（worker / 错误）分开看；默认 5 秒自动刷新
+          消息、插件、系统三类日志分开看；默认 5 秒自动刷新
         </p>
       </div>
 
@@ -81,7 +94,7 @@ export function Logs() {
           <CardDescription>账号 / 级别 / 关键词 / 自动刷新——两 tab 共用</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:items-end">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5 lg:items-end">
             <div className="space-y-1.5">
               <Label>账号</Label>
               <Select
@@ -105,6 +118,10 @@ export function Logs() {
                 <option value="warning">warning</option>
                 <option value="error">error</option>
               </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>插件</Label>
+              <PluginSelect value={pluginKey} onChange={setPluginKey} />
             </div>
             <div className="space-y-1.5 lg:col-span-1">
               <Label>关键词搜索</Label>
@@ -144,8 +161,9 @@ export function Logs() {
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as LogTab)}>
         <TabsList>
-          <TabsTrigger value="event">📨 消息日志</TabsTrigger>
-          <TabsTrigger value="system">⚙️ 系统日志</TabsTrigger>
+          <TabsTrigger value="event">消息日志</TabsTrigger>
+          <TabsTrigger value="plugin">插件日志</TabsTrigger>
+          <TabsTrigger value="system">系统日志</TabsTrigger>
         </TabsList>
 
         <TabsContent value="event">
@@ -153,9 +171,22 @@ export function Logs() {
             source="event"
             accountId={accountId}
             level={level}
+            pluginKey=""
             search={search}
             autoRefresh={autoRefresh && tab === "event"}
-            description="incoming 消息事件、plugin 命中、命令派发——排查「为什么没回复 / 转发出去没」用这里"
+            description="收到消息、命令分发等入口事件。先确认消息有没有进入系统。"
+          />
+        </TabsContent>
+
+        <TabsContent value="plugin">
+          <LogTable
+            source="plugin"
+            accountId={accountId}
+            level={level}
+            pluginKey={pluginKey}
+            search={search}
+            autoRefresh={autoRefresh && tab === "plugin"}
+            description="插件自己的运行记录和异常。排查「24 点、自动回复、转发为什么没反应」优先看这里。"
           />
         </TabsContent>
 
@@ -164,9 +195,10 @@ export function Logs() {
             source="system"
             accountId={accountId}
             level={level}
+            pluginKey=""
             search={search}
             autoRefresh={autoRefresh && tab === "system"}
-            description="worker 启停、IPC reload、风控状态、技术异常——排查「账号是不是真的活着」用这里"
+            description="worker 启停、IPC reload、风控状态、平台级异常。排查「账号是不是活着」看这里。"
           />
         </TabsContent>
       </Tabs>
@@ -179,13 +211,15 @@ function LogTable({
   source,
   accountId,
   level,
+  pluginKey,
   search,
   autoRefresh,
   description,
 }: {
-  source: "event" | "system";
+  source: "event" | "plugin" | "system";
   accountId: string;
   level: string;
+  pluginKey: string;
   search: string;
   autoRefresh: boolean;
   description: string;
@@ -194,6 +228,7 @@ function LogTable({
     source,
     account_id: accountId || undefined,
     level: level || undefined,
+    plugin_key: source === "plugin" && pluginKey ? pluginKey : undefined,
     limit: 200,
   };
   const logsQ = useQuery({
@@ -208,7 +243,10 @@ function LogTable({
     const all = logsQ.data ?? [];
     const q = search.trim().toLowerCase();
     if (!q) return all;
-    return all.filter((l) => l.message.toLowerCase().includes(q));
+    return all.filter((l) => {
+      const detailText = l.detail ? JSON.stringify(l.detail).toLowerCase() : "";
+      return l.message.toLowerCase().includes(q) || detailText.includes(q);
+    });
   }, [logsQ.data, search]);
 
   const totalCount = logsQ.data?.length ?? 0;
@@ -218,11 +256,15 @@ function LogTable({
     <Card>
       <CardHeader>
         <CardTitle className="text-base">
-          {source === "event" ? "消息日志" : "系统日志"}
+          {source === "event"
+            ? "消息日志"
+            : source === "plugin"
+              ? "插件日志"
+              : "系统日志"}
         </CardTitle>
         <CardDescription className="flex items-center justify-between gap-2">
           <span>{description}</span>
-          {search.trim() ? (
+          {search.trim() || (source === "plugin" && pluginKey) ? (
             <span className="shrink-0 text-xs text-muted-foreground">
               已过滤 <strong className="text-foreground">{showCount}</strong> /
               {" "}{totalCount}
@@ -242,7 +284,7 @@ function LogTable({
                 <TableHead className="w-40">时间</TableHead>
                 <TableHead className="w-20">级别</TableHead>
                 <TableHead className="w-24">账号</TableHead>
-                <TableHead>消息</TableHead>
+                <TableHead>发生了什么</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -263,8 +305,13 @@ function LogTable({
                   <TableCell className="text-muted-foreground">
                     {l.account_id ? `#${l.account_id}` : "—"}
                   </TableCell>
-                  <TableCell className="font-mono text-xs whitespace-pre-wrap">
-                    <HighlightedMessage text={l.message} keyword={search} />
+                  <TableCell className="text-xs whitespace-pre-wrap">
+                    <div className="font-mono">
+                      <HighlightedMessage text={l.message} keyword={search} />
+                    </div>
+                    {l.detail ? (
+                      <LogDetail detail={l.detail} keyword={search} />
+                    ) : null}
                   </TableCell>
                 </TableRow>
               ))}
@@ -283,7 +330,9 @@ function LogTable({
                 该分类暂无日志
                 {source === "event"
                   ? " — 让人给本账号发条消息，再回来看"
-                  : " — 没有错误是好事"}
+                  : source === "plugin"
+                    ? " — 插件还没有输出运行记录"
+                    : " — 没有错误是好事"}
               </>
             )}
           </p>
@@ -291,6 +340,69 @@ function LogTable({
       </CardContent>
     </Card>
   );
+}
+
+function PluginSelect({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const logsQ = useQuery({
+    queryKey: ["logs", "plugin-keys"],
+    queryFn: () => listRuntimeLogs({ source: "plugin", limit: 200 }),
+    staleTime: 30_000,
+  });
+  const keys = useMemo(() => {
+    const discovered = new Set<string>(BUILTIN_PLUGIN_KEYS);
+    for (const row of logsQ.data ?? []) {
+      const raw = row.detail?.plugin_key;
+      if (typeof raw === "string" && raw.trim()) discovered.add(raw.trim());
+    }
+    return [...discovered].sort();
+  }, [logsQ.data]);
+
+  return (
+    <Select value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">全部插件</option>
+      {keys.map((key) => (
+        <option key={key} value={key}>
+          {key}
+        </option>
+      ))}
+    </Select>
+  );
+}
+
+function LogDetail({
+  detail,
+  keyword,
+}: {
+  detail: Record<string, unknown>;
+  keyword: string;
+}) {
+  const rows = Object.entries(detail).filter(([, value]) => value !== undefined && value !== null);
+  if (!rows.length) return null;
+  return (
+    <div className="mt-2 grid gap-1 rounded-md bg-muted/60 px-2 py-1.5 font-mono text-[11px] text-muted-foreground">
+      {rows.slice(0, 8).map(([key, value]) => (
+        <div key={key} className="break-all">
+          <span className="text-foreground/70">{key}: </span>
+          <HighlightedMessage text={formatDetailValue(value)} keyword={keyword} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function formatDetailValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 // ── 关键词高亮：把匹配段落用 <mark> 包起来，便于一眼定位 ──

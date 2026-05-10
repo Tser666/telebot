@@ -32,6 +32,7 @@ import importlib.util
 import logging
 import re
 import time
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +53,7 @@ from ...db.models.remote_plugin import RemotePlugin
 from ...db.models.rule import Rule
 from ...redis_client import get_redis
 from ...services.rate_limit_service import get_effective
+from ...util.sudo_permissions import sudo_chat_allowed
 from ..command import register_plugin_command, unregister_plugin_command
 from ..ipc import RUNTIME_LOG_STREAM, RuntimeLogPayload
 from ..ratelimit.engine import RateLimitEngine
@@ -341,7 +343,7 @@ async def _event_allowed_for_owner_only(state: _AccountState, event: Any) -> boo
     if sudo_cfg is None:
         return False
     allowed_chats = sudo_cfg.get("allowed_chat_ids") or []
-    if allowed_chats and getattr(event, "chat_id", None) not in allowed_chats:
+    if not sudo_chat_allowed(allowed_chats, getattr(event, "chat_id", None)):
         return False
     return True
 
@@ -441,7 +443,14 @@ async def load_plugins_for_account(
                         redis,
                         account_id,
                         "info",
-                        f"[event] {peer_kind} chat_id={event.chat_id} | {text_preview!r}",
+                        (
+                            f"收到一条{peer_kind}消息：聊天 ID={event.chat_id}，"
+                            f"内容预览={text_preview!r}。已进入插件分发流程。"
+                        ),
+                        source="event",
+                        chat_id=event.chat_id,
+                        peer_kind=peer_kind,
+                        message_preview=text_preview,
                     )
                 except Exception:  # noqa: BLE001
                     pass
@@ -465,8 +474,18 @@ async def load_plugins_for_account(
                         redis,
                         account_id,
                         "error",
-                        f"插件 {fkey} on_message({direction}) 异常: {type(exc).__name__}: {exc}",
-                        source="system",
+                        (
+                            f"插件 {fkey} 处理{direction}消息时出错："
+                            f"{type(exc).__name__}: {exc}。"
+                            "这条消息已跳过，其他插件和 worker 会继续运行。"
+                        ),
+                        source="plugin",
+                        plugin_key=fkey,
+                        direction=direction,
+                        chat_id=getattr(event, "chat_id", None),
+                        sender_id=getattr(event, "sender_id", None),
+                        message_preview=(getattr(event, "raw_text", "") or "")[:200],
+                        traceback=traceback.format_exc(limit=8),
                     )
 
         return _dispatch
@@ -613,7 +632,7 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
         client=plugin_client,
         engine=state.engine if plugin_source != "installed" else None,
         redis=(state.redis or redis) if plugin_source != "installed" else None,
-        log=_make_logger(redis, state.account_id),
+        log=_make_logger(redis, state.account_id, af.feature_key),
         generation=state.generation,
     )
 
@@ -671,11 +690,20 @@ def _wrap_cmd(fn, ctx: PluginContext):
     return w
 
 
-def _make_logger(redis: Any, account_id: int):
+def _make_logger(redis: Any, account_id: int, plugin_key: str):
     """构造一个 ctx.log 协程，写到 ``runtime_log_stream``。"""
 
     async def _writer(level: str, message: str, **detail: Any) -> None:
-        await _log(redis, account_id, level, message, **detail)
+        source = str(detail.pop("source", "plugin"))
+        await _log(
+            redis,
+            account_id,
+            level,
+            message,
+            source=source,
+            plugin_key=plugin_key,
+            **detail,
+        )
 
     return _writer
 
