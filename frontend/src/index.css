@@ -147,6 +147,37 @@
     scrollbar-width: thin;
   }
 
+  .prose-pwa-safe {
+    max-width: 100%;
+  }
+
+  .prose-pwa-safe :where(pre, table) {
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .prose-pwa-safe :where(pre) {
+    white-space: pre-wrap;
+    overflow-x: auto;
+    word-break: break-word;
+  }
+
+  .prose-pwa-safe :where(code) {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .prose-pwa-safe :where(table) {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .prose-pwa-safe :where(th, td) {
+    min-width: 8rem;
+    word-break: break-word;
+  }
+
   .alert-info {
     @apply border-blue-200 bg-blue-50/70 text-blue-800 dark:border-blue-900/70 dark:bg-blue-950/30 dark:text-blue-200;
   }

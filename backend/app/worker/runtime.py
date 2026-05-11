@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -24,8 +23,6 @@ from ..crypto import decrypt_str
 from ..db.base import AsyncSessionLocal
 from ..db.models.account import Account, Proxy, SudoUser
 from ..db.models.command import AccountCommandLink, CommandAlias, CommandTemplate, LLMProvider
-from ..db.models.feature import FEATURE_SCHEDULER
-from ..db.models.rule import Rule
 from ..db.models.system import SystemSetting
 from ..redis_client import get_redis
 from ..settings import settings as app_settings
@@ -57,12 +54,12 @@ from .ipc import (
     make_cmd,
     make_event,
 )
+from .scheduler_runtime import PlatformScheduler
 from .tg_client import build_client
 
 log = logging.getLogger(__name__)
 
 _CONFIG_RECONCILE_SECONDS = 60
-_SCHEDULER_TICK_SECONDS = 30
 
 
 async def run_worker(account_id: int) -> None:
@@ -113,13 +110,27 @@ async def run_worker(account_id: int) -> None:
             )
             return
 
+        platform_scheduler = PlatformScheduler(
+            account_id=account_id,
+            client=client,
+            redis=redis,
+            paused=paused,
+            log_writer=_log,
+        )
+
         # connect 成功后再加载插件
         # D Agent 的 plugin loader 会通过 hook 接到 client 上；
         # 这里 try-import：D 没写完时不影响 worker 拉起。
         try:
             from .plugins.loader import load_plugins_for_account  # type: ignore
 
-            await load_plugins_for_account(client, account_id, paused, redis)
+            await load_plugins_for_account(
+                client,
+                account_id,
+                paused,
+                redis,
+                scheduler=platform_scheduler,
+            )
         except ImportError:
             await _log(redis, account_id, "warn", "插件系统尚未就绪（D Agent 待完成）")
         except Exception as e:
@@ -154,10 +165,12 @@ async def run_worker(account_id: int) -> None:
         await _publish(redis, account_id, EVT_STATUS, status="active")
 
         # 后台协程：监听 IPC 指令通道与全局通道
-        ipc_task = asyncio.create_task(_listen_cmd(redis, client, account_id, paused))
+        ipc_task = asyncio.create_task(
+            _listen_cmd(redis, client, account_id, paused, platform_scheduler)
+        )
         global_task = asyncio.create_task(_listen_global(redis, account_id, paused))
         reconcile_task = asyncio.create_task(_periodic_config_reconcile(redis, account_id))
-        scheduler_task = asyncio.create_task(_platform_scheduler_loop(redis, client, account_id, paused))
+        scheduler_task = asyncio.create_task(platform_scheduler.run())
 
         try:
             # 阻塞直到 client.disconnect() 被调用
@@ -193,6 +206,8 @@ async def run_worker(account_id: int) -> None:
                         except Exception:  # noqa: BLE001
                             # on_shutdown 失败不阻止 worker 退出，只记日志
                             log.exception("插件 %s on_shutdown 失败", fkey)
+                    if getattr(state, "scheduler", None) is not None:
+                        state.scheduler.unregister_owner(fkey)
         except ImportError:
             # 插件系统未就绪
             pass
@@ -208,7 +223,13 @@ async def run_worker(account_id: int) -> None:
         await _publish(redis, account_id, EVT_STATUS, status="stopped")
 
 
-async def _listen_cmd(redis, client, account_id: int, paused: asyncio.Event) -> None:
+async def _listen_cmd(
+    redis,
+    client,
+    account_id: int,
+    paused: asyncio.Event,
+    platform_scheduler: PlatformScheduler | None = None,
+) -> None:
     """监听 ``worker_cmd:{aid}`` 频道，处理 pause/resume/stop/ping/reload/*。
 
     内置自动重连：Redis 连接断开（如 Docker 重启、网络抖动）时，
@@ -252,6 +273,8 @@ async def _listen_cmd(redis, client, account_id: int, paused: asyncio.Event) -> 
                                             await inst.on_shutdown(ctx)
                                         except Exception:  # noqa: BLE001
                                             log.exception("插件 %s on_shutdown 失败", fkey)
+                                    if getattr(state, "scheduler", None) is not None:
+                                        state.scheduler.unregister_owner(fkey)
                         except ImportError:
                             pass
                         except Exception:  # noqa: BLE001
@@ -362,39 +385,12 @@ async def _listen_cmd(redis, client, account_id: int, paused: asyncio.Event) -> 
                         result_ok = False
                         result_error: str | None = None
                         try:
-                            scheduler = await _make_platform_scheduler_context(redis, client, account_id)
-                            if scheduler is None:
+                            if platform_scheduler is None:
                                 result_error = "定时任务调度器尚未初始化"
                             else:
-                                from app.db.base import AsyncSessionLocal
-                                from app.db.models.rule import Rule
-
-                                async with AsyncSessionLocal() as db:
-                                    rule_row = await db.get(Rule, rule_id)
-                                if rule_row is None or rule_row.account_id != account_id:
-                                    result_error = f"rule {rule_id} 不存在或不属于该账号"
-                                else:
-                                    cfg = dict(rule_row.config or {})
-                                    fired_at = datetime.now(UTC)
-                                    inst, ctx = scheduler
-                                    ok = await inst._fire(ctx, rule_id, cfg)
-                                    if ok:
-                                        from .plugins.builtin.scheduler.plugin import _get_system_tz
-
-                                        tz = await _get_system_tz()
-                                        cfg["last_fire"] = fired_at.isoformat()
-                                        cfg["last_result"] = "ok"
-                                        cfg["last_error"] = None
-                                        inst._advance_after_fire(cfg, fired_at, tz)
-                                        result_ok = True
-                                    else:
-                                        result_error = cfg.get("last_error", "执行失败")
-                                    # 持久化 config 变更
-                                    async with AsyncSessionLocal() as db:
-                                        row = await db.get(Rule, rule_id)
-                                        if row is not None:
-                                            row.config = cfg
-                                            await db.commit()
+                                result = await platform_scheduler.execute_rule(rule_id)
+                                result_ok = result.ok
+                                result_error = result.error
                         except Exception as e:  # noqa: BLE001
                             result_error = f"{type(e).__name__}: {e}"
                             await _log(redis, account_id, "warn", f"execute_rule 失败: {result_error}")
@@ -431,78 +427,6 @@ async def _ack_cmd(redis, cmd: IPCMessage, *, ok: bool, error: str | None = None
         )
     except Exception:  # noqa: BLE001
         pass
-
-
-async def _make_platform_scheduler_context(redis, client, account_id: int):
-    """构造平台级定时任务执行上下文。
-
-    scheduler 已从普通插件 tick loop 迁移到 runtime 基础能力；这里复用原
-    SchedulerPlugin 的调度算法和 action 实现，但不依赖 AccountFeature.enabled。
-    """
-    try:
-        from .plugins.base import PluginContext
-        from .plugins.builtin.scheduler.plugin import SchedulerPlugin
-        from .plugins.loader import _STATES  # type: ignore
-
-        state = _STATES.get(account_id)
-        engine = state.engine if state is not None else None
-        if engine is None:
-            return None
-
-        async def ctx_log(level: str, message: str, **detail) -> None:
-            await _log(redis, account_id, level, message, source="plugin", **detail)
-
-        ctx = PluginContext(
-            account_id=account_id,
-            feature_key=FEATURE_SCHEDULER,
-            config={},
-            rules=[],
-            client=client,
-            engine=engine,
-            redis=redis,
-            log=ctx_log,
-            generation=0,
-        )
-        return SchedulerPlugin(), ctx
-    except Exception as e:  # noqa: BLE001
-        await _log(redis, account_id, "warn", f"初始化定时任务调度器失败: {type(e).__name__}: {e}")
-        return None
-
-
-async def _platform_scheduler_loop(redis, client, account_id: int, paused: asyncio.Event) -> None:
-    """平台级定时任务调度器。
-
-    不再依赖 scheduler 插件启停。只要 worker active，调度器就会周期性读取
-    ``rule.feature_key == scheduler`` 的启用规则并执行。
-    """
-    scheduler = await _make_platform_scheduler_context(redis, client, account_id)
-    if scheduler is None:
-        return
-    inst, ctx = scheduler
-    await _log(redis, account_id, "info", "[scheduler-runtime] started")
-    while True:
-        try:
-            if paused.is_set():
-                async with AsyncSessionLocal() as db:
-                    rules = (
-                        await db.execute(
-                            select(Rule)
-                            .where(
-                                Rule.account_id == account_id,
-                                Rule.feature_key == FEATURE_SCHEDULER,
-                                Rule.enabled.is_(True),
-                            )
-                            .order_by(Rule.priority.desc(), Rule.id.asc())
-                        )
-                    ).scalars().all()
-                ctx.rules = list(rules)
-                await inst._tick_once(ctx)
-            await asyncio.sleep(_SCHEDULER_TICK_SECONDS)
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:  # noqa: BLE001
-            await _log(redis, account_id, "error", f"[scheduler-runtime] tick error: {type(e).__name__}: {e}")
-            await asyncio.sleep(_SCHEDULER_TICK_SECONDS)
 
 
 async def _periodic_config_reconcile(redis, account_id: int) -> None:

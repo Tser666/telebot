@@ -109,6 +109,7 @@ export default function App() {
             />
           </Route>
           <Route path="plugins" element={<Extensions />} />
+          <Route path="scheduler" element={<SchedulerConfig />} />
           <Route path="matrix" element={<Navigate to="/plugins" replace />} />
           <Route path="extensions" element={<Navigate to="/plugins" replace />} />
           <Route path="remote-plugins" element={<Navigate to="/plugins" replace />} />

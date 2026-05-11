@@ -281,7 +281,7 @@ function AccountPluginsTab() {
                             size="sm"
                             variant="outline"
                             className="h-9 px-3"
-                            onClick={() => nav(`/accounts/${selectedAccount.id}/features/${f.key}`)}
+                            onClick={() => nav(`/scheduler?aid=${selectedAccount.id}`)}
                           >
                             配置 →
                           </Button>
@@ -684,15 +684,15 @@ function InstalledPluginsSection({ onManageAccounts }: { onManageAccounts: () =>
 // ═══════════════════════════════════════════════════════════════════
 function DevGuideTab() {
   return (
-    <Card>
+    <Card className="overflow-hidden">
       <CardHeader>
         <CardTitle className="text-base">插件开发指南</CardTitle>
         <CardDescription>
           源文件：<code>docs/PLUGIN-DEV-GUIDE.md</code>，构建时打包进前端
         </CardDescription>
       </CardHeader>
-      <CardContent>
-        <article className="prose prose-sm max-w-none dark:prose-invert">
+      <CardContent className="min-w-0 overflow-hidden">
+        <article className="prose prose-sm prose-pwa-safe max-w-none dark:prose-invert">
           <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
             {devGuideMd}
           </ReactMarkdown>

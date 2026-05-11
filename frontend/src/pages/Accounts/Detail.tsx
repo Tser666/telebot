@@ -446,7 +446,7 @@ export function AccountDetail() {
                                     size="sm"
                                     variant="outline"
                                     className="h-9 px-3"
-                                    onClick={() => nav(`/accounts/${aid}/features/${f.key}`)}
+                                    onClick={() => nav(`/scheduler?aid=${aid}`)}
                                   >
                                     配置 →
                                   </Button>

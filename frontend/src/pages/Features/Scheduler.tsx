@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Pencil, Play, Plus, Trash2, Zap } from "lucide-react";
 import { toast } from "sonner";
 
 import { getSystemSettings } from "@/api/system";
+import { listAccounts } from "@/api/accounts";
 import {
   createRule,
   deleteRule,
@@ -88,9 +89,20 @@ function emptyForm(): FormState {
 
 export function SchedulerConfig() {
   const params = useParams();
-  const aid = Number(params.aid);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const aidFromPath = Number(params.aid);
+  const aidFromQuery = Number(searchParams.get("aid"));
+  const aid = Number.isFinite(aidFromPath) && aidFromPath > 0
+    ? aidFromPath
+    : (Number.isFinite(aidFromQuery) && aidFromQuery > 0 ? aidFromQuery : 0);
+  const fromAccountRoute = Number.isFinite(aidFromPath) && aidFromPath > 0;
   const nav = useNavigate();
   const qc = useQueryClient();
+
+  const accountsQ = useQuery({
+    queryKey: ["accounts"],
+    queryFn: listAccounts,
+  });
 
   const tzQ = useQuery({
     queryKey: ["system", "settings"],
@@ -221,15 +233,62 @@ export function SchedulerConfig() {
     onError: (err) => toast.error(getErrMsg(err)),
   });
 
-  if (!aid) return <p>账号 ID 不合法</p>;
+  if (!aid) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">调度中心</h1>
+          <p className="text-sm text-muted-foreground">选择账号后管理该账号的定时任务规则。</p>
+        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">选择账号</CardTitle>
+            <CardDescription>定时任务按账号隔离运行，每个账号独立维护规则。</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {accountsQ.isLoading ? (
+              <div className="flex h-20 items-center justify-center">
+                <Spinner className="text-primary" />
+              </div>
+            ) : accountsQ.data && accountsQ.data.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {accountsQ.data.map((a) => (
+                  <Button
+                    key={a.id}
+                    variant="outline"
+                    onClick={() => setSearchParams({ aid: String(a.id) })}
+                  >
+                    {a.display_name || a.phone || `账号 #${a.id}`}
+                  </Button>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">暂无可用账号，请先绑定账号。</p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-3">
-        <Button variant="ghost" size="sm" onClick={() => nav(`/accounts/${aid}?tab=features`)}>
-          <ArrowLeft className="mr-1 h-4 w-4" /> 返回账号
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => (
+            fromAccountRoute
+              ? nav(`/accounts/${aid}?tab=features`)
+              : nav("/scheduler")
+          )}
+        >
+          <ArrowLeft className="mr-1 h-4 w-4" />
+          {fromAccountRoute ? "返回账号" : "返回调度中心"}
         </Button>
-        <h1 className="text-2xl font-semibold tracking-tight">定时任务配置 · #{aid}</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          调度中心 · 账号 #{aid}
+        </h1>
       </div>
 
       <Card>

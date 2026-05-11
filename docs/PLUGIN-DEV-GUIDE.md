@@ -934,7 +934,53 @@ config_schema={
 - `manifest.py` 声明 `config_schema["x-ui-mode"] = "platform"`
 - 前端会在账号详情和插件中心里放到“基础能力 / 平台内置”分组
 - 如果有专属页面，仍需 `App.tsx` 路由和 `FEATURE_CONFIG_PAGE_KEYS`
-- 后端运行时应由平台服务初始化；插件壳只保留兼容入口或配置入口
+- 后端运行时由 `PlatformScheduler` 常驻初始化；调度算法与 action 执行在平台层，`scheduler` 插件壳只保留兼容入口或配置入口
+- 普通插件需要定时执行时，不要自己 `create_task` 写永久循环，优先使用 `ctx.scheduler`
+
+#### 插件调用平台调度器
+
+`ctx.scheduler` 是绑定到当前插件的最小 capability facade。插件只能注册 / 注销自己名下的任务，热重载、禁用、worker 退出时 loader 会统一清理，避免旧 callback 继续触发。
+
+```python
+from app.worker.scheduler_runtime import ScheduledJob
+
+
+class DemoPlugin(Plugin):
+    key = "demo"
+
+    async def on_startup(self, ctx: PluginContext) -> None:
+        if ctx.scheduler is None:
+            return
+        ctx.scheduler.register(
+            "daily_digest",
+            {"kind": "cron", "cron": "0 9 * * *"},
+            self._send_daily_digest,
+        )
+
+    async def on_shutdown(self, ctx: PluginContext) -> None:
+        if ctx.scheduler is not None:
+            ctx.scheduler.unregister_all()
+
+    async def _send_daily_digest(self, job: ScheduledJob) -> None:
+        # callback 可闭包引用插件自己的状态，也可以在 config 中保存轻量参数
+        ...
+```
+
+支持的 `schedule` 字段与定时任务页面一致：
+
+| 类型 | 示例 | 说明 |
+|------|------|------|
+| `cron` | `{"kind": "cron", "cron": "*/10 * * * *"}` | 按系统时区解析 cron |
+| `interval` | `{"kind": "interval", "interval_sec": 300}` | 首次 tick 会立即执行一次，之后按间隔推进 |
+| `once` | `{"kind": "once", "fire_at": "2026-05-11T10:00:00+00:00"}` | 执行后自动置为 disabled |
+
+注意：
+
+- callback 异常会写入插件日志，并保留任务等待下次 tick；不要把异常吞掉后静默失败
+- `ctx.scheduler` 注册的是运行期任务；worker 重启后会由插件 `on_startup` 重新注册，若需要精确保存 `last_fire` / `next_fire`，插件应把状态写回自己的配置或规则表
+- 如果任务依赖插件配置，配置变更后建议触发插件热重载，或在 callback 中读取最新 `ctx.config`
+- 第三方插件拿到的是 scheduler facade，不会直接获得 Redis / DB / Telethon session
+- GUI 定时任务页仍走 `Rule(feature_key="scheduler")`，由同一个 `PlatformScheduler` 调度；后续新增插件不要依赖 `SchedulerPlugin`，只依赖 `ctx.scheduler`
 
 ---
 

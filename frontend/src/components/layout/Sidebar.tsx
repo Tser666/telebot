@@ -6,6 +6,7 @@ import { NavLink } from "react-router-dom";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import {
   Boxes,
+  Clock3,
   Cog,
   LayoutDashboard,
   LayoutTemplate,
@@ -30,6 +31,7 @@ const NAV: NavItem[] = [
   { to: "/", label: "概览", icon: LayoutDashboard, end: true },
   { to: "/accounts", label: "账号", icon: Users },
   { to: "/plugins", label: "插件", icon: Boxes },
+  { to: "/scheduler", label: "调度", icon: Clock3 },
   { to: "/templates", label: "模板", icon: LayoutTemplate },
   { to: "/ai", label: "AI", icon: Sparkles },
   { to: "/logs", label: "日志", icon: ScrollText },

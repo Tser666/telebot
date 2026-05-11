@@ -369,8 +369,46 @@ def _read_memory_percent() -> tuple[float | None, int | None]:
     return None, None
 
 
-def _read_process_stats(pids: list[int]) -> dict[int, tuple[float | None, float | None]]:
-    """读取 PID -> (cpu%, rssMB)。"""
+def _read_process_stats_with_psutil(pids: list[int]) -> dict[int, tuple[float | None, float | None]] | None:
+    """用 psutil 读取 PID -> (cpu%, rssMB)。
+
+    Oracle / Linux 服务环境里 ``ps`` 的输出、权限与容器视图差异比较多；psutil 直接读
+    procfs，稳定性更好。未安装或被系统限制时返回 None，让调用方走 ``ps`` fallback。
+    """
+
+    try:
+        import psutil  # type: ignore[import-not-found]
+    except Exception:
+        return None
+
+    processes: list[Any] = []
+    for pid in pids:
+        try:
+            proc = psutil.Process(int(pid))
+            proc.cpu_percent(interval=None)
+            processes.append(proc)
+        except Exception:
+            continue
+    if not processes:
+        return {}
+
+    # process.cpu_percent 第一次调用只是初始化采样窗口；短暂停顿后第二次才有可读值。
+    time.sleep(0.05)
+
+    rows: dict[int, tuple[float | None, float | None]] = {}
+    for proc in processes:
+        try:
+            pid = int(proc.pid)
+            cpu = float(proc.cpu_percent(interval=None))
+            rss_mb = float(proc.memory_info().rss) / (1024 * 1024)
+            rows[pid] = (round(max(0.0, cpu), 2), round(max(0.0, rss_mb), 2))
+        except Exception:
+            continue
+    return rows
+
+
+def _read_process_stats_with_ps(pids: list[int]) -> dict[int, tuple[float | None, float | None]]:
+    """用系统 ``ps`` 读取 PID -> (cpu%, rssMB)，作为 psutil fallback。"""
 
     if not pids:
         return {}
@@ -392,6 +430,17 @@ def _read_process_stats(pids: list[int]) -> dict[int, tuple[float | None, float 
         except Exception:
             continue
     return rows
+
+
+def _read_process_stats(pids: list[int]) -> dict[int, tuple[float | None, float | None]]:
+    """读取 PID -> (cpu%, rssMB)。优先 psutil，失败再 fallback 到 ps。"""
+
+    if not pids:
+        return {}
+    rows = _read_process_stats_with_psutil(pids)
+    if rows is not None:
+        return rows
+    return _read_process_stats_with_ps(pids)
 
 
 def _snapshot_dashboard_host() -> HostResource:

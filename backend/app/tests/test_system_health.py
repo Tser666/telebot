@@ -10,7 +10,9 @@
 """
 from __future__ import annotations
 
+import sys
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -295,6 +297,39 @@ def test_probe_alembic_db_connect_failure() -> None:
         out = _probe_alembic()
     assert isinstance(out, AlembicStatus)
     assert out.ok is False
+
+
+def test_read_process_stats_prefers_psutil(monkeypatch) -> None:
+    """资源面板优先用 psutil 读取进程 CPU/RSS，避免 Linux/Oracle 上 ps 输出差异。"""
+
+    class _FakeProcess:
+        pid = 123
+
+        def cpu_percent(self, interval=None):  # noqa: ANN001
+            return 7.5
+
+        def memory_info(self):
+            return SimpleNamespace(rss=128 * 1024 * 1024)
+
+    fake_psutil = SimpleNamespace(Process=lambda pid: _FakeProcess())
+    monkeypatch.setitem(sys.modules, "psutil", fake_psutil)
+    monkeypatch.setattr(sh.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(sh, "_read_process_stats_with_ps", lambda _pids: {123: (0.0, 0.0)})
+
+    out = sh._read_process_stats([123])
+
+    assert out == {123: (7.5, 128.0)}
+
+
+def test_read_process_stats_falls_back_to_ps(monkeypatch) -> None:
+    """psutil 不可用时仍保留原 ps fallback。"""
+
+    monkeypatch.setattr(sh, "_read_process_stats_with_psutil", lambda _pids: None)
+    monkeypatch.setattr(sh, "_read_process_stats_with_ps", lambda _pids: {456: (1.25, 64.0)})
+
+    out = sh._read_process_stats([456])
+
+    assert out == {456: (1.25, 64.0)}
 
 
 # ════════════════════════════════════════════════════════════

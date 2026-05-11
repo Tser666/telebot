@@ -43,6 +43,7 @@ from ... import __version__ as TELEBOT_VERSION
 from ...db.base import AsyncSessionLocal
 from ...db.models.account import Account, HumanizeConfig, SudoUser
 from ...db.models.feature import (
+    FEATURE_SCHEDULER,
     FEATURE_STATE_ACTIVE,
     FEATURE_STATE_DISABLED,
     FEATURE_STATE_FAILED,
@@ -300,6 +301,7 @@ class _AccountState:
         self.engine: RateLimitEngine | None = None
         self.client: TelegramClient | None = None
         self.redis: Any = None  # redis.asyncio.Redis
+        self.scheduler: Any = None  # PlatformScheduler
         self.contexts: dict[str, PluginContext] = {}  # feature_key -> ctx
         self.instances: dict[str, Plugin] = {}  # feature_key -> Plugin 实例
         # paused 由 runtime 创建并传入；is_set() == True 表示正常运行
@@ -356,6 +358,7 @@ async def load_plugins_for_account(
     account_id: int,
     paused: asyncio.Event,
     redis: Any,
+    scheduler: Any | None = None,
 ) -> None:
     """runtime 在 ``client.connect()`` 之前调一次。
 
@@ -371,6 +374,7 @@ async def load_plugins_for_account(
     state.client = client
     state.paused = paused
     state.redis = redis
+    state.scheduler = scheduler
     _STATES[account_id] = state
 
     # ── 1) 拉取拟人化 + 账号信息构造 engine ──
@@ -408,6 +412,11 @@ async def load_plugins_for_account(
             return await get_effective(db, aid, action)
 
     state.engine = RateLimitEngine(account_id, opts, _get_eff, redis=redis)
+    if scheduler is not None:
+        try:
+            scheduler.attach_engine(state.engine)
+        except Exception:  # noqa: BLE001
+            log.exception("注入平台调度器 engine 失败 account=%s", account_id)
 
     # ── 1.5) 拉取忽略 peer 名单 ──
     await _load_ignored_peers(state)
@@ -524,6 +533,20 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
         af: AccountFeature 行
         redis: Redis 客户端
     """
+    if af.feature_key == FEATURE_SCHEDULER:
+        # scheduler 已是 worker 级平台基础能力，不再作为普通插件实例加载。
+        # 保留 account_feature 行仅用于历史兼容和前端配置入口。
+        await db.execute(
+            update(AccountFeature)
+            .where(
+                AccountFeature.account_id == state.account_id,
+                AccountFeature.feature_key == af.feature_key,
+            )
+            .values(state=FEATURE_STATE_ACTIVE, last_error=None)
+        )
+        await db.commit()
+        return
+
     cls = get_plugin(af.feature_key)
     if cls is None:
         rp = (
@@ -633,12 +656,18 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
         engine=state.engine if plugin_source != "installed" else None,
         redis=(state.redis or redis) if plugin_source != "installed" else None,
         log=_make_logger(redis, state.account_id, af.feature_key),
+        scheduler=(
+            state.scheduler.for_plugin(af.feature_key, state.generation)
+            if state.scheduler is not None else None
+        ),
         generation=state.generation,
     )
 
     try:
         await inst.on_startup(ctx)
     except Exception as exc:  # noqa: BLE001
+        if state.scheduler is not None:
+            state.scheduler.unregister_owner(af.feature_key)
         await db.execute(
             update(AccountFeature)
             .where(
@@ -848,6 +877,8 @@ async def reload_account_config(account_id: int, payload: dict | None = None) ->
                         cmds = getattr(inst, "commands", None) or cls.commands or {}
                         for cname in cmds.keys():
                             unregister_plugin_command(cname, owner_plugin_key=fkey)
+                    if state.scheduler is not None:
+                        state.scheduler.unregister_owner(fkey)
 
                 # 调用 shutdown（幂等设计）
                 if ctx is not None and inst is not None:
@@ -895,6 +926,8 @@ async def reload_account_config(account_id: int, payload: dict | None = None) ->
                 cmds = getattr(inst, "commands", None) or cls.commands or {}
                 for cname in cmds.keys():
                     unregister_plugin_command(cname, owner_plugin_key=fkey)
+                if state.scheduler is not None:
+                    state.scheduler.unregister_owner(fkey)
                 try:
                     await inst.on_shutdown(ctx)
                 except Exception:  # noqa: BLE001
@@ -906,6 +939,11 @@ async def reload_account_config(account_id: int, payload: dict | None = None) ->
 
             ctx.config = new_config
             ctx.rules = list(rules)
+            ctx.generation = state.generation
+            ctx.scheduler = (
+                state.scheduler.for_plugin(fkey, state.generation)
+                if state.scheduler is not None else None
+            )
 
         # 2) 处理新增的 enabled feature
         afs = (
@@ -948,6 +986,8 @@ async def reload_plugin(account_id: int, plugin_key: str | None) -> None:
             cmds = getattr(inst, "commands", None) or cls.commands or {}
             for cname in cmds.keys():
                 unregister_plugin_command(cname, owner_plugin_key=plugin_key)
+        if state.scheduler is not None:
+            state.scheduler.unregister_owner(plugin_key)
 
     # 2) shutdown 旧实例（幂等设计）
     if plugin_key in state.instances:
