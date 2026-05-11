@@ -932,6 +932,8 @@ config_schema={
 - `level: "account"` 或无 level → 账号配置区
 - **不需要**添加到 `FEATURE_CONFIG_PAGE_KEYS`，不需要创建页面文件
 - `config_schema["x-ui-mode"]` 可写 `schema`，ConfigDialog 自动渲染
+- 弹窗宽度、滚动高度、字段间距和控件风格应与自定义命令 / LLM 配置弹窗保持一致：使用统一的 `Input`、`Select`、`Switch`、`Textarea`、`Label` 视觉语言，不在字段标题里放 emoji 或临时说明块
+- `message_template`、`*_message_template`、`prompt`、`content`、`text` 等长文案字段会按多行文本体验展示；字段描述里应写清占位符和示例值
 
 ```python
 # config_schema 示例（适用于 ConfigDialog 自动渲染）
@@ -1290,6 +1292,8 @@ config_schema={
 ```
 
 如果插件有专属配置页，建议提供只读预览：用户修改模板后，用示例上下文渲染一段 `template_preview`。没有专属页面时，也至少在字段描述里给出一条完整示例，避免用户猜最终效果。
+
+配置页里的模板体验建议对齐 LLM 配置页：模板输入、占位符说明、只读预览三者放在同一个配置上下文里。预览只使用模拟数据，不读取真实群消息，也不触发实际发送。
 
 ### 定时任务与后台任务生命周期
 

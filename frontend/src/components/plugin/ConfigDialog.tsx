@@ -21,7 +21,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/misc";
+import { Select } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 
 export interface ConfigField {
   key: string;
@@ -102,7 +107,7 @@ export function ConfigDialog({
   if (!s?.properties || Object.keys(s.properties).length === 0) {
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>{pluginName} — 配置</DialogTitle>
             <DialogDescription>该插件没有可配置的选项。</DialogDescription>
@@ -118,7 +123,7 @@ export function ConfigDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{pluginName} — 配置</DialogTitle>
           <DialogDescription>
@@ -126,32 +131,32 @@ export function ConfigDialog({
             {accountName && <> · 账号: {accountName}</>}
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-5">
+        <div className="space-y-4">
           {globalFields.length > 0 && (
-            <div>
-              <div className="mb-2 flex items-center gap-2">
-                <span className="text-sm font-medium">📦 全局配置</span>
-                <span className="text-xs text-muted-foreground">所有账号共享</span>
+            <section className="space-y-3 rounded-md border bg-muted/30 p-3">
+              <div>
+                <div className="text-sm font-semibold">全局配置</div>
+                <p className="text-xs text-muted-foreground">所有账号共享</p>
               </div>
-              <div className="space-y-3 rounded-lg border border-border p-4">
+              <div className="space-y-4">
                 {globalFields.map(([key, field]) => (
                   <FieldInput key={key} fk={key} field={field} value={globalVals[key]} onChange={(v) => setGlobalVals(p => ({...p, [key]: v}))} />
                 ))}
               </div>
-            </div>
+            </section>
           )}
           {accountFields.length > 0 && (
-            <div>
-              <div className="mb-2 flex items-center gap-2">
-                <span className="text-sm font-medium">👤 账号配置</span>
-                <span className="text-xs text-muted-foreground">{accountName ? accountName + " 专属" : "按账号隔离"}</span>
+            <section className="space-y-3 rounded-md border bg-muted/30 p-3">
+              <div>
+                <div className="text-sm font-semibold">账号配置</div>
+                <p className="text-xs text-muted-foreground">{accountName ? accountName + " 专属" : "按账号隔离"}</p>
               </div>
-              <div className="space-y-3 rounded-lg border border-border p-4">
+              <div className="space-y-4">
                 {accountFields.map(([key, field]) => (
                   <FieldInput key={key} fk={key} field={field} value={accountVals[key]} onChange={(v) => setAccountVals(p => ({...p, [key]: v}))} />
                 ))}
               </div>
-            </div>
+            </section>
           )}
         </div>
         <DialogFooter>
@@ -175,16 +180,17 @@ interface FieldInputProps {
 function FieldInput({ fk, field, value, onChange }: FieldInputProps) {
   const label = field.title || fk;
   const description = field.description;
+  const inputId = `plugin-config-${fk}`;
 
   if (field.enum && field.enum.length > 0) {
     return (
-      <div>
-        <label className="text-sm font-medium">{label}</label>
+      <div className="space-y-1.5">
+        <Label htmlFor={inputId}>{label}</Label>
         {description && <p className="text-xs text-muted-foreground">{description}</p>}
-        <select
+        <Select
+          id={inputId}
           value={value != null ? String(value) : ""}
           onChange={(e) => onChange(e.target.value)}
-          className="mt-1 w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm"
         >
           {!field.enum.some((v) => String(v) === "") && <option value="">未设置</option>}
           {field.enum.map((opt) => (
@@ -192,34 +198,34 @@ function FieldInput({ fk, field, value, onChange }: FieldInputProps) {
               {String(opt)}
             </option>
           ))}
-        </select>
+        </Select>
       </div>
     );
   }
 
   if (field.type === "boolean") {
     return (
-      <label className="flex items-center gap-3 text-sm">
-        <input
-          type="checkbox"
-          checked={Boolean(value)}
-          onChange={(e) => onChange(e.target.checked)}
-          className="h-4 w-4 rounded border-input"
-        />
-        <div>
-          <span className="font-medium">{label}</span>
-          {description && <span className="ml-2 text-xs text-muted-foreground">{description}</span>}
+      <div className="flex items-start justify-between gap-4">
+        <div className="space-y-1.5">
+          <Label htmlFor={inputId}>{label}</Label>
+          {description && <p className="text-xs text-muted-foreground">{description}</p>}
         </div>
-      </label>
+        <Switch
+          id={inputId}
+          checked={Boolean(value)}
+          onCheckedChange={onChange}
+        />
+      </div>
     );
   }
 
   if (field.type === "integer" || field.type === "number") {
     return (
-      <div>
-        <label className="text-sm font-medium">{label}</label>
+      <div className="space-y-1.5">
+        <Label htmlFor={inputId}>{label}</Label>
         {description && <p className="text-xs text-muted-foreground">{description}</p>}
-        <input
+        <Input
+          id={inputId}
           type="number"
           value={value != null ? String(value) : ""}
           min={field.minimum as number}
@@ -228,10 +234,9 @@ function FieldInput({ fk, field, value, onChange }: FieldInputProps) {
             const v = e.target.value;
             onChange(v === "" ? null : Number(v));
           }}
-          className="mt-1 w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm"
         />
         {field.minimum !== undefined && field.maximum !== undefined && (
-          <p className="mt-0.5 text-xs text-muted-foreground">范围: {field.minimum} — {field.maximum}</p>
+          <p className="text-xs text-muted-foreground">范围: {field.minimum} — {field.maximum}</p>
         )}
       </div>
     );
@@ -240,10 +245,11 @@ function FieldInput({ fk, field, value, onChange }: FieldInputProps) {
   if (field.type === "array") {
     const textValue = Array.isArray(value) ? value.join(", ") : value != null ? String(value) : "";
     return (
-      <div>
-        <label className="text-sm font-medium">{label}</label>
+      <div className="space-y-1.5">
+        <Label htmlFor={inputId}>{label}</Label>
         {description && <p className="text-xs text-muted-foreground">{description}</p>}
-        <input
+        <Input
+          id={inputId}
           type="text"
           value={textValue}
           onChange={(e) => {
@@ -258,23 +264,42 @@ function FieldInput({ fk, field, value, onChange }: FieldInputProps) {
             }
           }}
           placeholder="用逗号分隔多个值"
-          className="mt-1 w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm"
         />
       </div>
     );
   }
 
   // 默认：string 类型
+  const textValue = value != null ? String(value) : "";
+  const defaultValue = field.default != null ? String(field.default) : "";
+  const multiline = textValue.includes("\n") || defaultValue.includes("\n") || /template|message|text|prompt|content/i.test(fk);
+
+  if (multiline) {
+    return (
+      <div className="space-y-1.5">
+        <Label htmlFor={inputId}>{label}</Label>
+        {description && <p className="text-xs text-muted-foreground">{description}</p>}
+        <Textarea
+          id={inputId}
+          value={textValue}
+          rows={4}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={defaultValue}
+        />
+      </div>
+    );
+  }
+
   return (
-    <div>
-      <label className="text-sm font-medium">{label}</label>
+    <div className="space-y-1.5">
+      <Label htmlFor={inputId}>{label}</Label>
       {description && <p className="text-xs text-muted-foreground">{description}</p>}
-      <input
+      <Input
+        id={inputId}
         type="text"
-        value={value != null ? String(value) : ""}
+        value={textValue}
         onChange={(e) => onChange(e.target.value)}
-        placeholder={field.default != null ? String(field.default) : ""}
-        className="mt-1 w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm"
+        placeholder={defaultValue}
       />
     </div>
   );
