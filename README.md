@@ -1,116 +1,259 @@
-# Telebot — 多账号 Telegram Userbot 管理控制台
+# TeleBot - 多账号 Telegram UserBot 管理控制台
 
-> Self-hosted Web UI for managing Telegram userbots: auto-reply, forward, scheduler, custom AI commands, rate limiting.
-
-<!-- [![CI](https://github.com/Anoyou/telebot/workflows/CI/badge.svg)](https://github.com/Anoyou/telebot/actions) -->
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.12+-3776ab.svg)](backend/pyproject.toml)
+[![React](https://img.shields.io/badge/React-18-61dafb.svg)](frontend/package.json)
+[![Status](https://img.shields.io/badge/status-alpha-orange.svg)](#项目状态)
 
-## 个人玩具，纯纯用白嫖的 Claude Opus 4.7 / Codex GPT 5.5 等 AI Vibe 出来的，想到什么做什么。很多地方还不完善。
+TeleBot 是一个自托管的 Telegram UserBot 多账号管理平台。它用 Web GUI 管理多个 Telegram 个人账号，每个账号独立运行 worker 子进程，并提供插件、规则、AI 命令、风控、日志、账号 Bot 联动与 PWA 管理体验。
 
-## Features
+> 这是个人 Vibe 自用取向的项目，仍处于 Alpha 阶段。UserBot 使用的是 Telegram MTProto 用户账号能力，不是 Bot API；请自行评估账号风控、合规和安全风险。
 
-- 🪪 **多账号绑定**：基于 Telethon，支持代理与设备伪装
-- 💬 **自动回复**：关键词 / 正则匹配，支持作用域、冷却时间、白名单
-- 🔁 **消息转发**：4 种模式（原生 / 复制 / 引用 / 仅链接）
-- ⏰ **定时任务**：cron / once / interval 三种模式，支持多账号广播
-- 🤖 **自定义命令模板**：含 AI 类型（OpenAI / Anthropic / 自建反代）
-- 🛡 **风控引擎**：18 actions × 5 policies × 拟人化 + FloodWait 自适应
-- 🔌 **插件开发框架**：支持本地和远程插件（施工中...）——见 [docs/PLUGIN-DEV-GUIDE.md](docs/PLUGIN-DEV-GUIDE.md)
-- 📨 **多 Bot 通知通道**：项目启动 / 故障告警（施工中...）
-- 持续更新中...
+## 核心能力
 
+- 多账号管理：每个 Telegram 账号独立登录、独立配置、独立 worker 子进程运行。
+- Web 控制台：账号、插件、模板、AI、日志、系统设置集中管理，支持浅色 / 深色 / 跟随系统主题。
+- PWA 体验：支持安装到桌面或手机主屏幕，针对 iPhone 安全区、窄屏 Tab 和自适应排版做了优化。
+- 插件系统：内置插件、远程插件、插件热加载、generation guard、生命周期钩子、配置 schema。
+- 规则驱动插件：自动回复、消息转发、自动复读等按规则匹配并执行。
+- 单配置对象插件：Codex 图片生成等以账号级配置页管理。
+- 平台基础能力：定时任务调度器作为 worker 常驻能力运行，插件和系统页面可复用。
+- LLM 集成：支持多 provider、fallback、retry、usage 记录、预算限制、自定义 AI 命令与 Telegram 长回复分段。
+- 账号 Bot 联动：每个 UserBot 账号可绑定一个普通 Bot，作为移动端/远程运维入口，支持授权用户、角色和常用操作。
+- 可观测性：系统状态、资源占用、事件日志、插件日志、系统日志、插件筛选与日志保留策略。
+- 安全基础：Fernet 加密 session / api_id / api_hash / Bot Token，JWT 登录，TOTP，Sudo 默认拒绝，远程插件安装阶段静态 manifest 校验。
 
-## Screenshots
+## 截图
+
+> 下面截图按最新功能区组织。若你在本地更新截图，直接覆盖同名文件即可。
 
 <p align="center">
-  <img src="docs/screenshots/dashboard.png" width="45%" alt="Dashboard" />
-  <img src="docs/screenshots/account-detail.png" width="45%" alt="Account Detail" />
+  <img src="docs/screenshots/dashboard-light.png" width="45%" alt="浅色主题系统概览与资源占用" />
+  <img src="docs/screenshots/dashboard-dark.png" width="45%" alt="暗色主题系统概览与资源占用" />
 </p>
 <p align="center">
-  <img src="docs/screenshots/ai-module.png" width="45%" alt="AI Module" />
-  <img src="docs/screenshots/command-template.png" width="45%" alt="Command Template" />
+  <img src="docs/screenshots/plugin-center-1.png" width="45%" alt="插件中心与账号插件管理" />
+  <img src="docs/screenshots/plugin-center-2.png" width="45%" alt="支持远程插件安装与管理" />
+</p>
+<p align="center">
+  <img src="docs/screenshots/codex-image-config.png" width="45%" alt="Codex 生图片生成配置页展示" />
+  <img src="docs/screenshots/plugin-logs.png" width="45%" alt="插件日志与筛选" />
+</p>
+<p align="center">
+  <img src="docs/screenshots/account-bot.png" width="45%" alt="账号 Bot 联动配置" />
+  <img src="docs/screenshots/ai-module.png" width="45%" alt="AI Provider 与模型路由设置" />
+</p>
+<p align="center">
+  <img src="docs/screenshots/account-detail.png" width="45%" alt="账号详情页和风控管理" />
+  <img src="docs/screenshots/command-template.png" width="45%" alt="支持自定义命令模板" />
+</p>
+<p align="center">
+  <img src="docs/screenshots/pwa-mobile-1.png" width="32%" alt="iPhone PWA 移动端适配展示 1" />
+  <img src="docs/screenshots/pwa-mobile-2.png" width="32%" alt="iPhone PWA 移动端适配展示 2" />
 </p>
 
-## Prerequisites
- 
- 在开始之前，你需要准备好以下内容：
- 
- 1.  **Telegram API 凭据**：前往 [my.telegram.org](https://my.telegram.org) 申请 `API_ID` 和 `API_HASH`。
- 2.  **网络环境**：由于 Telegram API 在国内无法直接访问，若你使用国内服务器，请确保拥有可用的 SOCKS5 或 HTTP 代理。
- 3.  **基础环境**：
-     *   **Docker 部署**：安装 Docker 20.10+ 及 Compose V2。
-     *   **本地开发**：Python 3.12+，Node.js 18+，Pnpm 8+。
- 
- ## Quick Start
 
-### 本机开发（HTTP，适合调试）
+## 架构概览
 
-```bash
-git clone https://github.com/Anoyou/telebot
-cd telebot
-cp .env.example .env       # 修改 MASTER_KEY / JWT_SECRET
-make dev-up                # 启动依赖（PG + Redis）
-cd backend && pip install -e .[dev] && alembic upgrade head
-uvicorn app.main:app --reload --port 8000
-# 另一个终端
-cd frontend && pnpm install && pnpm dev
-# 访问 http://localhost:5173
+```mermaid
+flowchart LR
+  Browser["Web / PWA GUI"] --> API["FastAPI"]
+  API --> DB[("PostgreSQL")]
+  API --> Redis[("Redis IPC / rate limit")]
+  API --> Supervisor["Worker Supervisor"]
+  Supervisor --> W1["Account Worker A"]
+  Supervisor --> W2["Account Worker B"]
+  W1 --> TG1["Telegram MTProto"]
+  W2 --> TG2["Telegram MTProto"]
+  W1 --> Plugins["Plugin Runtime"]
+  Plugins --> LLM["LLM Providers"]
+  API --> AccountBot["Account Bot Polling Runtime"]
+  AccountBot --> BotAPI["Telegram Bot API"]
 ```
 
-### Docker 部署（推荐，生产环境）
+### 运行模型
+
+- FastAPI 主进程负责 Web API、认证、配置管理、账号 Bot polling runtime 和 worker supervisor。
+- 每个账号一个独立 worker 子进程，负责 Telethon 客户端、插件派发、定时任务和 Telegram 消息处理。
+- Redis 用于 IPC、热加载通知、限速令牌桶和部分确认 payload。
+- PostgreSQL 保存账号、规则、模板、插件、日志、审计和加密后的敏感字段。
+
+## 内置功能
+
+| 类型 | 功能 | 说明 |
+| --- | --- | --- |
+| 账号 | 多账号绑定 | Web 向导输入 API ID / API Hash / 手机号，支持验证码和两步密码 |
+| 账号 | 代理与设备伪装 | 每账号可选择代理、设备 profile、语言参数 |
+| 账号 | 风控基础 | 全局限速、账号限速、FloodWait / PeerFlood 处理和拟人化发送 |
+| 插件 | 自动回复 | 关键词 / 正则 / 作用域 / 冷却 / 白名单 |
+| 插件 | 消息转发 | 原生转发、复制、引用、仅链接等模式 |
+| 插件 | 自动复读 | 群聊重复消息检测和自动复读 |
+| 插件 | Codex 图片生成 | Telegram 内触发生图，支持模板、尺寸、比例、格式和命令覆盖 |
+| 平台 | 定时任务 | cron / once / interval，作为 worker 平台调度能力运行 |
+| AI | 自定义命令模板 | reply_text / forward_to / run_plugin / ai 多类型模板 |
+| AI | LLM Provider | OpenAI 兼容、Anthropic、Ollama、自定义 endpoint、proxy、tag 路由 |
+| Bot | 账号 Bot 联动 | 每账号独立 Bot Token、授权用户、viewer/operator/admin 角色 |
+| 日志 | 可观测性 | 消息日志、插件日志、系统日志、资源占用和系统健康检查 |
+
+## 技术栈
+
+- 后端：Python 3.12, FastAPI, SQLAlchemy 2, Alembic, PostgreSQL 16, Redis, Telethon 1.43+
+- 前端：React 18, TypeScript, Vite, TailwindCSS, TanStack Query, Radix UI, PWA
+- Worker：multiprocessing spawn，每账号一个子进程，Redis IPC
+- 插件：Plugin 基类 + loader + manifest/config_schema + generation guard
+- AI：多 provider router, retry/fallback, usage record, token/cost limit
+- 部署：Docker Compose, Nginx frontend, FastAPI web, PostgreSQL, Redis
+
+## 快速开始
+
+### 1. 准备 Telegram API 凭据
+
+到 [my.telegram.org](https://my.telegram.org) 申请 `API ID` 和 `API Hash`。每个账号绑定时会在 Web 向导中填写，敏感字段会加密落库。
+
+### 2. 初始化环境变量
 
 ```bash
 git clone https://github.com/Anoyou/telebot
 cd telebot
-cp .env.example .env           # 务必修改 MASTER_KEY / JWT_SECRET
+cp .env.example .env
+```
+
+至少修改 `.env` 中这些值：
+
+```bash
+MASTER_KEY=replace-with-fernet-key
+JWT_SECRET=replace-with-long-random-secret
+POSTGRES_PASSWORD=replace-in-production
+COOKIE_SECURE=false
+```
+
+生成密钥示例：
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+python -c "import secrets; print(secrets.token_urlsafe(64))"
+```
+
+### 3. 本地开发启动
+
+推荐使用项目 Makefile：
+
+```bash
+make up
+```
+
+常用命令：
+
+```bash
+make status
+make logs
+make restart
+make down
+```
+
+默认访问：
+
+- 前端：http://localhost:5173
+- 后端：http://localhost:8000
+
+首次打开登录页时，如果系统还没有管理员账号，可以直接创建管理员。
+
+### 4. Docker 部署
+
+```bash
+cp .env.example .env
+# 修改 MASTER_KEY / JWT_SECRET / POSTGRES_PASSWORD / COOKIE_SECURE 等
 docker compose up -d --build
-# 访问 http://localhost (默认 80 端口)
 ```
 
-### 公网部署（HTTPS）
+默认前端监听宿主机 80 端口。公网 HTTPS 部署请参考 [docs/DEPLOY-PUBLIC.md](docs/DEPLOY-PUBLIC.md)。
 
-见 [docs/DEPLOY-PUBLIC.md](docs/DEPLOY-PUBLIC.md)
+## 配置重点
 
-## Configuration
+| 配置 | 说明 |
+| --- | --- |
+| `MASTER_KEY` | Fernet 主密钥，用于加密 session、api_id、api_hash、totp_secret、Bot Token。丢失后加密数据无法恢复 |
+| `JWT_SECRET` | Web 登录 JWT 签名密钥 |
+| `COOKIE_SECURE` | HTTPS 部署设为 `true`，本地 HTTP 调试保持 `false` |
+| `DATABASE_URL` | PostgreSQL async DSN |
+| `REDIS_URL` | Redis 连接地址 |
+| `TG_DEFAULT_PROXY` | 默认 Telegram 出口代理，可被账号级代理覆盖 |
+| `TRUST_FORWARDED_FOR` | 只有在可信反代后方才设为 `true` |
+| `AUTO_MIGRATE_ON_STARTUP` | 生产建议 `false`，由部署流程显式执行迁移 |
 
-项目的核心配置位于 `.env` 文件中：
+更多安全建议见 [docs/SECURITY-OPS.md](docs/SECURITY-OPS.md)。
 
-- **安全项**：务必修改 `MASTER_KEY` 与 `JWT_SECRET`。`MASTER_KEY` 丢失会导致数据库内所有加密数据无法找回。
-- **网络代理**：在 `.env` 中设置 `TG_DEFAULT_PROXY` 即可。Docker 模式下访问宿主机代理建议使用 `socks5://host.docker.internal:1080`。
+## 插件开发
 
-## Tech Stack
+插件按前端配置体验分为几类：
 
-- **后端**：Python 3.12 / FastAPI / SQLAlchemy 2 / Alembic / asyncpg / Redis / Telethon 1.43+
-- **前端**：React 18 / Vite / TypeScript / TailwindCSS / TanStack Query
-- **进程模型**：每账号一个 worker 子进程（mp spawn）+ Redis pub/sub IPC
-- **数据库**：PostgreSQL 16
+| 模式 | 说明 | 示例 |
+| --- | --- | --- |
+| 规则驱动 | 多条规则匹配后执行动作 | auto_reply, forward, autorepeat |
+| 单配置对象 | 每账号保存一份配置，像一个工具面板 | game24, codex_image |
+| Schema 弹窗 | 通过 `config_schema` 自动渲染表单 | 轻量配置插件 |
+| 平台基础能力 | 随 worker 初始化，为系统和插件提供能力 | scheduler |
 
-## Development
+开发文档：
 
-- **插件开发**：[docs/PLUGIN-DEV-GUIDE.md](docs/PLUGIN-DEV-GUIDE.md)
-- **安全运维**：[docs/SECURITY-OPS.md](docs/SECURITY-OPS.md)
-- **公网部署**：[docs/DEPLOY-PUBLIC.md](docs/DEPLOY-PUBLIC.md)
-- **变更日志**：[CHANGELOG.md](CHANGELOG.md)
+- [插件开发指南](docs/PLUGIN-DEV-GUIDE.md)
+- [远程插件设计](docs/REMOTE-PLUGIN-GUIDE.md)
 
-## FAQ
+## 安全边界
 
-### Q: 项目起源？多用户支持？
+TeleBot 默认做了多层防护，但它仍然是一个能操控 Telegram 用户账号的系统：
 
-- 想着在实现 userbot 的各种各样自定义功能后，如果有小号可以直接在控制台中复用。所以有了该项目。
+- 不要把管理后台裸露在公网 HTTP。
+- 不要复用弱密码、默认数据库密码或示例密钥。
+- 不要把 `.env`、数据库备份、session、Bot Token、LLM API Key 发到聊天或截图里。
+- 远程插件只安装可信来源；第三方插件启用前先读代码。
+- UserBot 行为可能触发 Telegram 风控，请谨慎设置自动回复、群发、定时任务和 AI 命令。
 
-### Q: 为什么不用 Bot API 而用 userbot？
+## 开发与验证
 
-- userbot = 你的个人 Telegram 账号，能进所有群、看所有 DM；Bot 只能进被人邀请的群
-- 见 [Telegram 官方文档](https://core.telegram.org/api#telegram-api) 关于 user vs bot
+```bash
+# 后端测试
+cd backend
+. .venv/bin/activate
+pytest -v
 
-## Status
+# 后端静态检查
+ruff check app
 
-Alpha / 个人自用 / 欢迎 fork 但暂不接大 PR。
+# 前端类型检查与构建
+pnpm -C frontend exec tsc -b --noEmit
+pnpm -C frontend build
+```
+
+当前工作区最近一次完整验证：
+
+- 后端测试：`487 passed, 2 skipped`
+- 后端静态检查：`ruff check backend/app` 通过
+- 前端类型检查：`pnpm -C frontend exec tsc -b --noEmit` 通过
+- 前端生产构建：`pnpm -C frontend build` 通过
+
+## 文档入口
+
+- [变更日志](CHANGELOG.md)
+- [公网部署](docs/DEPLOY-PUBLIC.md)
+- [安全运维](docs/SECURITY-OPS.md)
+- [插件开发指南](docs/PLUGIN-DEV-GUIDE.md)
+- [远程插件设计](docs/REMOTE-PLUGIN-GUIDE.md)
+- [贡献指南](CONTRIBUTING.md)
+
+## 项目状态
+
+当前版本：`v0.10.0 · feature`
+
+项目处于 Alpha / 个人自用阶段。核心链路已经能跑，但仍在快速迭代中，接口、页面和插件规范可能继续调整。欢迎 fork、参考和提 issue；大规模 PR 建议先开 issue 对齐方向。
 
 ## License
 
-MIT — 见 [LICENSE](LICENSE)
+MIT - 见 [LICENSE](LICENSE)。
 
 ## 致谢
 
-- [Telethon](https://github.com/LonamiWebs/Telethon) - 优秀的 Telegram MTProto 客户端库
+- [Telethon](https://github.com/LonamiWebs/Telethon) - Telegram MTProto 客户端
+- [FastAPI](https://fastapi.tiangolo.com/) - 后端 Web 框架
+- [React](https://react.dev/) - 前端 UI 框架
+- [Tailwind CSS](https://tailwindcss.com/) - 前端样式系统
