@@ -16,7 +16,7 @@ def get_pool() -> redis_async.ConnectionPool:
         _pool = redis_async.ConnectionPool.from_url(
             settings.redis_url,
             decode_responses=True,
-            max_connections=64,
+            max_connections=max(4, int(settings.redis_max_connections or 16)),
         )
     return _pool
 

@@ -172,6 +172,21 @@ docker compose up -d --build
 
 默认前端监听宿主机 80 端口。公网 HTTPS 部署请参考 [docs/DEPLOY-PUBLIC.md](docs/DEPLOY-PUBLIC.md)。
 
+### 小 VPS 内存建议
+
+生产 Compose 默认采用偏保守的资源参数：PostgreSQL 缓存、Redis 上限、后端 DB/Redis 连接池都按单人自托管场景收紧。每个已激活 Telegram 账号仍会常驻一个独立 worker 进程，账号数是内存占用的主要变量；小机器上建议只启用实际需要在线的账号和插件。
+
+可在 `.env` 里继续压低：
+
+```bash
+DB_POOL_SIZE=3
+DB_MAX_OVERFLOW=1
+REDIS_MAX_CONNECTIONS=8
+REDIS_MAXMEMORY=32mb
+POSTGRES_SHARED_BUFFERS=32MB
+POSTGRES_MAX_CONNECTIONS=24
+```
+
 ## 配置重点
 
 | 配置 | 说明 |
@@ -180,7 +195,9 @@ docker compose up -d --build
 | `JWT_SECRET` | Web 登录 JWT 签名密钥 |
 | `COOKIE_SECURE` | HTTPS 部署设为 `true`，本地 HTTP 调试保持 `false` |
 | `DATABASE_URL` | PostgreSQL async DSN |
+| `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` | 后端与每个 worker 的数据库连接池上限，小 VPS 不宜过大 |
 | `REDIS_URL` | Redis 连接地址 |
+| `REDIS_MAX_CONNECTIONS` | 后端与每个 worker 的 Redis 客户端连接池上限 |
 | `TG_DEFAULT_PROXY` | 默认 Telegram 出口代理，可被账号级代理覆盖 |
 | `TRUST_FORWARDED_FOR` | 只有在可信反代后方才设为 `true` |
 | `AUTO_MIGRATE_ON_STARTUP` | 生产建议 `false`，由部署流程显式执行迁移 |

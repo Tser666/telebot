@@ -30,7 +30,11 @@ class Settings(BaseSettings):
 
     # ── 数据库 / Redis ─────────────────────────────────────────────
     database_url: str = "postgresql+asyncpg://telebot:telebot@localhost:5432/telebot"
+    db_pool_size: int = 5
+    db_max_overflow: int = 2
+    db_pool_timeout: int = 30
     redis_url: str = "redis://localhost:6379/0"
+    redis_max_connections: int = 16
 
     # ── Web ────────────────────────────────────────────────────────
     web_host: str = "0.0.0.0"

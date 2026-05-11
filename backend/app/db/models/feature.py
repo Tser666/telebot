@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import importlib
+import importlib.util
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -34,16 +34,33 @@ _BUILTIN_PLUGIN_DIR: Path = (
 )
 
 
-def scan_builtin_manifests() -> dict[str, str]:
-    """动态扫描 builtin 目录，返回 {plugin_key: display_name}。
+def _load_manifest_file(path: Path) -> Any | None:
+    """直接加载单个 ``manifest.py``，避免触发插件包 ``__init__`` 导入实现代码。"""
+
+    if not path.exists():
+        return None
+    try:
+        mod_name = f"_telebot_builtin_manifest_{path.parent.name}_{abs(hash(str(path)))}"
+        spec = importlib.util.spec_from_file_location(mod_name, path)
+        if spec is None or spec.loader is None:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return getattr(mod, "MANIFEST", None)
+    except Exception:  # noqa: BLE001
+        log.warning("加载 builtin manifest 失败: %s", path, exc_info=True)
+        return None
+
+
+def scan_builtin_manifest_objects() -> dict[str, Any]:
+    """动态扫描 builtin 目录，返回 {plugin_key: MANIFEST}。
 
     - 以文件系统为权威来源：只要在 builtin/ 下新建一个包含正确 manifest.py 的目录，
       就会自动出现在结果里，不需要手动维护任何常量。
-    - 解析方式：直接 import ``app.worker.plugins.builtin.<key>.manifest`` 模块，
-      读取其 ``MANIFEST.display_name``；import 失败的目录写 warn 后跳过，不影响其它插件。
+    - 解析方式：直接执行 ``manifest.py`` 文件，避免 Web 进程为读元数据而导入插件实现。
     - 任何异常均吞掉，最坏情况返回空 dict，上层 seed 逻辑有幂等保护不会误删已有行。
     """
-    result: dict[str, str] = {}
+    result: dict[str, Any] = {}
     if not _BUILTIN_PLUGIN_DIR.exists():
         log.warning("builtin 插件目录不存在: %s", _BUILTIN_PLUGIN_DIR)
         return result
@@ -54,20 +71,22 @@ def scan_builtin_manifests() -> dict[str, str]:
         manifest_file = sub / "manifest.py"
         if not manifest_file.exists():
             continue
-        try:
-            mod = importlib.import_module(
-                f"app.worker.plugins.builtin.{sub.name}.manifest"
-            )
-            m = getattr(mod, "MANIFEST", None)
-            if m is None:
-                log.warning("builtin 插件 %s 的 manifest.py 没有 MANIFEST 对象，跳过", sub.name)
-                continue
-            key: str = getattr(m, "key", sub.name)
-            display_name: str = getattr(m, "display_name", key)
-            result[key] = display_name
-        except Exception:  # noqa: BLE001
-            log.warning("扫描 builtin 插件 %s 失败，跳过", sub.name, exc_info=True)
+        m = _load_manifest_file(manifest_file)
+        if m is None:
+            log.warning("builtin 插件 %s 的 manifest.py 没有 MANIFEST 对象，跳过", sub.name)
+            continue
+        key: str = getattr(m, "key", sub.name)
+        result[key] = m
     return result
+
+
+def scan_builtin_manifests() -> dict[str, str]:
+    """动态扫描 builtin 目录，返回 {plugin_key: display_name}。"""
+
+    return {
+        key: str(getattr(manifest, "display_name", key))
+        for key, manifest in scan_builtin_manifest_objects().items()
+    }
 
 
 # ── 向后兼容的 BUILTIN_FEATURES 包装 ──────────────────────────────────────────
@@ -83,6 +102,7 @@ class _LazyBuiltinFeatures(dict):
     """
 
     _loaded: bool = False
+    _manifest_cache: dict[str, Any] = {}
 
     def _ensure_loaded(self) -> None:
         if not self._loaded:
@@ -93,11 +113,21 @@ class _LazyBuiltinFeatures(dict):
         在单线程 asyncio worker 里没有竞争；主进程 FastAPI 多请求并发最坏结果是多扫一次，
         结果一致。
         """
-        found = scan_builtin_manifests()
+        manifests = scan_builtin_manifest_objects()
         self.clear()
-        self.update(found)
+        self.update(
+            {
+                key: str(getattr(manifest, "display_name", key))
+                for key, manifest in manifests.items()
+            }
+        )
+        self._manifest_cache = manifests
         self._loaded = True
         log.debug("BUILTIN_FEATURES 已刷新: %s", list(self.keys()))
+
+    def manifest_for(self, key: str) -> Any | None:
+        self._ensure_loaded()
+        return self._manifest_cache.get(key)
 
     # ── 重载 dict 各访问入口以触发惰性加载 ──
     def __contains__(self, item: object) -> bool:

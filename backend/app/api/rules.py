@@ -40,10 +40,6 @@ from ..schemas.rule import (
 )
 from ..services import audit
 from ..worker.ipc import CMD_RELOAD_CONFIG, cmd_channel, make_cmd, publish_cmd_with_ack
-from ..worker.plugins.builtin.auto_reply import _dry_run_match
-from ..worker.plugins.builtin.autorepeat.plugin import _dry_run_match as _autorepeat_dry_run_match
-from ..worker.plugins.builtin.codex_image.plugin import _dry_run_match as _codex_image_dry_run_match
-from ..worker.plugins.builtin.forward.plugin import _dry_run_match as _forward_dry_run_match
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["rules"])
@@ -84,6 +80,30 @@ async def _notify_reload(aid: int) -> None:
 
 def _to_out(r: Rule) -> RuleOut:
     return RuleOut.model_validate(r)
+
+
+def _auto_reply_dry_run_match(*args):
+    from ..worker.plugins.builtin.auto_reply import _dry_run_match
+
+    return _dry_run_match(*args)
+
+
+def _forward_dry_run_match(*args):
+    from ..worker.plugins.builtin.forward.plugin import _dry_run_match
+
+    return _dry_run_match(*args)
+
+
+def _autorepeat_dry_run_match(*args):
+    from ..worker.plugins.builtin.autorepeat.plugin import _dry_run_match
+
+    return _dry_run_match(*args)
+
+
+def _codex_image_dry_run_match(*args):
+    from ..worker.plugins.builtin.codex_image.plugin import _dry_run_match
+
+    return _dry_run_match(*args)
 
 
 def _parse_scheduler_dt(raw: Any) -> datetime | None:
@@ -298,7 +318,7 @@ async def dry_run_rule(
     if key == FEATURE_AUTO_REPLY:
         chat_type = payload.sample_chat_type or "private"
         cfg = rule.config or {}
-        matched, output = _dry_run_match(
+        matched, output = _auto_reply_dry_run_match(
             cfg,
             payload.sample_message,
             chat_type,

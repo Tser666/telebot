@@ -107,6 +107,17 @@ def _scan_builtin_dirs() -> list[Path]:
 _BUILTIN_MODULES: tuple[str, ...] = tuple(p.name for p in _scan_builtin_dirs())
 
 
+def _builtin_plugin_path(plugin_key: str) -> Path | None:
+    if not _is_safe_plugin_key(plugin_key):
+        return None
+    path = (_BUILTIN_DIR / plugin_key).resolve()
+    try:
+        path.relative_to(_BUILTIN_DIR.resolve())
+    except ValueError:
+        return None
+    return path if path.is_dir() else None
+
+
 def _import_builtins() -> None:
     """import 内置插件包，触发各模块的 ``@register`` 装饰器写入注册表。
 
@@ -281,6 +292,15 @@ def _load_installed_plugin(plugin_key: str) -> dict[str, type[Plugin]]:
     return _load_dir(path, source="installed")
 
 
+def _load_builtin_plugin(plugin_key: str) -> dict[str, type[Plugin]]:
+    """按 key 加载单个 builtin 插件；worker 启动时只为启用项付内存成本。"""
+
+    path = _builtin_plugin_path(plugin_key)
+    if path is None:
+        return {}
+    return _load_dir(path, source="builtin")
+
+
 def discover_plugins(*, include_installed: bool = False) -> dict[str, type[Plugin]]:
     """按目录扫描插件根，返回 ``{key -> Plugin 子类}``。
 
@@ -377,13 +397,11 @@ async def load_plugins_for_account(
     """runtime 在 ``client.connect()`` 之前调一次。
 
     步骤：
-      1. import 全部内置插件（首次会触发注册）
+      1. 构造账号插件运行态
       2. 构造 ``RateLimitEngine``（依赖 humanize 配置 + service 层 ``get_effective``）
       3. 在 client 上注册全局 NewMessage 派发，把每条消息按 instances 顺序广播
-      4. 加载该账号已启用的 features → ``_activate``
+      4. 加载该账号已启用的 features → ``_activate`` 按需导入对应插件
     """
-    _import_builtins()
-
     state = _AccountState(account_id)
     state.client = client
     state.paused = paused
@@ -562,6 +580,9 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
         return
 
     cls = get_plugin(af.feature_key)
+    if cls is None and _builtin_plugin_path(af.feature_key) is not None:
+        _load_builtin_plugin(af.feature_key)
+        cls = get_plugin(af.feature_key)
     if cls is None:
         rp = (
             await db.execute(
@@ -811,8 +832,7 @@ async def reload_account_config(account_id: int, payload: dict | None = None) ->
     """收到 IPC ``reload_config`` 时调用：
 
     - **先刷新 BUILTIN_FEATURES**：动态重扫 builtin 目录，让新增插件立即可见
-    - **再重新扫描 builtin 目录**：``discover_plugins()`` 把新发现的内置插件类注册进 ``_REGISTRY``
-      第三方插件只在 RemotePlugin.enabled + AccountFeature.enabled 双开关通过后按需加载
+    - builtin / installed 插件都在 ``_activate`` 中按需加载，避免每次热更新导入全部实现
     - 已实例化的 feature：刷新 ``ctx.config`` / ``ctx.rules``；若该 feature 已被禁用则 shutdown
     - 数据库新增的 enabled feature：调 ``_activate`` 加载
 
@@ -830,12 +850,6 @@ async def reload_account_config(account_id: int, payload: dict | None = None) ->
         BUILTIN_FEATURES.refresh()
     except Exception:  # noqa: BLE001
         log.exception("reload_account_config 时刷新 BUILTIN_FEATURES 失败")
-
-    # 仅刷新 builtin。installed 插件在 _activate 里按需加载，不能在这里无条件执行。
-    try:
-        discover_plugins()
-    except Exception:  # noqa: BLE001
-        log.exception("reload_account_config 时 discover_plugins 失败")
 
     reload_plugin_key = None
     if isinstance(payload, dict):
@@ -1013,7 +1027,7 @@ async def reload_plugin(account_id: int, plugin_key: str | None) -> None:
         state.contexts.pop(plugin_key, None)
 
     # 2) reload 模块
-    if plugin_key not in _BUILTIN_MODULES:
+    if _builtin_plugin_path(plugin_key) is None:
         _clear_installed_module_cache(plugin_key)
     else:
         try:

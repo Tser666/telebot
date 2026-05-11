@@ -62,15 +62,10 @@ async def seed_builtin_features(db: AsyncSession) -> int:
         # 尝试从 manifest 读取 config_schema 和 version
         cfg_schema = None
         ver = None
-        try:
-            import importlib
-            mod = importlib.import_module(f"app.worker.plugins.builtin.{key}.manifest")
-            m = getattr(mod, "MANIFEST", None)
-            if m is not None:
-                cfg_schema = getattr(m, "config_schema", None)
-                ver = getattr(m, "version", None)
-        except Exception:  # noqa: BLE001
-            pass
+        m = BUILTIN_FEATURES.manifest_for(key)
+        if m is not None:
+            cfg_schema = getattr(m, "config_schema", None)
+            ver = getattr(m, "version", None)
 
         if key in existing:
             f = existing[key]

@@ -1,12 +1,6 @@
-"""内置插件包索引。"""
+"""内置插件包索引。
 
-from . import auto_reply, autorepeat, codex_image, forward, game24, scheduler  # noqa: F401
+不要在包入口导入所有插件实现；worker 会按账号启用项懒加载。
+"""
 
-__all__ = [
-    "auto_reply",
-    "autorepeat",
-    "codex_image",
-    "forward",
-    "game24",
-    "scheduler",
-]
+__all__ = ["auto_reply", "autorepeat", "codex_image", "forward", "game24", "scheduler"]

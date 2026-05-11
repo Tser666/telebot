@@ -11,6 +11,15 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    command:
+      [
+        "postgres",
+        "-c", "shared_buffers=${POSTGRES_SHARED_BUFFERS:-64MB}",
+        "-c", "effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-192MB}",
+        "-c", "work_mem=${POSTGRES_WORK_MEM:-2MB}",
+        "-c", "maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-32MB}",
+        "-c", "max_connections=${POSTGRES_MAX_CONNECTIONS:-40}",
+      ]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-telebot}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-telebot}
@@ -27,7 +36,14 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
+    command:
+      [
+        "redis-server",
+        "--appendonly", "${REDIS_APPENDONLY:-no}",
+        "--save", "${REDIS_SAVE:-}",
+        "--maxmemory", "${REDIS_MAXMEMORY:-64mb}",
+        "--maxmemory-policy", "${REDIS_MAXMEMORY_POLICY:-allkeys-lru}",
+      ]
     volumes:
       - redisdata:/data
     healthcheck:
@@ -47,6 +63,11 @@ services:
       # 容器内连接服务名（postgres / redis），覆盖 .env 中本机地址
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-telebot}:${POSTGRES_PASSWORD:-telebot}@postgres:5432/${POSTGRES_DB:-telebot}
       REDIS_URL: redis://redis:6379/0
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-2}
+      DB_POOL_TIMEOUT: ${DB_POOL_TIMEOUT:-30}
+      REDIS_MAX_CONNECTIONS: ${REDIS_MAX_CONNECTIONS:-16}
+      MALLOC_ARENA_MAX: ${MALLOC_ARENA_MAX:-2}
       WEB_HOST: 0.0.0.0
       WEB_PORT: "8000"
       # #14：迁移只保留 command 里的那一次；应用启动期自动迁移关闭，避免重复执行
@@ -73,7 +94,7 @@ services:
       retries: 5
     # 启动顺序：先跑 alembic 迁移再启 uvicorn（唯一迁移入口）
     # ⚠ 必须 --workers 1：supervisor 在主进程内管子进程，多 worker 会重复拉起 worker 子进程
-    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1"]
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --loop asyncio --http h11 --no-access-log"]
 
   # ── Frontend：nginx 静态托管 + 反代后端 ──────────────────────
   frontend:
