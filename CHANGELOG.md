@@ -10,6 +10,21 @@
 
 ---
 
+## [0.11.4] — 2026-05-12 · fix · 远程插件模板预览
+
+### Fixed
+- 远程插件 `ConfigDialog` 中的 `template_preview` / `*_preview` 不再渲染为可编辑输入框，改为使用 `TelegramHtmlPreview` 展示只读 HTML 预览卡片。
+- `readOnly: true`、`template_preview`、`*_preview`、`template_placeholders` 字段统一只读展示，并在保存配置时过滤掉，避免把预览和说明写回运行配置。
+- `message_template` / `*_template` 保持可编辑多行输入，继续兼容现有远程插件 schema。
+
+### Documentation
+- 插件开发指南和远程插件指南补充自动弹窗对 `readOnly`、`template_placeholders`、`template_preview` / `*_preview` 的渲染规则。
+
+### Verification
+- 前端构建通过：`pnpm --dir frontend build`。
+
+---
+
 ## [0.11.3] — 2026-05-12 · docs · 插件文案模板规范
 
 ### Documentation

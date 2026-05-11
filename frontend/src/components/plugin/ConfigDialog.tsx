@@ -9,8 +9,9 @@
  * 配置合并顺序（前端用于展示）：
  * schema defaults < globalConfig < accountConfig
  */
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, type ReactNode } from "react";
 import { toast } from "sonner";
+import { TelegramHtmlPreview } from "@/components/TelegramHtmlPreview";
 import { getErrMsg } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,6 +40,7 @@ export interface ConfigField {
   minimum?: number;
   maximum?: number;
   level?: "global" | "account";
+  readOnly?: boolean;
 }
 
 export interface ConfigSchema {
@@ -71,9 +73,12 @@ export function ConfigDialog({
 
   const handleSave = useCallback(async () => {
     if (!onSave) return;
+    const properties = ((schema as ConfigSchema | null)?.properties ?? {}) as Record<string, ConfigField>;
+    const editableGlobalVals = withoutReadOnlyValues(globalVals, properties);
+    const editableAccountVals = withoutReadOnlyValues(accountVals, properties);
     setSaving(true);
     try {
-      await onSave(globalVals, accountVals);
+      await onSave(editableGlobalVals, editableAccountVals);
       toast.success("配置已保存");
       onOpenChange(false);
     } catch (err) {
@@ -81,7 +86,7 @@ export function ConfigDialog({
     } finally {
       setSaving(false);
     }
-  }, [onSave, globalVals, accountVals, onOpenChange]);
+  }, [onSave, schema, globalVals, accountVals, onOpenChange]);
 
   // 初始化配置值
   useEffect(() => {
@@ -181,6 +186,40 @@ function FieldInput({ fk, field, value, onChange }: FieldInputProps) {
   const label = field.title || fk;
   const description = field.description;
   const inputId = `plugin-config-${fk}`;
+  const textValue = formatConfigValue(value);
+  const defaultValue = field.default != null ? formatConfigValue(field.default) : "";
+  const isPreview = isPreviewField(fk);
+  const isPlaceholders = isPlaceholderField(fk);
+  const isTemplate = isTemplateField(fk);
+  const isReadOnly = isReadOnlyField(fk, field);
+
+  if (isPreview) {
+    return (
+      <ReadOnlyField label={label} description={description}>
+        <TelegramHtmlPreview value={textValue || defaultValue} mode="html" />
+      </ReadOnlyField>
+    );
+  }
+
+  if (isPlaceholders) {
+    return (
+      <ReadOnlyField label={label} description={description}>
+        <pre className="whitespace-pre-wrap break-words font-sans text-sm text-muted-foreground">
+          {textValue || defaultValue || "暂无占位符说明"}
+        </pre>
+      </ReadOnlyField>
+    );
+  }
+
+  if (isReadOnly) {
+    return (
+      <ReadOnlyField label={label} description={description}>
+        <pre className="whitespace-pre-wrap break-words font-sans text-sm text-muted-foreground">
+          {textValue || defaultValue || "未设置"}
+        </pre>
+      </ReadOnlyField>
+    );
+  }
 
   if (field.enum && field.enum.length > 0) {
     return (
@@ -243,7 +282,6 @@ function FieldInput({ fk, field, value, onChange }: FieldInputProps) {
   }
 
   if (field.type === "array") {
-    const textValue = Array.isArray(value) ? value.join(", ") : value != null ? String(value) : "";
     return (
       <div className="space-y-1.5">
         <Label htmlFor={inputId}>{label}</Label>
@@ -270,9 +308,7 @@ function FieldInput({ fk, field, value, onChange }: FieldInputProps) {
   }
 
   // 默认：string 类型
-  const textValue = value != null ? String(value) : "";
-  const defaultValue = field.default != null ? String(field.default) : "";
-  const multiline = textValue.includes("\n") || defaultValue.includes("\n") || /template|message|text|prompt|content/i.test(fk);
+  const multiline = isTemplate || textValue.includes("\n") || defaultValue.includes("\n") || /message|text|prompt|content/i.test(fk);
 
   if (multiline) {
     return (
@@ -301,6 +337,66 @@ function FieldInput({ fk, field, value, onChange }: FieldInputProps) {
         onChange={(e) => onChange(e.target.value)}
         placeholder={defaultValue}
       />
+    </div>
+  );
+}
+
+function isTemplateField(key: string): boolean {
+  return key === "message_template" || /_template$/i.test(key);
+}
+
+function isPreviewField(key: string): boolean {
+  return key === "template_preview" || /_preview$/i.test(key);
+}
+
+function isPlaceholderField(key: string): boolean {
+  return key === "template_placeholders";
+}
+
+function isReadOnlyField(key: string, field: ConfigField): boolean {
+  return Boolean(field.readOnly) || isPreviewField(key) || isPlaceholderField(key);
+}
+
+function formatConfigValue(value: unknown): string {
+  if (value == null) return "";
+  if (Array.isArray(value)) return value.map((item) => String(item)).join(", ");
+  if (typeof value === "object") {
+    return JSON.stringify(value, null, 2);
+  }
+  return String(value);
+}
+
+function withoutReadOnlyValues(
+  values: Record<string, unknown>,
+  properties: Record<string, ConfigField>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(values)) {
+    const field = properties[key];
+    if (field && isReadOnlyField(key, field)) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
+function ReadOnlyField({
+  label,
+  description,
+  children,
+}: {
+  label: string;
+  description?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <div>
+        <Label>{label}</Label>
+        {description && <p className="mt-1 text-xs text-muted-foreground">{description}</p>}
+      </div>
+      <div className="rounded-md border bg-background px-3 py-2">
+        {children}
+      </div>
     </div>
   );
 }

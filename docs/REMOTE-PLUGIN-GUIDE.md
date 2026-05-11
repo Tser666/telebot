@@ -345,6 +345,8 @@ command_config_keys = {"command"}
 - 凡是会出现在 Telegram 消息里的文案，都必须有模板配置入口；不要只在源码里改字符串。
 - 如果插件提供专属页面，模板输入、占位符说明/按钮、只读预览应放在同一个配置上下文里，预览只用模拟数据渲染，不读取真实消息，也不实际发送。
 - 消息模板预览交互应对齐“自定义命令模板”，不是 LLM Provider 配置页；LLM 配置页只作为基础表单宽度、间距和控件风格的参考。
+- 自动弹窗会按字段名兼容已有 schema：`message_template` / `*_template` 渲染为可编辑多行输入，`template_placeholders` 渲染为只读占位符说明，`template_preview` / `*_preview` 渲染为 `TelegramHtmlPreview` 预览卡片。
+- `readOnly: true` 字段统一只读展示，不会渲染为可编辑控件，也不会在保存时写回配置。
 - 没有专属页面时，至少通过字段标题、默认值和 `description` 让自动弹窗能呈现出清晰的模板说明和示例效果。
 
 ### 配置弹窗的数据来源

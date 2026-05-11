@@ -934,6 +934,7 @@ config_schema={
 - `config_schema["x-ui-mode"]` 可写 `schema`，ConfigDialog 自动渲染
 - 弹窗宽度、滚动高度、字段间距和控件风格应与自定义命令 / LLM 等系统配置弹窗保持一致：使用统一的 `Input`、`Select`、`Switch`、`Textarea`、`Label` 视觉语言，不在字段标题里放 emoji 或临时说明块
 - `message_template`、`*_message_template`、`prompt`、`content`、`text` 等长文案字段会按多行文本体验展示；字段描述里应写清占位符和示例值
+- `field.readOnly === true`、`template_preview`、`*_preview`、`template_placeholders` 会自动按只读块渲染，不会保存回配置；其中预览字段使用 `TelegramHtmlPreview` 展示最终 HTML 消息效果
 
 ```python
 # config_schema 示例（适用于 ConfigDialog 自动渲染）
@@ -1296,6 +1297,8 @@ config_schema={
 如果插件有专属配置页，建议提供只读预览：用户修改模板后，用示例上下文渲染一段 `template_preview`。预览应展示“模板 + 示例上下文”替换后的最终消息效果，而不是简单重复默认值或字段说明。没有专属页面时，也至少在字段描述里给出一条完整示例，避免用户猜最终效果。
 
 配置页里的模板预览体验应对齐自定义命令模板：模板输入、占位符说明/按钮、最终消息预览三者放在同一个配置上下文里。预览只使用模拟数据，不读取真实群消息，也不触发实际发送；如果模板支持 Telegram HTML，应尽量复用和自定义命令模板一致的预览渲染方式。
+
+自动弹窗兼容已有 schema 约定：`message_template` / `*_template` 是可编辑多行模板；`template_placeholders` 是只读占位符说明；`template_preview` / `*_preview` 是只读渲染预览。插件只需在 schema 中提供这些字段和默认值，不需要额外协议。
 
 ### 定时任务与后台任务生命周期
 
