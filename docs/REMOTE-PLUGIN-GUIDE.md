@@ -81,6 +81,7 @@ guess_number/
 
 - `name` / `key` 只能包含字母、数字、`_`、`-`，不能包含 `.`、`/`、`\`。
 - `version` 必须类似 `x.y.z`。
+- `plugin.json.version` 必须与 `manifest.py` 中的 `MANIFEST.version` 保持一致；如果插件进入 Registry，Registry 里的 `version` 也要同步。
 - `plugin.json` 必须是合法 JSON。
 - 安装阶段不会 import `manifest.py`，所以不能依赖 Python 代码生成元数据。
 - 不兼容旧的“只有 plugin.json + plugin.py”单文件插件。请补齐 `manifest.py` 和 `__init__.py` 后再安装。
@@ -194,8 +195,10 @@ Web UI 或 API 安装远程插件时，后端会执行：
 
 - “插件管理”里的启用/禁用是远程插件全局开关。
 - “账号插件管理”里的启用/禁用是账号级开关。
-- 仅打开全局开关不会自动让所有账号运行插件；还需要按账号启用。
+- 新安装插件首次在“插件管理”点“启用”时，如果还没有任何账号级配置，后端会为现有账号创建启用行，方便立即试用。
+- 一旦插件已有账号级配置，后续全局启用不会覆盖用户的账号选择；要调整范围，请到“账号插件管理”或使用按账号启用 API。
 - 如果插件缺少运行期文件，安装/更新阶段会失败，而不是等到 worker 运行时才报“未找到插件实现”。
+- 热更新后建议看插件日志中的启动版本，确认 worker 已经切换到新代码。
 
 ---
 
@@ -302,6 +305,9 @@ Web UI 或 API 安装远程插件时，后端会执行：
 | `timeout` | integer | 超时时间（秒） |
 | `auto_next` | boolean | 是否自动下一轮 |
 | `message_template` | string | 输出消息模板 |
+| `cooldown_seconds` | integer | 聊天级或用户级冷却时间 |
+| `cleanup_delay_seconds` | integer | 流程结束后延迟清理临时消息 |
+| `end_commands` | array[string] | 取消/强制结束命令别名 |
 | `status_interval_seconds` | integer | 状态编辑间隔，建议 10-300 秒 |
 | `allowed_chat_ids` | array[int] | 限制生效聊天 |
 
@@ -320,6 +326,14 @@ command_config_keys = {"command"}
 ```
 
 这样用户在 GUI 修改命令名后，loader 才能重新注册命令。
+
+模板类字段应提供占位符说明和示例值。比如答题插件的开局模板可说明：
+
+```text
+可用占位符：{round}=轮次，例如 1；{reward}=奖励，例如 100；{timeout}=限时秒数，例如 60；{command}=当前命令，例如 game。
+```
+
+如果插件有专属配置页，建议提供只读预览字段，用示例上下文渲染最终文案；没有专属页面时，至少在 `description` 中给出完整示例。
 
 ### 配置弹窗的数据来源
 
@@ -411,12 +425,18 @@ await ctx.log(
 - [ ] `manifest.py` 导出 `MANIFEST`，`__init__.py` 导出 `PLUGIN_CLASS` 和 `MANIFEST`。
 - [ ] 不是旧的单文件结构；`manifest.py`、`plugin.py`、`__init__.py` 三个运行期文件都存在。
 - [ ] 插件名、Manifest key、目录名一致。
+- [ ] `plugin.json.version`、`MANIFEST.version`、Registry `version` 一致。
+- [ ] 启动日志或主要交互消息包含当前插件版本，方便确认远程热更新是否生效。
 - [ ] `permissions` 覆盖实际调用的 `ctx.client` 方法。
 - [ ] 命令可触发，命令改名后热重载生效。
 - [ ] 群聊、私聊、频道/匿名频道下不会因为事件属性缺失崩溃。
+- [ ] 进行中重复触发会提示当前状态和下一步操作，不会覆盖已有局。
 - [ ] 抢答并发只奖励一次。
 - [ ] 超时和答题同时发生时只结束一次。
+- [ ] 高频交互有冷却/限流/超时策略，且用户可见文案说明关键规则。
+- [ ] 模板类配置有占位符说明和示例预览。
 - [ ] 插件禁用、热重载、worker 退出后没有幽灵任务。
+- [ ] 取消、完成、超时、禁用、热重载都会清理临时消息、文件和后台任务。
 - [ ] 外部 HTTP 请求有 timeout，错误提示已脱敏。
 - [ ] 插件日志足够排查“为什么没触发/为什么没发出去”。
 
