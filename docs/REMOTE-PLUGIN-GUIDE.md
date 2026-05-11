@@ -299,12 +299,19 @@ Web UI 或 API 安装远程插件时，后端会执行：
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `command` | string | 触发指令名，支持中文，不含空格 |
-| `reward` | integer | 奖励值；无积分系统时仅作为文案奖励 |
 | `timeout` | integer | 超时时间（秒） |
 | `auto_next` | boolean | 是否自动下一轮 |
 | `message_template` | string | 输出消息模板 |
 | `status_interval_seconds` | integer | 状态编辑间隔，建议 10-300 秒 |
 | `allowed_chat_ids` | array[int] | 限制生效聊天 |
+
+抢答/答题类插件不要把“本轮奖励金额、下注金额、题目范围”这类单局动态参数优先做成固定 `config_schema` 字段。更推荐让用户在触发命令里带上，例如：
+
+```text
+,game 100
+```
+
+配置页只放稳定配置项：`command`、`timeout`、`auto_next`、`message_template`、`allowed_chat_ids`。如果确实需要默认奖励，可以命名为 `default_reward`，只作为命令未传奖励时的兜底值。
 
 命令型插件必须设置：
 
@@ -313,6 +320,65 @@ command_config_keys = {"command"}
 ```
 
 这样用户在 GUI 修改命令名后，loader 才能重新注册命令。
+
+### 配置弹窗的数据来源
+
+远程插件配置页有一个很容易误判的点：前端点击“配置”时，不会直接读取磁盘上的 `plugin.json` 或 `manifest.py`，而是读取：
+
+```text
+GET /api/accounts/{aid}/features
+```
+
+也就是接口返回的 `features[].config_schema`。这个字段来自数据库里的 `Feature.manifest.config_schema`。
+
+因此，远程插件的配置链路是：
+
+```text
+plugin.json.config_schema
+  -> 安装/更新服务解析 plugin.json
+  -> 后端写入 Feature.manifest.config_schema
+  -> /api/accounts/{aid}/features 返回 config_schema
+  -> 前端 ConfigDialog 自动渲染配置表单
+```
+
+开发与排查时请记住：
+
+- `plugin.json.config_schema` 是远程插件安装阶段的静态来源。
+- 安装/更新后，后端必须把它持久化到 `Feature.manifest.config_schema`。
+- 前端配置弹窗实际读取 `/api/accounts/{aid}/features` 返回的 `config_schema`。
+- 如果 UI 显示“该插件没有可配置的选项”，先检查该 API 返回里的 `config_schema` 是否为空。
+- 修改远程插件的 `config_schema` 后，需要在插件中心执行“更新插件”，并确认后端完成元数据回写。
+
+### 答题/抢答奖励交互规范
+
+远程答题、抢答、下注类插件建议统一使用下面的交互方式：
+
+1. 奖励金额优先从触发命令参数读取，例如 `,game 100`。
+2. 开局时立即把本轮奖励金额写入局状态，例如 `RoundState.reward = reward`；后续答题、超时、结算都读取局状态，不再读取运行时可变配置，避免一局进行中配置被修改后奖励不一致。
+3. 答对后使用两步反馈：
+   - 回复答对者消息发送纯文本奖励，例如 `+100`；
+   - 编辑原题目消息，追加答对者、正确答案、奖励金额、耗时等结算信息。
+4. 如果插件需要发送题面图片，必须同时在 `plugin.json.permissions` 和 `manifest.py` 的 `permissions` 里声明 `send_file`。
+5. 图片题面插件应避免隐式依赖未声明系统库；如果不引入 Pillow，应说明可以用标准库输出 PNG；如果必须用 Pillow、numpy 等第三方库，要在 README 或插件说明中写清安装约束。
+6. 单局动态参数，如奖励金额、题目范围、下注金额，优先由命令参数传入；配置页只承载长期稳定配置。
+
+最小示例：
+
+```python
+async def _cmd_start(self, client, event, args, account_id, ctx):
+    reward = int(args[0]) if args else int(ctx.config.get("default_reward", 0) or 0)
+    state = RoundState(chat_id=event.chat_id, reward=reward, answer="42")
+    self._rounds[state.chat_id] = state
+
+async def on_message(self, ctx, event):
+    ...
+    await event.reply(f"+{state.reward}")
+    await ctx.client.edit_message(
+        state.chat_id,
+        state.question_message_id,
+        f"{state.question_text}\n\n已答对：{winner_name}\n答案：{state.answer}\n奖励：+{state.reward}",
+    )
+```
 
 ---
 

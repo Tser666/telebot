@@ -1158,7 +1158,7 @@ class QuizPlugin(Plugin):
 | 字段 | 类型 | 推荐默认值 | 推荐范围/校验 | 说明 |
 |------|------|------------|---------------|------|
 | `command` | string | 插件短名 | 1-32 字符，不含空白，支持中文 | 触发指令名，配合 `command_config_keys = {"command"}` |
-| `reward` | integer | `0` | `0` 到业务允许上限 | 奖励值；无积分系统时仅作为文案奖励 |
+| `default_reward` | integer | `0` | `0` 到业务允许上限 | 可选默认奖励；抢答/下注类插件的单局奖励优先由命令参数传入 |
 | `timeout` | integer | `60` | 10-86400 秒 | 用户可理解的超时秒数；已有插件沿用该字段 |
 | `auto_next` | boolean | `false` | 布尔 | 游戏/任务结束后是否自动开下一轮 |
 | `message_template` | string | 内置模板 | 建议限制最大长度 | 用户可编辑输出消息模板 |
@@ -1187,11 +1187,12 @@ config_schema={
             "pattern": r"^\S+$",
             "description": "跟在系统命令前缀后使用，支持中文；不要包含空格。",
         },
-        "reward": {
+        "default_reward": {
             "type": "integer",
             "title": "默认奖励",
             "default": 0,
             "minimum": 0,
+            "description": "仅作为命令未传奖励时的兜底值；本轮奖励建议通过命令参数传入。",
         },
         "timeout": {
             "type": "integer",
@@ -1208,6 +1209,8 @@ config_schema={
     },
 }
 ```
+
+配置页只适合放长期稳定配置，例如 `command`、`timeout`、`auto_next`、`message_template`。像奖励金额、题目范围、下注金额这类单局动态参数，优先从命令参数读取，例如 `,game 100`，并在开局时冻结到本轮状态里。
 
 ### 定时任务与后台任务生命周期
 
@@ -1289,6 +1292,11 @@ await ctx.log(
 
 - 不要在日志里记录完整昵称、完整消息正文或隐私文本。
 - 真正记分前必须保证“首个答对”已经在锁内原子判定。
+- 奖励金额不建议作为抢答类插件的固定配置项；优先由触发命令携带，例如 `,game 100`。
+- 开局时把本轮奖励写入局状态，例如 `RoundState.reward`；一局进行中不要再读取运行时可变配置，避免配置变更导致结算金额漂移。
+- 答对后建议两步反馈：先回复答对者消息发送纯文本奖励（如 `+100`），再编辑原题目消息追加答对者、正确答案、奖励金额、耗时等结算信息。
+- 图片题面插件必须在 `plugin.json` 和 `manifest.py` 的 `permissions` 中声明 `send_file`，并给发送的文件设置明确后缀名。
+- 图片题面插件不要隐式依赖未声明系统库；如果不用 Pillow，可以说明使用标准库生成 PNG；如果必须使用 Pillow、numpy 等第三方库，要在 README 或插件说明中写清安装约束。
 - 奖励发送失败要写 `warn/error` 日志，并说明是否已经兜底发送普通消息。
 
 ### 插件最小测试清单
@@ -1371,7 +1379,9 @@ class GuessNumberPlugin(Plugin):
 
     async def _cmd_start(self, client, event, args: list[str], account_id: int, ctx: PluginContext) -> None:
         chat_id = int(getattr(event, "chat_id", 0) or 0)
-        reward = int(ctx.config.get("reward", 0) or 0)
+        # 单局奖励优先由命令参数传入，如：,guess 100。
+        # 没传时才使用 default_reward 兜底，并在开局时冻结到 RoundState。
+        reward = int(args[0]) if args else int(ctx.config.get("default_reward", 0) or 0)
         timeout = int(ctx.config.get("timeout", 60) or 60)
 
         async with self._locks[chat_id]:
@@ -1383,7 +1393,7 @@ class GuessNumberPlugin(Plugin):
 
         task = asyncio.create_task(self._timeout_round(ctx, chat_id, timeout))
         self._track_task(task)
-        await event.edit(f"猜一个 1-9 的数字，限时 {timeout} 秒。")
+        await event.edit(f"猜一个 1-9 的数字，限时 {timeout} 秒，奖励 +{reward}。")
 
     async def on_message(self, ctx: PluginContext, event) -> None:
         chat_id = int(getattr(event, "chat_id", 0) or 0)
@@ -1402,7 +1412,7 @@ class GuessNumberPlugin(Plugin):
 
         if ctx.log:
             await ctx.log("info", "猜数字答对，准备发送奖励文案。", chat_id=chat_id, reward=state.reward)
-        prize_text = f"答对了！奖励 {state.reward}。"
+        prize_text = f"+{state.reward}"
         try:
             await event.reply(prize_text)
         except Exception:
@@ -1457,11 +1467,12 @@ MANIFEST = Manifest(
                 "maxLength": 32,
                 "pattern": r"^\S+$",
             },
-            "reward": {
+            "default_reward": {
                 "type": "integer",
-                "title": "奖励文案数值",
+                "title": "默认奖励",
                 "default": 0,
                 "minimum": 0,
+                "description": "仅作为命令未传奖励时的兜底值；本轮奖励建议通过命令参数传入。",
             },
             "timeout": {
                 "type": "integer",

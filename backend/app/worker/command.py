@@ -88,6 +88,8 @@ class CommandContext:
     aliases: dict[str, str] = None  # type: ignore[assignment]  # {alias: target}
     sudo_users: dict[int, dict[str, Any]] = None  # type: ignore[assignment]  # {tg_user_id: config}
     sudo_prefix: str = "."
+    sudo_enabled: bool = False
+    self_tg_user_id: int | None = None
 
     def __post_init__(self) -> None:
         if self.aliases is None:
@@ -425,7 +427,9 @@ async def _check_sudo_permission(event, cmd: str, account_id: int) -> tuple[bool
     Returns:
         (allowed, error_message)
     """
-    if _ctx is None or not _ctx.sudo_users:
+    if _ctx is None or not _ctx.sudo_enabled:
+        return False, "sudo 系统未开启"
+    if not _ctx.sudo_users:
         return False, "sudo 系统未配置"
     
     sender = await event.get_sender()
@@ -462,12 +466,58 @@ def _should_report_incoming_sudo_denial(error_msg: str) -> bool:
     这样普通群友发了类似 ``.xxx`` 的消息时，不会莫名收到 userbot 的拒绝提示。
     """
     silent_fragments = (
+        "sudo 系统未开启",
         "sudo 系统未配置",
         "不在 sudo 列表中",
         "未配置允许对话",
         "未配置允许命令",
     )
     return not any(fragment in error_msg for fragment in silent_fragments)
+
+
+def _looks_like_command_name(cmd: str, *, prefix: str = ".") -> bool:
+    """判断 sudo 前缀后的 token 是否像一个真实命令名。
+
+    ``.`` 是常见 sudo 前缀，但群聊里用户也会发送 ``..``、``...`` 或小数点
+    表情/占位文本。旧逻辑会把这些内容当成 sudo 命令并公开回复权限拒绝。
+    这里先过滤纯标点和重复前缀，让普通聊天内容不会进入 sudo 权限链路。
+    """
+    name = str(cmd or "").strip()
+    if not name:
+        return False
+    if prefix and name.startswith(prefix):
+        return False
+    return any(ch.isalnum() or ch == "_" for ch in name)
+
+
+def _has_dispatch_target(cmd: str, args_raw: str = "") -> bool:
+    """sudo incoming 只对真实可派发命令做权限提示。
+
+    已授权 sudo 用户在未授权群里误发 ``...`` 时不应收到公开拒绝；
+    但 ``.ping`` / ``.模板名`` / ``.插件命令`` 这类真实命令仍会进入权限检查。
+    """
+    if cmd in _BUILTIN_ALIAS_TO_PRIMARY:
+        return True
+    if _ctx is not None:
+        if cmd in _ctx.templates:
+            return True
+        if _ctx.aliases:
+            full_rest = f"{cmd} {args_raw}".strip() if args_raw else cmd
+            for alias in _ctx.aliases:
+                if full_rest == alias or full_rest.startswith(alias + " "):
+                    return True
+    return False
+
+
+def _is_self_chat(event) -> bool:
+    """sudo incoming 只允许在账号自身 chat（收藏夹语义）触发。"""
+    if _ctx is None or _ctx.self_tg_user_id is None:
+        return False
+    try:
+        chat_id = int(getattr(event, "chat_id", 0) or 0)
+    except Exception:
+        return False
+    return chat_id == int(_ctx.self_tg_user_id)
 
 
 def _replied_media_placeholder(msg: Any) -> str:
@@ -2042,9 +2092,15 @@ def make_command_handler(client: TelegramClient, account_id: int, prefix: str | 
         sudo_p = (_ctx.sudo_prefix if _ctx else "") or "."
         pattern_sudo = re.compile(rf"^{re.escape(sudo_p)}(\S+)(?:\s+(.*))?$", re.S)
         m = pattern_sudo.match(text)
-        if m:
+        if m and incoming_sudo:
             cmd = m.group(1)
             args_raw = (m.group(2) or "").strip()
+            if not _looks_like_command_name(cmd, prefix=sudo_p):
+                return
+            if incoming_sudo and not _has_dispatch_target(cmd, args_raw):
+                return
+            if incoming_sudo and not _is_self_chat(event):
+                return
             allowed, error_msg = await _check_sudo_permission(event, cmd, account_id)
             if not allowed:
                 if incoming_sudo:
@@ -2069,7 +2125,10 @@ def make_command_handler(client: TelegramClient, account_id: int, prefix: str | 
         m = pattern.match(text)
         if not m:
             return
-        await _dispatch(event, m.group(1), (m.group(2) or "").strip(), help_prefix=p)
+        cmd = m.group(1)
+        if not _looks_like_command_name(cmd, prefix=p):
+            return
+        await _dispatch(event, cmd, (m.group(2) or "").strip(), help_prefix=p)
 
     @client.on(events.NewMessage(incoming=True))
     async def _sudo_incoming_h(event):

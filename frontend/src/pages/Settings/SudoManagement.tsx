@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/misc";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 
 import {
   createSudoUser,
@@ -24,6 +25,7 @@ import {
   updateSudoUser,
 } from "@/api/sudo";
 import { listAccountCommands, listBuiltinCommands } from "@/api/commands";
+import { getSystemSettings, patchSystemSettings } from "@/api/system";
 import type { SudoUserResponse } from "@/types/sudo";
 import { listAccounts } from "@/api/accounts";
 import { getErrMsg } from "@/lib/api";
@@ -97,6 +99,10 @@ export function SudoManagement() {
   const builtinCommandsQ = useQuery({
     queryKey: ["commands", "builtin"],
     queryFn: () => listBuiltinCommands(),
+  });
+  const settingsQ = useQuery({
+    queryKey: ["system", "settings"],
+    queryFn: getSystemSettings,
   });
 
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -192,6 +198,14 @@ export function SudoManagement() {
     },
     onError: (err) => toast.error(getErrMsg(err)),
   });
+  const sudoEnabledMut = useMutation({
+    mutationFn: (enabled: boolean) => patchSystemSettings({ sudo_enabled: enabled }),
+    onSuccess: () => {
+      toast.success("Sudo 总开关已保存，worker 将热加载");
+      qc.invalidateQueries({ queryKey: ["system", "settings"] });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
 
   const startEdit = (user: SudoUserResponse) => {
     setEditingId(user.id);
@@ -261,6 +275,27 @@ export function SudoManagement() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        <div className="rounded-lg border bg-muted/20 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold">Sudo 总开关</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                关闭时所有 sudo 触发都会静默忽略。开启后也只允许在账号自身 chat（收藏夹）里触发，不在群组或普通私聊里响应。
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-muted-foreground">
+                {settingsQ.data?.sudo_enabled ? "已开启" : "已关闭"}
+              </span>
+              <Switch
+                checked={!!settingsQ.data?.sudo_enabled}
+                disabled={settingsQ.isLoading || sudoEnabledMut.isPending}
+                onCheckedChange={(checked) => sudoEnabledMut.mutate(checked)}
+              />
+            </div>
+          </div>
+        </div>
+
         {/* 创建/编辑表单 */}
         <div className="space-y-4 rounded-lg border p-4">
           <h3 className="text-sm font-semibold">

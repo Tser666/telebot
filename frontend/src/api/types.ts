@@ -472,6 +472,7 @@ export interface AuditLogItem {
 export interface SystemSettings {
   command_prefix: string;
   kill_switch?: boolean;
+  sudo_enabled?: boolean;
   api_qps_total?: number;
   /** IANA 时区标识，如 "Asia/Shanghai"；空字符串 = 使用浏览器本地时区 */
   timezone?: string;

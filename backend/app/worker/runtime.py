@@ -552,6 +552,8 @@ async def _refresh_command_context(account_id: int) -> None:
         # 命令前缀：DB 里 system_setting.command_prefix 优先，没有则用 .env 默认
     prefix: str = app_settings.command_prefix or ","
     sudo_prefix: str = "."
+    sudo_enabled = False
+    self_tg_user_id: int | None = None
     async with AsyncSessionLocal() as db:
         # 0) 命令前缀（系统设置）
         try:
@@ -581,6 +583,17 @@ async def _refresh_command_context(account_id: int) -> None:
                     sudo_prefix = v
         except Exception:  # noqa: BLE001
             pass
+
+        # 0.6) Sudo 总开关（默认关闭）
+        try:
+            row_sudo_enabled = await db.get(SystemSetting, "sudo_enabled")
+            raw_enabled = row_sudo_enabled.value if row_sudo_enabled is not None else None
+            if isinstance(raw_enabled, dict):
+                sudo_enabled = bool(raw_enabled.get("enabled", False))
+            elif raw_enabled is not None:
+                sudo_enabled = bool(raw_enabled)
+        except Exception:  # noqa: BLE001
+            sudo_enabled = False
 
         # 1) 该账号启用中的命令模板
         rows = (
@@ -674,6 +687,10 @@ async def _refresh_command_context(account_id: int) -> None:
         ).scalars().all()
         aliases: dict[str, str] = {r.alias: r.target for r in alias_rows}
 
+        account_row = await db.get(Account, account_id)
+        if account_row is not None and account_row.tg_user_id is not None:
+            self_tg_user_id = int(account_row.tg_user_id)
+
         # 4) Sudo users
         sudo_rows = (
             await db.execute(
@@ -697,6 +714,8 @@ async def _refresh_command_context(account_id: int) -> None:
             aliases=aliases,
             sudo_users=sudo_users,
             sudo_prefix=sudo_prefix,
+            sudo_enabled=sudo_enabled,
+            self_tg_user_id=self_tg_user_id,
         )
     )
 

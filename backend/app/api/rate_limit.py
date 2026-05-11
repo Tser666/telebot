@@ -596,6 +596,7 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
     tz_val = await _get_setting(db, "timezone", {"value": ""})
     llm_val = await _get_setting(db, "llm_limits", {})
     log_val = await _get_setting(db, "log_retention", {})
+    sudo_val = await _get_setting(db, "sudo_enabled", {"enabled": False})
     tz = str(tz_val.get("value", "")) if isinstance(tz_val, dict) else str(tz_val)
     llm_limits = llm_val if isinstance(llm_val, dict) else {}
     log_retention = log_val if isinstance(log_val, dict) else {}
@@ -604,6 +605,7 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
         "kill_switch": bool(kill_val.get("enabled", False)) if isinstance(kill_val, dict) else bool(kill_val),
         "api_qps_total": int(qps_val.get("api_qps_total", 0)) if isinstance(qps_val, dict) else int(qps_val),
         "timezone": tz or "",
+        "sudo_enabled": bool(sudo_val.get("enabled", False)) if isinstance(sudo_val, dict) else bool(sudo_val),
         "llm_limits": {
             "per_minute": max(0, int(llm_limits.get("per_minute", 0) or 0)),
             "daily_requests": max(0, int(llm_limits.get("daily_requests", 0) or 0)),
@@ -649,6 +651,7 @@ class _SettingsPatch(BaseModel):
 
     command_prefix: str | None = None
     timezone: str | None = None
+    sudo_enabled: bool | None = None
     llm_limits: _LLMLimitsPatch | None = None
     log_retention: _LogRetentionPatch | None = None
 
@@ -673,6 +676,11 @@ async def patch_system_settings(
         if tz and tz not in __import__("zoneinfo").available_timezones():  # noqa: PLC0415
             raise _bad("invalid_timezone", f"无效时区：{tz}")
         await _set_setting(db, "timezone", {"value": tz})
+    if payload.sudo_enabled is not None:
+        enabled = bool(payload.sudo_enabled)
+        await _set_setting(db, "sudo_enabled", {"enabled": enabled})
+        await _audit(db, user.id, "set_sudo_enabled", target="system", detail={"enabled": enabled})
+        await _broadcast_reload()
     if payload.llm_limits is not None:
         current = await _get_setting(db, "llm_limits", {})
         if not isinstance(current, dict):

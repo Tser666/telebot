@@ -144,6 +144,45 @@ async def test_handler_falls_back_when_ctx_missing():
         )
 
 
+@pytest.mark.asyncio
+async def test_repeated_global_prefix_is_silent():
+    """全局命令前缀后仍是前缀时静默，不提示未知命令。"""
+    from app.worker.command import make_command_handler
+
+    captured = {}
+
+    def fake_on(_event_type):
+        def deco(fn):
+            captured["fn"] = fn
+            return fn
+
+        return deco
+
+    client = MagicMock()
+    client.on = fake_on
+    make_command_handler(client, account_id=1, prefix="。")
+    handler = captured["fn"]
+
+    set_command_context(
+        CommandContext(
+            account_id=1,
+            templates={},
+            providers={},
+            command_prefix="。",
+        )
+    )
+
+    event = AsyncMock()
+    event.raw_text = "。。。"
+    await handler(event)
+    event.edit.assert_not_called()
+
+    event2 = AsyncMock()
+    event2.raw_text = "。ping"
+    await handler(event2)
+    event2.edit.assert_called_with("pong")
+
+
 def test_command_context_has_command_prefix_field():
     """守门测试：CommandContext 必须有 command_prefix 字段且默认 ","。"""
     ctx = CommandContext(account_id=1, templates={}, providers={})

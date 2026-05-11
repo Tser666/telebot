@@ -17,7 +17,12 @@ from app.schemas.sudo import SudoUserResponse
 from app.worker.command import (
     CommandContext,
     _check_sudo_permission,
+    _has_dispatch_target,
+    _is_self_chat,
+    _looks_like_command_name,
     _should_report_incoming_sudo_denial,
+    make_command_handler,
+    set_command_context,
 )
 
 # ════════════════════════════════════════════════════════════
@@ -35,6 +40,8 @@ def test_command_context_sudo_defaults():
     )
     assert ctx.sudo_users == {}
     assert ctx.sudo_prefix == "."
+    assert ctx.sudo_enabled is False
+    assert ctx.self_tg_user_id is None
 
 
 def test_command_context_sudo_can_be_set():
@@ -44,6 +51,7 @@ def test_command_context_sudo_can_be_set():
         templates={},
         providers={},
         command_prefix=",",
+        sudo_enabled=True,
         sudo_users={
             111: {"display_name": "alice", "allowed_chat_ids": [], "allowed_commands": []},
         },
@@ -51,6 +59,7 @@ def test_command_context_sudo_can_be_set():
     )
     assert 111 in ctx.sudo_users
     assert ctx.sudo_users[111]["display_name"] == "alice"
+    assert ctx.sudo_enabled is True
 
 
 # ════════════════════════════════════════════════════════════
@@ -68,7 +77,7 @@ async def test_check_sudo_no_ctx():
         event = AsyncMock()
         allowed, msg = await _check_sudo_permission(event, "ping", 1)
         assert allowed is False
-        assert "未配置" in msg
+        assert "未开启" in msg
     finally:
         wcmd._ctx = old
 
@@ -80,13 +89,35 @@ async def test_check_sudo_empty_users():
     old = wcmd._ctx
     wcmd._ctx = CommandContext(
         account_id=1, templates={}, providers={},
-        command_prefix=",", sudo_users={},
+        command_prefix=",", sudo_enabled=True, sudo_users={},
     )
     try:
         event = AsyncMock()
         allowed, msg = await _check_sudo_permission(event, "ping", 1)
         assert allowed is False
         assert "未配置" in msg
+    finally:
+        wcmd._ctx = old
+
+
+@pytest.mark.asyncio
+async def test_check_sudo_disabled_by_global_switch():
+    """sudo 总开关关闭时，即使配置了用户也拒绝。"""
+    from app.worker import command as wcmd
+    old = wcmd._ctx
+    wcmd._ctx = CommandContext(
+        account_id=1,
+        templates={},
+        providers={},
+        command_prefix=",",
+        sudo_enabled=False,
+        sudo_users={111: {"display_name": "alice", "allowed_chat_ids": ["*"], "allowed_commands": ["*"]}},
+    )
+    try:
+        event = AsyncMock()
+        allowed, msg = await _check_sudo_permission(event, "ping", 1)
+        assert allowed is False
+        assert "未开启" in msg
     finally:
         wcmd._ctx = old
 
@@ -99,6 +130,7 @@ async def test_check_sudo_user_not_in_list():
     wcmd._ctx = CommandContext(
         account_id=1, templates={}, providers={},
         command_prefix=",",
+        sudo_enabled=True,
         sudo_users={999: {"display_name": "bob", "allowed_chat_ids": [], "allowed_commands": []}},
     )
     try:
@@ -122,6 +154,7 @@ async def test_check_sudo_allowed_explicit_all_scope():
     wcmd._ctx = CommandContext(
         account_id=1, templates={}, providers={},
         command_prefix=",",
+        sudo_enabled=True,
         sudo_users={111: {"display_name": "alice", "allowed_chat_ids": ["*"], "allowed_commands": ["*"]}},
     )
     try:
@@ -146,6 +179,7 @@ async def test_check_sudo_empty_scope_denied_by_default():
     wcmd._ctx = CommandContext(
         account_id=1, templates={}, providers={},
         command_prefix=",",
+        sudo_enabled=True,
         sudo_users={111: {"display_name": "alice", "allowed_chat_ids": [], "allowed_commands": []}},
     )
     try:
@@ -170,6 +204,7 @@ async def test_check_sudo_chat_not_allowed():
     wcmd._ctx = CommandContext(
         account_id=1, templates={}, providers={},
         command_prefix=",",
+        sudo_enabled=True,
         sudo_users={111: {
             "display_name": "alice",
             "allowed_chat_ids": [-100111],
@@ -198,6 +233,7 @@ async def test_check_sudo_chat_allowed():
     wcmd._ctx = CommandContext(
         account_id=1, templates={}, providers={},
         command_prefix=",",
+        sudo_enabled=True,
         sudo_users={111: {
             "display_name": "alice",
             "allowed_chat_ids": [-100111],
@@ -225,6 +261,7 @@ async def test_check_sudo_command_not_allowed():
     wcmd._ctx = CommandContext(
         account_id=1, templates={}, providers={},
         command_prefix=",",
+        sudo_enabled=True,
         sudo_users={111: {
             "display_name": "alice",
             "allowed_chat_ids": ["*"],
@@ -252,6 +289,7 @@ async def test_check_sudo_command_allowed():
     wcmd._ctx = CommandContext(
         account_id=1, templates={}, providers={},
         command_prefix=",",
+        sudo_enabled=True,
         sudo_users={111: {
             "display_name": "alice",
             "allowed_chat_ids": ["*"],
@@ -290,6 +328,7 @@ def test_sudo_response_hides_internal_all_marker():
 
 def test_incoming_sudo_denial_reporting_is_quiet_for_unconfigured_users():
     """群里普通消息撞到 sudo 前缀时，不应该公开回复未授权提示。"""
+    assert _should_report_incoming_sudo_denial("sudo 系统未开启") is False
     assert _should_report_incoming_sudo_denial("sudo 系统未配置") is False
     assert _should_report_incoming_sudo_denial("TG 用户 123 不在 sudo 列表中") is False
     assert _should_report_incoming_sudo_denial("未配置允许对话，sudo 默认拒绝") is False
@@ -300,6 +339,196 @@ def test_incoming_sudo_denial_reporting_keeps_scope_errors_visible():
     """已授权 sudo 用户越界使用时仍给明确反馈。"""
     assert _should_report_incoming_sudo_denial("此对话（chat_id=-100）不在白名单中") is True
     assert _should_report_incoming_sudo_denial("命令 `reboot` 不在白名单中") is True
+
+
+def test_sudo_command_name_rejects_repeated_dot_noise():
+    """多个小数点不是 sudo 命令，不能进入权限拒绝链路。"""
+    assert _looks_like_command_name("ping", prefix=".") is True
+    assert _looks_like_command_name("帮助", prefix=".") is True
+    assert _looks_like_command_name(".", prefix=".") is False
+    assert _looks_like_command_name("..", prefix=".") is False
+    assert _looks_like_command_name("...", prefix=".") is False
+
+
+def test_sudo_dispatch_target_only_accepts_known_commands():
+    """incoming sudo 只对真实命令做权限检查，未知文本静默忽略。"""
+    from app.worker import command as wcmd
+    old = wcmd._ctx
+    wcmd._ctx = CommandContext(
+        account_id=1,
+        templates={"hello": {"type": "reply_text", "text": "hi"}},
+        providers={},
+        command_prefix=",",
+        aliases={"问候": "hello"},
+    )
+    try:
+        assert _has_dispatch_target("ping") is True
+        assert _has_dispatch_target("hello") is True
+        assert _has_dispatch_target("问候") is True
+        assert _has_dispatch_target(".") is False
+        assert _has_dispatch_target("not-a-command") is False
+    finally:
+        wcmd._ctx = old
+
+
+def test_sudo_self_chat_guard():
+    """sudo incoming 只允许账号自身 chat。"""
+    from app.worker import command as wcmd
+    old = wcmd._ctx
+    wcmd._ctx = CommandContext(
+        account_id=1,
+        templates={},
+        providers={},
+        command_prefix=",",
+        sudo_enabled=True,
+        self_tg_user_id=999,
+    )
+    try:
+        event = MagicMock()
+        event.chat_id = 999
+        assert _is_self_chat(event) is True
+        event.chat_id = -1002090852236
+        assert _is_self_chat(event) is False
+    finally:
+        wcmd._ctx = old
+
+
+@pytest.mark.asyncio
+async def test_incoming_repeated_dots_do_not_trigger_sudo_denial():
+    """回归：群里发 '..' / '...' 不应被 userbot 当作 sudo 命令并公开回复。"""
+    captured = []
+
+    def fake_on(_event_type):
+        def deco(fn):
+            captured.append(fn)
+            return fn
+
+        return deco
+
+    client = MagicMock()
+    client.on = fake_on
+    make_command_handler(client, account_id=1, prefix=",")
+    incoming_handler = captured[0]
+
+    set_command_context(
+        CommandContext(
+            account_id=1,
+            templates={},
+            providers={},
+            command_prefix=",",
+            sudo_prefix=".",
+            sudo_enabled=True,
+            self_tg_user_id=111,
+            sudo_users={
+                111: {
+                    "display_name": "alice",
+                    "allowed_chat_ids": [-100111],
+                    "allowed_commands": ["*"],
+                }
+            },
+        )
+    )
+
+    sender = MagicMock()
+    sender.id = 111
+    event = AsyncMock()
+    event.raw_text = "..."
+    event.chat_id = -1002090852236
+    event.get_sender = AsyncMock(return_value=sender)
+
+    await incoming_handler(event)
+    event.respond.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_incoming_sudo_command_outside_self_chat_is_ignored():
+    """即使是授权 sudo 用户，在群组里发 .ping 也不应触发拒绝提示。"""
+    captured = []
+
+    def fake_on(_event_type):
+        def deco(fn):
+            captured.append(fn)
+            return fn
+
+        return deco
+
+    client = MagicMock()
+    client.on = fake_on
+    make_command_handler(client, account_id=1, prefix=",")
+    incoming_handler = captured[0]
+
+    set_command_context(
+        CommandContext(
+            account_id=1,
+            templates={},
+            providers={},
+            command_prefix=",",
+            sudo_prefix=".",
+            sudo_enabled=True,
+            self_tg_user_id=111,
+            sudo_users={
+                111: {
+                    "display_name": "alice",
+                    "allowed_chat_ids": ["*"],
+                    "allowed_commands": ["*"],
+                }
+            },
+        )
+    )
+
+    sender = MagicMock()
+    sender.id = 111
+    event = AsyncMock()
+    event.raw_text = ".ping"
+    event.chat_id = -1002090852236
+    event.get_sender = AsyncMock(return_value=sender)
+
+    await incoming_handler(event)
+    event.respond.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_outgoing_dot_prefix_does_not_enter_sudo_branch():
+    """账号自己发点号消息时不走 sudo 分支，避免群里被改成权限拒绝。"""
+    captured = []
+
+    def fake_on(_event_type):
+        def deco(fn):
+            captured.append(fn)
+            return fn
+
+        return deco
+
+    client = MagicMock()
+    client.on = fake_on
+    make_command_handler(client, account_id=1, prefix=",")
+    outgoing_handler = captured[1]
+
+    set_command_context(
+        CommandContext(
+            account_id=1,
+            templates={},
+            providers={},
+            command_prefix=",",
+            sudo_prefix=".",
+            sudo_enabled=True,
+            self_tg_user_id=111,
+            sudo_users={
+                111: {
+                    "display_name": "self",
+                    "allowed_chat_ids": ["*"],
+                    "allowed_commands": ["*"],
+                }
+            },
+        )
+    )
+
+    event = AsyncMock()
+    event.raw_text = ".ping"
+    event.chat_id = -1002090852236
+
+    await outgoing_handler(event)
+    event.edit.assert_not_called()
 
 
 # ════════════════════════════════════════════════════════════
