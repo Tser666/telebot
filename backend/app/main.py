@@ -333,3 +333,8 @@ app.include_router(system_health_api.router)
 from .api import remote_plugin as remote_plugin_api  # noqa: E402
 
 app.include_router(remote_plugin_api.router)
+
+# 插件仓库管理（可浏览的 Git 仓库列表 + 选择性安装其中插件）
+from .api import plugin_repo as plugin_repo_api  # noqa: E402
+
+app.include_router(plugin_repo_api.router)

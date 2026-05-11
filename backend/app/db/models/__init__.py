@@ -9,6 +9,7 @@ from .llm_usage import LLMUsage
 from .log import AuditLog, RuntimeLog
 from .notify import NotifyBot
 from .plugin import PluginInstall
+from .plugin_repo import PluginRepo
 from .rate_limit import RateLimitEvent, RateLimitOverride, RateLimitRule, RateLimitTemplate
 from .remote_plugin import RemotePlugin
 from .rule import Rule
@@ -31,6 +32,7 @@ __all__ = [
     "NotificationChannel",
     "NotifyBot",
     "PluginInstall",
+    "PluginRepo",
     "Proxy",
     "RateLimitEvent",
     "RateLimitOverride",

@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     # 已安装第三方插件的根目录；loader.discover_plugins 会扫描这里下的子目录。
     # 对应 worker/plugins/loader.py 中的 _INSTALLED_DIR；二者一定要一致。
     plugins_installed_dir: str = "./plugins/installed"
+    # 插件仓库（plugin_repo）本地克隆缓存目录；用于浏览仓库内可装插件而不重复克隆。
+    plugin_repos_cache_dir: str = "./data/plugin_repos"
     # 上传 zip 时验签使用的 Ed25519 公钥（PEM）；为空表示不验签，前端给出"未签名"警告。
     # 公钥示例：-----BEGIN PUBLIC KEY-----\nMC...\n-----END PUBLIC KEY-----
     plugin_pubkey: str = ""

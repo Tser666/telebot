@@ -12,15 +12,16 @@ import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BookOpen,
+  ChevronDown,
+  ChevronRight,
   ExternalLink,
   GitFork,
-  History,
   Package2,
+  Plus,
   Puzzle,
   RefreshCw,
   Trash2,
   Users,
-  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
@@ -37,13 +38,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
@@ -83,6 +79,13 @@ import {
   updateRemotePlugin,
   uninstallRemotePlugin,
 } from "@/api/remotePlugin";
+import {
+  addPluginRepo,
+  deletePluginRepo,
+  fetchPluginRepos,
+  fetchRepoPlugins,
+  installFromRepo,
+} from "@/api/pluginRepo";
 import type { RemotePlugin } from "@/types/remotePlugin";
 import type { ConfigSchema } from "@/components/plugin/ConfigDialog";
 
@@ -90,31 +93,8 @@ import type { ConfigSchema } from "@/components/plugin/ConfigDialog";
 type TabValue = "accounts" | "plugins" | "guide";
 const PLUGINS_QK = ["installed-packages"] as const;
 const REMOTE_QK = ["remote-plugins"] as const;
+const PLUGIN_REPOS_QK = ["plugin-repos"] as const;
 const FEATURE_CONFIG_PAGE_KEYS = new Set(["auto_reply", "autorepeat", "codex_image", "forward", "scheduler", "game24"]);
-
-// 已保存仓库 URL 列表（持久化于 localStorage，用于远程插件安装快速选择）
-const SAVED_REPOS_KEY = "telebot-saved-repos";
-const SAVED_REPOS_LIMIT = 20;
-
-function loadSavedRepos(): string[] {
-  try {
-    const raw = localStorage.getItem(SAVED_REPOS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((u): u is string => typeof u === "string" && u.length > 0);
-  } catch {
-    return [];
-  }
-}
-
-function persistSavedRepos(urls: string[]) {
-  try {
-    localStorage.setItem(SAVED_REPOS_KEY, JSON.stringify(urls));
-  } catch {
-    // 忽略 quota / 隐身模式等存储错误
-  }
-}
 
 function featureConfigPath(aid: number | null | undefined, key: string): string | null {
   if (!aid || !FEATURE_CONFIG_PAGE_KEYS.has(key)) return null;
@@ -499,112 +479,189 @@ function PluginsManagementTab({ onManageAccounts }: { onManageAccounts: () => vo
   );
 }
 
-// ── 远程安装输入栏 ──────────────────────────────────────────────
+// ── 远程安装：仓库管理 + 浏览插件 ────────────────────────────────
 function RemoteInstallCard() {
   const qc = useQueryClient();
-  const [url, setUrl] = useState("");
-  const [savedRepos, setSavedRepos] = useState<string[]>(loadSavedRepos);
+  const [addUrl, setAddUrl] = useState("");
+  const [addName, setAddName] = useState("");
+  const [expandedRepoId, setExpandedRepoId] = useState<number | null>(null);
 
-  const installMut = useMutation({
-    mutationFn: () => installRemotePlugin({ source_url: url.trim() }),
+  // 已保存仓库列表（后端）
+  const reposQ = useQuery({ queryKey: PLUGIN_REPOS_QK, queryFn: fetchPluginRepos });
+  const repos = reposQ.data ?? [];
+
+  // 仓库内插件列表
+  const pluginsQ = useQuery({
+    queryKey: ["repo-plugins", expandedRepoId],
+    queryFn: () => fetchRepoPlugins(expandedRepoId!),
+    enabled: expandedRepoId !== null,
+  });
+
+  // 添加仓库
+  const addRepoMut = useMutation({
+    mutationFn: () => addPluginRepo({ url: addUrl.trim(), name: addName.trim() || undefined }),
     onSuccess: (row) => {
-      toast.success(`已安装 ${row.name} v${row.version}（默认禁用，请在「账号插件管理」中按账号启用）`);
-      const trimmed = url.trim();
-      if (trimmed) {
-        setSavedRepos((prev) => {
-          const next = [trimmed, ...prev.filter((u) => u !== trimmed)].slice(0, SAVED_REPOS_LIMIT);
-          persistSavedRepos(next);
-          return next;
-        });
-      }
-      setUrl("");
-      qc.invalidateQueries({ queryKey: REMOTE_QK });
-      qc.invalidateQueries({ queryKey: PLUGINS_QK });
+      toast.success(`已添加仓库 ${row.name || row.url}`);
+      setAddUrl("");
+      setAddName("");
+      qc.invalidateQueries({ queryKey: PLUGIN_REPOS_QK });
     },
     onError: (err) => toast.error(getErrMsg(err)),
   });
 
-  const removeRepo = (target: string) => {
-    setSavedRepos((prev) => {
-      const next = prev.filter((u) => u !== target);
-      persistSavedRepos(next);
-      return next;
-    });
-  };
+  // 删除仓库
+  const delRepoMut = useMutation({
+    mutationFn: (id: number) => deletePluginRepo(id),
+    onSuccess: () => {
+      toast.success("已移除仓库");
+      setExpandedRepoId(null);
+      qc.invalidateQueries({ queryKey: PLUGIN_REPOS_QK });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
+  // 从仓库安装插件
+  const installFromRepoMut = useMutation({
+    mutationFn: ({ repoId, name }: { repoId: number; name: string }) =>
+      installFromRepo(repoId, name),
+    onSuccess: (row) => {
+      toast.success(`已安装 ${row.name} v${row.version}`);
+      qc.invalidateQueries({ queryKey: REMOTE_QK });
+      qc.invalidateQueries({ queryKey: PLUGINS_QK });
+      qc.invalidateQueries({ queryKey: ["repo-plugins", expandedRepoId] });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
 
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-base">从 Git 仓库安装</CardTitle>
+        <CardTitle className="text-base">插件仓库</CardTitle>
         <CardDescription>
-          支持 GitHub / GitLab 等公开仓库，仓库根目录需含静态 <code>plugin.json</code>
+          添加 Git 仓库后浏览并安装插件
         </CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-4">
+        {/* 添加仓库 */}
         <div className="flex gap-2">
-          {savedRepos.length > 0 && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-9 w-9 shrink-0 px-0"
-                  title={`已保存 ${savedRepos.length} 个仓库`}
-                  disabled={installMut.isPending}
-                >
-                  <History className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-[24rem] max-w-[calc(100vw-2rem)]">
-                <div className="px-2 py-1 text-xs text-muted-foreground">已保存的仓库</div>
-                {savedRepos.map((repo) => (
-                  <DropdownMenuItem
-                    key={repo}
-                    className="flex items-center gap-1 pr-1"
-                    onSelect={() => setUrl(repo)}
-                  >
-                    <span className="flex-1 truncate font-mono text-xs" title={repo}>
-                      {repo}
-                    </span>
-                    <button
-                      type="button"
-                      className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        removeRepo(repo);
-                      }}
-                      title="移除"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
+          <input
+            className="flex h-9 w-40 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            placeholder="仓库名（可选）"
+            value={addName}
+            onChange={(e) => setAddName(e.target.value)}
+          />
           <input
             className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             placeholder="https://github.com/user/repo.git"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
+            value={addUrl}
+            onChange={(e) => setAddUrl(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && url.trim()) installMut.mutate();
+              if (e.key === "Enter" && addUrl.trim()) addRepoMut.mutate();
             }}
-            disabled={installMut.isPending}
+            disabled={addRepoMut.isPending}
           />
           <Button
-            onClick={() => installMut.mutate()}
-            disabled={!url.trim() || installMut.isPending}
+            onClick={() => addRepoMut.mutate()}
+            disabled={!addUrl.trim() || addRepoMut.isPending}
             className="shrink-0"
           >
-            {installMut.isPending ? (
-              <><Spinner className="mr-2 h-4 w-4" /> 安装中…</>
+            {addRepoMut.isPending ? (
+              <><Spinner className="mr-2 h-4 w-4" /> 添加中…</>
             ) : (
-              <><Package2 className="mr-2 h-4 w-4" /> 安装</>
+              "添加仓库"
             )}
           </Button>
         </div>
+
+        {/* 仓库列表 */}
+        {repos.length === 0 ? (
+          <p className="py-4 text-center text-sm text-muted-foreground">暂无已保存的仓库</p>
+        ) : (
+          <div className="space-y-2">
+            {repos.map((repo) => (
+              <div key={repo.id} className="rounded-md border">
+                <div
+                  className="flex cursor-pointer items-center gap-2 px-3 py-2 hover:bg-accent/50"
+                  onClick={() => setExpandedRepoId(expandedRepoId === repo.id ? null : repo.id)}
+                >
+                  <ChevronRight
+                    className={cn("h-4 w-4 shrink-0 transition-transform", expandedRepoId === repo.id && "rotate-90")}
+                  />
+                  <span className="flex-1 truncate text-sm font-medium">
+                    {repo.name || repo.url}
+                  </span>
+                  {repo.name && (
+                    <span className="truncate font-mono text-xs text-muted-foreground">
+                      {repo.url}
+                    </span>
+                  )}
+                  <Badge variant="outline" className="shrink-0">
+                    {expandedRepoId === repo.id && pluginsQ.isLoading ? "加载中…" : "仓库"}
+                  </Badge>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 w-6 shrink-0 p-0 text-muted-foreground hover:text-destructive"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      delRepoMut.mutate(repo.id);
+                    }}
+                    title="移除仓库"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+                {/* 展开：仓库内插件列表 */}
+                {expandedRepoId === repo.id && (
+                  <div className="border-t px-3 py-2">
+                    {pluginsQ.isLoading ? (
+                      <div className="flex h-16 items-center justify-center">
+                        <Spinner className="text-primary" />
+                      </div>
+                    ) : pluginsQ.isError ? (
+                      <p className="py-2 text-center text-sm text-destructive">
+                        加载失败：{getErrMsg(pluginsQ.error)}
+                      </p>
+                    ) : (pluginsQ.data ?? []).length === 0 ? (
+                      <p className="py-2 text-center text-sm text-muted-foreground">仓库内未找到插件</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {(pluginsQ.data ?? []).map((p) => (
+                          <div
+                            key={p.name}
+                            className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-accent/30"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-medium">{p.display_name || p.name}</span>
+                                <span className="font-mono text-xs text-muted-foreground">v{p.version}</span>
+                                {p.installed && (
+                                  <Badge variant="secondary" className="text-xs">已安装</Badge>
+                                )}
+                              </div>
+                              {p.description && (
+                                <p className="truncate text-xs text-muted-foreground">{p.description}</p>
+                              )}
+                            </div>
+                            <Button
+                              size="sm"
+                              variant={p.installed ? "outline" : "default"}
+                              className="shrink-0 h-7"
+                              disabled={p.installed || installFromRepoMut.isPending}
+                              onClick={() => installFromRepoMut.mutate({ repoId: repo.id, name: p.name })}
+                            >
+                              {p.installed ? "已安装" : "安装"}
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
