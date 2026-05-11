@@ -14,11 +14,13 @@ import {
   BookOpen,
   ExternalLink,
   GitFork,
+  History,
   Package2,
   Puzzle,
   RefreshCw,
   Trash2,
   Users,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
@@ -36,6 +38,12 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
@@ -83,6 +91,30 @@ type TabValue = "accounts" | "plugins" | "guide";
 const PLUGINS_QK = ["installed-packages"] as const;
 const REMOTE_QK = ["remote-plugins"] as const;
 const FEATURE_CONFIG_PAGE_KEYS = new Set(["auto_reply", "autorepeat", "codex_image", "forward", "scheduler", "game24"]);
+
+// 已保存仓库 URL 列表（持久化于 localStorage，用于远程插件安装快速选择）
+const SAVED_REPOS_KEY = "telebot-saved-repos";
+const SAVED_REPOS_LIMIT = 20;
+
+function loadSavedRepos(): string[] {
+  try {
+    const raw = localStorage.getItem(SAVED_REPOS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((u): u is string => typeof u === "string" && u.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+function persistSavedRepos(urls: string[]) {
+  try {
+    localStorage.setItem(SAVED_REPOS_KEY, JSON.stringify(urls));
+  } catch {
+    // 忽略 quota / 隐身模式等存储错误
+  }
+}
 
 function featureConfigPath(aid: number | null | undefined, key: string): string | null {
   if (!aid || !FEATURE_CONFIG_PAGE_KEYS.has(key)) return null;
@@ -471,17 +503,34 @@ function PluginsManagementTab({ onManageAccounts }: { onManageAccounts: () => vo
 function RemoteInstallCard() {
   const qc = useQueryClient();
   const [url, setUrl] = useState("");
+  const [savedRepos, setSavedRepos] = useState<string[]>(loadSavedRepos);
 
   const installMut = useMutation({
     mutationFn: () => installRemotePlugin({ source_url: url.trim() }),
     onSuccess: (row) => {
       toast.success(`已安装 ${row.name} v${row.version}（默认禁用，请在「账号插件管理」中按账号启用）`);
+      const trimmed = url.trim();
+      if (trimmed) {
+        setSavedRepos((prev) => {
+          const next = [trimmed, ...prev.filter((u) => u !== trimmed)].slice(0, SAVED_REPOS_LIMIT);
+          persistSavedRepos(next);
+          return next;
+        });
+      }
       setUrl("");
       qc.invalidateQueries({ queryKey: REMOTE_QK });
       qc.invalidateQueries({ queryKey: PLUGINS_QK });
     },
     onError: (err) => toast.error(getErrMsg(err)),
   });
+
+  const removeRepo = (target: string) => {
+    setSavedRepos((prev) => {
+      const next = prev.filter((u) => u !== target);
+      persistSavedRepos(next);
+      return next;
+    });
+  };
 
   return (
     <Card>
@@ -493,6 +542,47 @@ function RemoteInstallCard() {
       </CardHeader>
       <CardContent>
         <div className="flex gap-2">
+          {savedRepos.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-9 w-9 shrink-0 px-0"
+                  title={`已保存 ${savedRepos.length} 个仓库`}
+                  disabled={installMut.isPending}
+                >
+                  <History className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-[24rem] max-w-[calc(100vw-2rem)]">
+                <div className="px-2 py-1 text-xs text-muted-foreground">已保存的仓库</div>
+                {savedRepos.map((repo) => (
+                  <DropdownMenuItem
+                    key={repo}
+                    className="flex items-center gap-1 pr-1"
+                    onSelect={() => setUrl(repo)}
+                  >
+                    <span className="flex-1 truncate font-mono text-xs" title={repo}>
+                      {repo}
+                    </span>
+                    <button
+                      type="button"
+                      className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        removeRepo(repo);
+                      }}
+                      title="移除"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
           <input
             className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             placeholder="https://github.com/user/repo.git"

@@ -27,6 +27,7 @@ interface CodexImageConfig {
   command: string;
   access_token: string;
   model: string;
+  image_model: string;
   max_wait_seconds: number;
   status_interval_seconds: number;
   message_template: string;
@@ -55,10 +56,11 @@ const DEFAULT_CONFIG: CodexImageConfig = {
   command: "cximg",
   access_token: "",
   model: "gpt-5.4",
+  image_model: "auto",
   max_wait_seconds: 600,
   status_interval_seconds: 20,
   message_template:
-    "<b>🎨 Codex 图片生成</b>\n<b>状态:</b> {status}\n<b>提示词:</b> {prompt}\n<b>尺寸:</b> {image_size} · <b>比例:</b> {aspect_ratio} · <b>格式:</b> {image_format}\n<b>耗时:</b> {elapsed}{?revised_prompt}\n<b>修订提示词:</b> {revised_prompt}{/?}",
+    "<b>🎨 Codex 图片生成</b>\n<b>状态:</b> {status}\n<b>提示词:</b> {prompt}\n<b>主模型:</b> {model} · <b>图片模型:</b> {image_model}\n<b>尺寸:</b> {image_size} · <b>比例:</b> {aspect_ratio} · <b>格式:</b> {image_format}\n<b>耗时:</b> {elapsed}{?revised_prompt}\n<b>修订提示词:</b> {revised_prompt}{/?}",
   image_size: "1024x1024",
   aspect_ratio: "1:1",
   image_format: "png",
@@ -68,11 +70,37 @@ const DEFAULT_CONFIG: CodexImageConfig = {
   custom_instructions: "",
 };
 
+// 支持的主模型列表
+const MAIN_MODEL_OPTIONS = [
+  { value: "gpt-5.5", label: "gpt-5.5（推荐）" },
+  { value: "gpt-5.4-mini", label: "gpt-5.4-mini" },
+  { value: "gpt-5.4-nano", label: "gpt-5.4-nano" },
+  { value: "gpt-5.2", label: "gpt-5.2" },
+  { value: "gpt-5", label: "gpt-5" },
+  { value: "gpt-5-nano", label: "gpt-5-nano" },
+  { value: "gpt-4.1", label: "gpt-4.1" },
+  { value: "gpt-4.1-mini", label: "gpt-4.1-mini" },
+  { value: "gpt-4.1-nano", label: "gpt-4.1-nano" },
+  { value: "gpt-4o", label: "gpt-4o" },
+  { value: "gpt-4o-mini", label: "gpt-4o-mini" },
+  { value: "o3", label: "o3" },
+];
+
+// 支持的底层图片模型
+const IMAGE_MODEL_OPTIONS = [
+  { value: "auto", label: "自动选择" },
+  { value: "gpt-image-2", label: "gpt-image-2（最新）" },
+  { value: "gpt-image-1.5", label: "gpt-image-1.5" },
+  { value: "gpt-image-1", label: "gpt-image-1" },
+  { value: "gpt-image-1-mini", label: "gpt-image-1-mini" },
+];
+
 const TEMPLATE_PLACEHOLDERS = [
   { key: "{status}", label: "状态" },
   { key: "{prompt}", label: "提示词" },
   { key: "{elapsed}", label: "耗时" },
-  { key: "{model}", label: "模型" },
+  { key: "{model}", label: "主模型" },
+  { key: "{image_model}", label: "图片模型" },
   { key: "{command}", label: "命令" },
   { key: "{image_size}", label: "分辨率" },
   { key: "{aspect_ratio}", label: "比例" },
@@ -116,6 +144,7 @@ export function CodexImageConfigPage() {
   const [command, setCommand] = useState(DEFAULT_CONFIG.command);
   const [accessToken, setAccessToken] = useState(DEFAULT_CONFIG.access_token);
   const [model, setModel] = useState(DEFAULT_CONFIG.model);
+  const [imageModel, setImageModel] = useState(DEFAULT_CONFIG.image_model);
   const [maxWaitInput, setMaxWaitInput] = useState(
     String(DEFAULT_CONFIG.max_wait_seconds),
   );
@@ -140,6 +169,9 @@ export function CodexImageConfigPage() {
     }
     if (currentConfig.model !== undefined) {
       setModel(currentConfig.model);
+    }
+    if (currentConfig.image_model !== undefined) {
+      setImageModel(currentConfig.image_model);
     }
     if (currentConfig.max_wait_seconds !== undefined) {
       setMaxWaitInput(String(currentConfig.max_wait_seconds));
@@ -193,6 +225,7 @@ export function CodexImageConfigPage() {
       command: command.trim() || DEFAULT_CONFIG.command,
       access_token: accessToken,
       model,
+      image_model: imageModel,
       max_wait_seconds: maxWaitSeconds,
       status_interval_seconds: statusIntervalSeconds,
       message_template: messageTemplate || DEFAULT_CONFIG.message_template,
@@ -207,11 +240,13 @@ export function CodexImageConfigPage() {
   }
 
   const effectiveCommand = command || DEFAULT_CONFIG.command;
+  const displayImageModel = imageModel === "auto" ? "自动选择" : imageModel;
   const previewValues = {
     status: "正在生成图片",
     prompt: "云海里的未来城市，电影感光影",
     elapsed: "20秒",
     model,
+    image_model: displayImageModel,
     command: effectiveCommand,
     image_size: imageSize,
     aspect_ratio: aspectRatio,
@@ -360,21 +395,48 @@ export function CodexImageConfigPage() {
             )}
           </div>
 
-          {/* Model */}
+          {/* 主模型 */}
           <div className="space-y-1.5">
-            <Label htmlFor="model">模型名称</Label>
+            <Label htmlFor="model">主模型</Label>
             <p className="text-xs text-muted-foreground">
-              Codex 使用的模型，默认 <code className="mx-0.5">gpt-5.4</code>。
+              处理请求的主模型，支持 <code className="mx-0.5">image_generation</code> 工具。
             </p>
-            <Input
+            <Select
               id="model"
-              className="w-full font-mono sm:w-48"
               value={model}
               onChange={(e) => {
-                setModel(e.target.value.trim());
+                setModel(e.target.value);
                 setDirty(true);
               }}
-            />
+            >
+              {MAIN_MODEL_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </Select>
+          </div>
+
+          {/* 底层图片模型 */}
+          <div className="space-y-1.5">
+            <Label htmlFor="image-model">底层图片模型</Label>
+            <p className="text-xs text-muted-foreground">
+              实际生成图片的模型。<code className="mx-0.5">auto</code> 表示由 OpenAI 自动选择。
+            </p>
+            <Select
+              id="image-model"
+              value={imageModel}
+              onChange={(e) => {
+                setImageModel(e.target.value);
+                setDirty(true);
+              }}
+            >
+              {IMAGE_MODEL_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </Select>
           </div>
 
           {/* Max Wait */}
@@ -424,12 +486,15 @@ export function CodexImageConfigPage() {
                   setDirty(true);
                 }}
               >
-                <option value="auto">auto</option>
-                <option value="1024x1024">1024x1024</option>
-                <option value="1536x1024">1536x1024</option>
-                <option value="1024x1536">1024x1536</option>
+                <option value="auto">auto（自动）</option>
+                <option value="1024x1024">1024x1024（方形）</option>
+                <option value="1536x1024">1536x1024（横图）</option>
+                <option value="1024x1536">1024x1536（竖图）</option>
+                <option value="from_reference">from_reference（参考图尺寸）</option>
               </Select>
-              <p className="text-xs text-muted-foreground">命令可用 --size 覆盖。</p>
+              <p className="text-xs text-muted-foreground">
+                <code className="mx-0.5">from_reference</code> 使用参考图尺寸；命令可用 --size 覆盖。
+              </p>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="aspect-ratio">默认画面比例</Label>
@@ -441,16 +506,19 @@ export function CodexImageConfigPage() {
                   setDirty(true);
                 }}
               >
-                <option value="auto">auto</option>
-                <option value="1:1">1:1</option>
-                <option value="3:2">3:2</option>
-                <option value="2:3">2:3</option>
+                <option value="auto">auto（自动）</option>
+                <option value="1:1">1:1（方形）</option>
+                <option value="3:2">3:2（横图）</option>
+                <option value="2:3">2:3（竖图）</option>
                 <option value="4:3">4:3</option>
                 <option value="3:4">3:4</option>
-                <option value="16:9">16:9</option>
-                <option value="9:16">9:16</option>
+                <option value="16:9">16:9（宽屏）</option>
+                <option value="9:16">9:16（竖屏）</option>
+                <option value="from_reference">from_reference（参考图比例）</option>
               </Select>
-              <p className="text-xs text-muted-foreground">命令可用 --比例 或 --ratio 覆盖。</p>
+              <p className="text-xs text-muted-foreground">
+                <code className="mx-0.5">from_reference</code> 使用参考图比例；命令可用 --比例 覆盖。
+              </p>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="image-format">默认图片格式</Label>
@@ -596,6 +664,9 @@ export function CodexImageConfigPage() {
                   }
                   if (currentConfig.model !== undefined) {
                     setModel(currentConfig.model);
+                  }
+                  if (currentConfig.image_model !== undefined) {
+                    setImageModel(currentConfig.image_model);
                   }
                   if (currentConfig.max_wait_seconds !== undefined) {
                     setMaxWaitInput(String(currentConfig.max_wait_seconds));

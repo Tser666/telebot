@@ -4,6 +4,8 @@
 account_feature.config 字段：
   - access_token: str   Codex Access Token（通常在 .codex/auth.json 中获取）
   - command: str        触发命令名，默认 cximg，支持中文
+  - model: str          主模型名称（如 gpt-5.4）
+  - image_model: str    底层图片模型（如 gpt-image-2），auto 表示自动选择
   - message_template: str 最终 caption / 生成中状态消息模板
   - image_size / aspect_ratio / image_format: 图片尺寸、比例和输出格式
 """
@@ -15,7 +17,7 @@ from app.worker.plugins.manifest import Manifest
 MANIFEST = Manifest(
     key="codex_image",
     display_name="Codex 图片生成",
-    version="1.0.0",
+    version="1.1.0",
     author="TeleBoxOrg",
     description="通过 Codex API 调用 GPT 图片生成模型，支持纯文生图和参考图生成",
     permissions=["send_message", "edit_message", "read_chat"],
@@ -36,9 +38,17 @@ MANIFEST = Manifest(
             },
             "model": {
                 "type": "string",
-                "title": "模型名称",
+                "title": "主模型",
                 "default": "gpt-5.4",
-                "description": "Codex 使用的模型，默认 gpt-5.4",
+                "enum": ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "o3", "gpt-5", "gpt-5-nano", "gpt-5.2", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.5"],
+                "description": "处理请求的主模型，支持 image_generation 工具",
+            },
+            "image_model": {
+                "type": "string",
+                "title": "底层图片模型",
+                "default": "auto",
+                "enum": ["auto", "gpt-image-2", "gpt-image-1.5", "gpt-image-1", "gpt-image-1-mini"],
+                "description": "实际生成图片的模型。auto 表示由 OpenAI 自动选择",
             },
             "max_wait_seconds": {
                 "type": "integer",
@@ -59,25 +69,26 @@ MANIFEST = Manifest(
                     "<b>🎨 Codex 图片生成</b>\n"
                     "<b>状态:</b> {status}\n"
                     "<b>提示词:</b> {prompt}\n"
+                    "<b>主模型:</b> {model} · <b>图片模型:</b> {image_model}\n"
                     "<b>尺寸:</b> {image_size} · <b>比例:</b> {aspect_ratio} · <b>格式:</b> {image_format}\n"
                     "<b>耗时:</b> {elapsed}"
                     "{?revised_prompt}\n<b>修订提示词:</b> {revised_prompt}{/?}"
                 ),
-                "description": "支持 {status}/{prompt}/{elapsed}/{model}/{image_size}/{aspect_ratio}/{image_format}/{revised_prompt} 等占位符",
+                "description": "支持 {status}/{prompt}/{elapsed}/{model}/{image_model}/{image_size}/{aspect_ratio}/{image_format}/{revised_prompt} 等占位符",
             },
             "image_size": {
                 "type": "string",
                 "title": "默认分辨率",
                 "default": "1024x1024",
-                "enum": ["auto", "1024x1024", "1536x1024", "1024x1536"],
-                "description": "默认生成尺寸；命令中可用 --size 临时覆盖",
+                "enum": ["auto", "1024x1024", "1536x1024", "1024x1536", "from_reference"],
+                "description": "默认生成尺寸；from_reference 表示使用参考图尺寸（仅参考图生成时有效）；命令中可用 --size 临时覆盖",
             },
             "aspect_ratio": {
                 "type": "string",
                 "title": "默认画面比例",
                 "default": "1:1",
-                "enum": ["auto", "1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"],
-                "description": "默认构图比例；命令中可用 --比例 或 --ratio 临时覆盖",
+                "enum": ["auto", "1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "from_reference"],
+                "description": "默认构图比例；from_reference 表示使用参考图比例；命令中可用 --比例 或 --ratio 临时覆盖",
             },
             "image_format": {
                 "type": "string",

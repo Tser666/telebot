@@ -36,6 +36,7 @@ from app.worker.plugins.base import Plugin, PluginContext, register
 
 CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
 DEFAULT_MODEL = "gpt-5.4"
+DEFAULT_IMAGE_MODEL = "auto"  # 底层图片模型，auto 表示由 OpenAI 自动选择
 DEFAULT_MAX_WAIT = 600  # 10 分钟
 DEFAULT_COMMAND = "cximg"
 DEFAULT_STATUS_INTERVAL = 20
@@ -45,6 +46,7 @@ DEFAULT_MESSAGE_TEMPLATE = (
     "<b>🎨 Codex 图片生成</b>\n"
     "<b>状态:</b> {status}\n"
     "<b>提示词:</b> {prompt}\n"
+    "<b>主模型:</b> {model} · <b>图片模型:</b> {image_model}\n"
     "<b>尺寸:</b> {image_size} · <b>比例:</b> {aspect_ratio} · <b>格式:</b> {image_format}\n"
     "<b>耗时:</b> {elapsed}"
     "{?revised_prompt}\n<b>修订提示词:</b> {revised_prompt}{/?}"
@@ -52,8 +54,22 @@ DEFAULT_MESSAGE_TEMPLATE = (
 DEFAULT_IMAGE_SIZE = "1024x1024"
 DEFAULT_ASPECT_RATIO = "1:1"
 DEFAULT_IMAGE_FORMAT = "png"
-SUPPORTED_IMAGE_SIZES = {"auto", "1024x1024", "1536x1024", "1024x1536"}
-SUPPORTED_ASPECT_RATIOS = {"auto", "1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"}
+
+# 支持的主模型列表（支持 image_generation 工具）
+SUPPORTED_MAIN_MODELS = [
+    "gpt-4o", "gpt-4o-mini",
+    "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano",
+    "o3",
+    "gpt-5", "gpt-5-nano",
+    "gpt-5.2", "gpt-5.4-mini", "gpt-5.4-nano",
+    "gpt-5.5",
+]
+
+# 支持的底层图片模型
+SUPPORTED_IMAGE_MODELS = ["auto", "gpt-image-2", "gpt-image-1.5", "gpt-image-1", "gpt-image-1-mini"]
+
+SUPPORTED_IMAGE_SIZES = {"auto", "1024x1024", "1536x1024", "1024x1536", "from_reference"}
+SUPPORTED_ASPECT_RATIOS = {"auto", "1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "from_reference"}
 SUPPORTED_IMAGE_FORMATS = {"png", "jpeg", "webp"}
 _STREAM_RECOVERABLE_ERRORS = (
     httpx.RemoteProtocolError,
@@ -204,7 +220,8 @@ def _normalize_choice(value: Any, allowed: set[str], default: str) -> str:
     return out if out in allowed else default
 
 
-def _normalize_size(value: Any) -> str:
+def _normalize_size(value: Any, reference_size: str | None = None) -> str:
+    """标准化图片尺寸，支持 from_reference 使用参考图尺寸。"""
     aliases = {
         "square": "1024x1024",
         "landscape": "1536x1024",
@@ -212,14 +229,35 @@ def _normalize_size(value: Any) -> str:
         "横图": "1536x1024",
         "竖图": "1024x1536",
         "方图": "1024x1024",
+        "原图": "from_reference",
+        "参考图": "from_reference",
     }
     raw = str(value or "").strip().lower()
-    return _normalize_choice(aliases.get(raw, raw), SUPPORTED_IMAGE_SIZES, DEFAULT_IMAGE_SIZE)
+    normalized = aliases.get(raw, raw)
+    
+    # 如果是 from_reference 且有参考图尺寸，使用参考图尺寸
+    if normalized == "from_reference" and reference_size:
+        return reference_size
+    
+    return _normalize_choice(normalized, SUPPORTED_IMAGE_SIZES, DEFAULT_IMAGE_SIZE)
 
 
-def _normalize_aspect_ratio(value: Any) -> str:
+def _normalize_aspect_ratio(value: Any, reference_ratio: str | None = None) -> str:
+    """标准化画面比例，支持 from_reference 使用参考图比例。"""
     raw = str(value or "").strip().lower().replace("：", ":")
-    return _normalize_choice(raw, SUPPORTED_ASPECT_RATIOS, DEFAULT_ASPECT_RATIO)
+    
+    # 别名处理
+    aliases = {
+        "原图": "from_reference",
+        "参考图": "from_reference",
+    }
+    normalized = aliases.get(raw, raw)
+    
+    # 如果是 from_reference 且有参考图比例，使用参考图比例
+    if normalized == "from_reference" and reference_ratio:
+        return reference_ratio
+    
+    return _normalize_choice(normalized, SUPPORTED_ASPECT_RATIOS, DEFAULT_ASPECT_RATIO)
 
 
 def _normalize_image_format(value: Any) -> str:
@@ -229,11 +267,23 @@ def _normalize_image_format(value: Any) -> str:
     return _normalize_choice(raw, SUPPORTED_IMAGE_FORMATS, DEFAULT_IMAGE_FORMAT)
 
 
-def _parse_generation_args(args: list[str], ctx: PluginContext) -> tuple[str, dict[str, str]]:
-    """解析命令级覆盖项，返回清理后的 prompt 和图片选项。"""
+def _parse_generation_args(
+    args: list[str], 
+    ctx: PluginContext, 
+    reference_size: str | None = None,
+    reference_ratio: str | None = None,
+) -> tuple[str, dict[str, str]]:
+    """解析命令级覆盖项，返回清理后的 prompt 和图片选项。
+    
+    Args:
+        args: 命令参数列表
+        ctx: 插件上下文
+        reference_size: 参考图尺寸（如 "1024x1024"），用于 from_reference
+        reference_ratio: 参考图比例（如 "1:1"），用于 from_reference
+    """
     opts = {
-        "image_size": _normalize_size(_get_config_value(ctx, "image_size", DEFAULT_IMAGE_SIZE)),
-        "aspect_ratio": _normalize_aspect_ratio(_get_config_value(ctx, "aspect_ratio", DEFAULT_ASPECT_RATIO)),
+        "image_size": _normalize_size(_get_config_value(ctx, "image_size", DEFAULT_IMAGE_SIZE), reference_size),
+        "aspect_ratio": _normalize_aspect_ratio(_get_config_value(ctx, "aspect_ratio", DEFAULT_ASPECT_RATIO), reference_ratio),
         "image_format": _normalize_image_format(_get_config_value(ctx, "image_format", DEFAULT_IMAGE_FORMAT)),
     }
     key_map = {
@@ -272,9 +322,9 @@ def _parse_generation_args(args: list[str], ctx: PluginContext) -> tuple[str, di
                 i += 1
             if value:
                 if normalized_key == "image_size":
-                    opts["image_size"] = _normalize_size(value)
+                    opts["image_size"] = _normalize_size(value, reference_size)
                 elif normalized_key == "aspect_ratio":
-                    opts["aspect_ratio"] = _normalize_aspect_ratio(value)
+                    opts["aspect_ratio"] = _normalize_aspect_ratio(value, reference_ratio)
                 elif normalized_key == "image_format":
                     opts["image_format"] = _normalize_image_format(value)
             i += 1
@@ -341,6 +391,7 @@ async def _call_codex_image(
     prompt: str,
     token: str,
     model: str = DEFAULT_MODEL,
+    image_model: str = DEFAULT_IMAGE_MODEL,
     reference_image: dict[str, str] | None = None,
     update_status: Any | None = None,
     max_wait: int = DEFAULT_MAX_WAIT,
@@ -355,8 +406,9 @@ async def _call_codex_image(
     Args:
         prompt: 生成提示词
         token: Bearer token
-        model: 模型名
-        reference_image: 参考图 {base64, mime_type}，可选
+        model: 主模型名（如 gpt-5.4）
+        image_model: 底层图片模型（如 gpt-image-2），auto 表示自动选择
+        reference_image: 参考图 {base64, mime_type, width, height}，可选
         update_status: 异步状态回调 async (text) -> None
         max_wait: 最大等待秒数
 
@@ -378,6 +430,9 @@ async def _call_codex_image(
         ]
 
     image_tool: dict[str, Any] = {"type": "image_generation"}
+    # 指定底层图片模型
+    if image_model and image_model != "auto":
+        image_tool["model"] = image_model
     if image_size and image_size != "auto":
         image_tool["size"] = image_size
     if image_format and image_format != "png":
@@ -628,7 +683,42 @@ class CodexImagePlugin(Plugin):
             await self._cmd_token(ctx, args[1:], event)
             return
 
-        prompt, image_opts = _parse_generation_args(args, ctx)
+        # 先检查参考图，获取尺寸信息用于参数解析
+        reference_image = None
+        reference_size: str | None = None
+        reference_ratio: str | None = None
+        reply_msg = await event.get_reply_message()
+        if reply_msg and reply_msg.media:
+            try:
+                reference_image = await self._download_reference_image(ctx, reply_msg)
+                # 提取参考图尺寸
+                if reference_image.get("width") and reference_image.get("height"):
+                    w = reference_image["width"]
+                    h = reference_image["height"]
+                    reference_size = f"{w}x{h}"
+                    # 计算比例（简化为最接近的常见比例）
+                    ratio = w / h
+                    if 0.99 <= ratio <= 1.01:
+                        reference_ratio = "1:1"
+                    elif 1.49 <= ratio <= 1.51:
+                        reference_ratio = "3:2"
+                    elif 0.66 <= ratio <= 0.68:
+                        reference_ratio = "2:3"
+                    elif 1.32 <= ratio <= 1.34:
+                        reference_ratio = "4:3"
+                    elif 0.74 <= ratio <= 0.76:
+                        reference_ratio = "3:4"
+                    elif 1.77 <= ratio <= 1.79:
+                        reference_ratio = "16:9"
+                    elif 0.56 <= ratio <= 0.58:
+                        reference_ratio = "9:16"
+                    else:
+                        reference_ratio = f"{w}:{h}"  # 使用原始比例
+            except Exception as exc:
+                await _edit_html(event, f"❌ 参考图下载失败：{_html_escape(_safe_error_text(str(exc)))}")
+                return
+
+        prompt, image_opts = _parse_generation_args(args, ctx, reference_size, reference_ratio)
         cmd = _command_name(ctx)
         if not prompt:
             await _edit_html(
@@ -636,11 +726,12 @@ class CodexImagePlugin(Plugin):
                 f"❌ 请输入提示词，例如：<code>,{_html_escape(cmd)} 一只戴墨镜的柴犬坐在跑车里</code>\n"
                 f"• 指定比例：<code>,{_html_escape(cmd)} --比例 4:3 云海里的城市</code>\n"
                 f"• 指定尺寸/格式：<code>,{_html_escape(cmd)} --size 1536x1024 --format jpeg 海边日落</code>\n"
+                f"• 使用原图尺寸：<code>,{_html_escape(cmd)} --size 原图 云海里的城市</code>（回复图片时）\n"
                 f"• 设置 Token：<code>,{_html_escape(cmd)} token 你的codex access token</code>"
             )
             return
 
-        await self._cmd_generate(ctx, prompt, event, image_opts)
+        await self._cmd_generate(ctx, prompt, event, image_opts, reference_image)
 
     # ── Token 管理 ────────────────────────────────────
 
@@ -667,7 +758,7 @@ class CodexImagePlugin(Plugin):
     # ── 图片生成 ──────────────────────────────────────
 
     async def _cmd_generate(
-        self, ctx: PluginContext, prompt: str, event, image_opts: dict[str, str] | None = None
+        self, ctx: PluginContext, prompt: str, event, image_opts: dict[str, str] | None = None, reference_image: dict[str, Any] | None = None
     ) -> None:
         # 获取 token
         token = _get_config_value(ctx, "access_token", "")
@@ -680,6 +771,7 @@ class CodexImagePlugin(Plugin):
             return
 
         model = _get_config_value(ctx, "model", DEFAULT_MODEL)
+        image_model = _get_config_value(ctx, "image_model", DEFAULT_IMAGE_MODEL)
         max_wait = int(_get_config_value(ctx, "max_wait_seconds", DEFAULT_MAX_WAIT))
         status_interval = int(_get_config_value(ctx, "status_interval_seconds", DEFAULT_STATUS_INTERVAL))
         status_interval = max(10, min(300, status_interval))
@@ -689,19 +781,18 @@ class CodexImagePlugin(Plugin):
         reasoning_effort = str(_get_config_value(ctx, "reasoning_effort", DEFAULT_REASONING_EFFORT) or DEFAULT_REASONING_EFFORT)
         message_template = str(_get_config_value(ctx, "message_template", DEFAULT_MESSAGE_TEMPLATE) or DEFAULT_MESSAGE_TEMPLATE)
         image_opts = image_opts or {}
-        image_size = _normalize_size(image_opts.get("image_size") or _get_config_value(ctx, "image_size", DEFAULT_IMAGE_SIZE))
-        aspect_ratio = _normalize_aspect_ratio(image_opts.get("aspect_ratio") or _get_config_value(ctx, "aspect_ratio", DEFAULT_ASPECT_RATIO))
+        
+        # 获取参考图尺寸信息（如果有的话）
+        ref_size: str | None = None
+        if reference_image and reference_image.get("width") and reference_image.get("height"):
+            ref_size = f"{reference_image['width']}x{reference_image['height']}"
+        
+        image_size = _normalize_size(image_opts.get("image_size") or _get_config_value(ctx, "image_size", DEFAULT_IMAGE_SIZE), ref_size)
+        aspect_ratio = _normalize_aspect_ratio(image_opts.get("aspect_ratio") or _get_config_value(ctx, "aspect_ratio", DEFAULT_ASPECT_RATIO), None)
         image_format = _normalize_image_format(image_opts.get("image_format") or _get_config_value(ctx, "image_format", DEFAULT_IMAGE_FORMAT))
 
-        # 检查参考图
-        reference_image = None
-        reply_msg = await event.get_reply_message()
-        if reply_msg and reply_msg.media:
-            try:
-                reference_image = await self._download_reference_image(ctx, reply_msg)
-            except Exception as exc:
-                await _edit_html(event, f"❌ 参考图下载失败：{_html_escape(_safe_error_text(str(exc)))}")
-                return
+        # 显示的 image_model 值
+        display_image_model = image_model if image_model != "auto" else "自动选择"
 
         started_at = time.monotonic()
         last_status_at = 0.0
@@ -721,6 +812,7 @@ class CodexImagePlugin(Plugin):
                     "prompt": prompt,
                     "elapsed": elapsed,
                     "model": model,
+                    "image_model": display_image_model,
                     "command": cmd,
                     "image_size": image_size,
                     "aspect_ratio": aspect_ratio,
@@ -766,6 +858,7 @@ class CodexImagePlugin(Plugin):
                     "info",
                     "[codex_image] generation started",
                     model=str(model),
+                    image_model=str(image_model),
                     image_size=image_size,
                     aspect_ratio=aspect_ratio,
                     image_format=image_format,
@@ -777,6 +870,7 @@ class CodexImagePlugin(Plugin):
                 prompt=_effective_prompt(prompt, aspect_ratio),
                 token=token,
                 model=model,
+                image_model=image_model,
                 reference_image=reference_image,
                 update_status=update_status,
                 max_wait=max_wait,
@@ -913,8 +1007,8 @@ class CodexImagePlugin(Plugin):
 
     async def _download_reference_image(
         self, ctx: PluginContext, reply_msg: Any
-    ) -> dict[str, str]:
-        """从回复消息中下载参考图，返回 {base64, mime_type}。"""
+    ) -> dict[str, str | int | None]:
+        """从回复消息中下载参考图，返回 {base64, mime_type, width, height}。"""
         from ....media import _download_with_retry
 
         client = ctx.client
@@ -928,17 +1022,34 @@ class CodexImagePlugin(Plugin):
 
         # 推断 MIME 类型
         mime_type = "image/png"
+        width: int | None = None
+        height: int | None = None
+        
         if hasattr(reply_msg, "media") and reply_msg.media:
             doc = getattr(reply_msg.media, "document", None)
             if doc:
                 doc_mime = getattr(doc, "mime_type", None)
                 if doc_mime and doc_mime.startswith("image/"):
                     mime_type = doc_mime
+                # 尝试从 document 的 attributes 中获取尺寸
+                for attr in getattr(doc, "attributes", []):
+                    if hasattr(attr, "w") and hasattr(attr, "h"):
+                        width = attr.w
+                        height = attr.h
+                        break
             elif hasattr(reply_msg.media, "photo"):
                 mime_type = "image/jpeg"
+                # Telegram photo 可能有多层尺寸，取最大的
+                photo = reply_msg.media.photo
+                if hasattr(photo, "sizes"):
+                    for size in photo.sizes:
+                        if hasattr(size, "w") and hasattr(size, "h"):
+                            if width is None or size.w > width:
+                                width = size.w
+                                height = size.h
 
         b64 = base64.b64encode(media_bytes).decode("utf-8")
-        return {"base64": b64, "mime_type": mime_type}
+        return {"base64": b64, "mime_type": mime_type, "width": width, "height": height}
 
 
 # ─── dry-run 支持（无规则，不适用，但预留接口）──────────
