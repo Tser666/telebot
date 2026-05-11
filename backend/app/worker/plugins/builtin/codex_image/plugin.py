@@ -1077,7 +1077,14 @@ class CodexImagePlugin(Plugin):
                     reply_to=reply_msg.id if reply_msg else event.id,
                     force_document=False,
                 )
-            except Exception:
+            except Exception as send_exc:
+                if ctx.log:
+                    await ctx.log(
+                        "warn",
+                        "[codex_image] send with HTML caption failed, retrying plain text",
+                        error=type(send_exc).__name__,
+                        detail=_safe_error_text(str(send_exc))[:300],
+                    )
                 image_file = io.BytesIO(image_bytes)
                 image_file.name = file_name
                 await client.send_file(
@@ -1106,14 +1113,16 @@ class CodexImagePlugin(Plugin):
                 )
 
         except Exception as exc:
+            error_msg = _safe_error_text(str(exc))
             if ctx.log:
                 await ctx.log(
                     "warn",
                     "[codex_image] send image failed",
                     error=type(exc).__name__,
+                    detail=error_msg[:500],
                     elapsed=elapsed,
                 )
-            await _edit_html(event, f"❌ 图片发送失败：{_html_escape(_safe_error_text(str(exc)))}")
+            await _edit_html(event, f"❌ 图片发送失败：{type(exc).__name__}: {_html_escape(error_msg)}")
 
     # ── 参考图下载 ────────────────────────────────────
 
