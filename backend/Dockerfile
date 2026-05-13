@@ -18,6 +18,7 @@ COPY pyproject.toml /app/
 COPY app /app/app
 
 # 升级 pip 并安装本项目（含全部 runtime 依赖：fastapi/telethon/cryptg/python-socks 等）
+# 保留默认 .pyc 编译：镜像会略大，但避免容器首次 import 现场编译大量依赖导致 RSS 抬高。
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir .
 
