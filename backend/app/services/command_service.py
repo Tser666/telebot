@@ -48,7 +48,6 @@ _BUILTIN_RESERVED_WORDS: set[str] = {
     "pause",
     "resume",
     "restart", "rs",
-    "reboot", "rb",
     "version", "v",
     "del",
 }

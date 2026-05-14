@@ -10,6 +10,14 @@
 
 ---
 
+## [Unreleased]
+
+### Changed
+- PR1 安全收敛：删除高危 Telegram 命令入口，不再支持通过普通 Telegram 命令触发项目级 `,reboot/,rb`、远程插件运维 `,plugin install/remove/enable/disable/update`、以及 `,sudo add/,sudo del`。
+- 保留 `,sudo ls` 作为只读查询入口。
+
+---
+
 ## [0.12.1] — 2026-05-14 · refactor · Feature 配置页 CRUD 骨架抽取
 
 ### Changed
