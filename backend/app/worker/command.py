@@ -3,7 +3,7 @@
 用户在 TG 中**自己给自己发**（任何对话，含收藏夹）以前缀（默认 ``,``）开头的消息时，
 worker 拦截命令并**编辑原消息**为执行结果。
 
-内置命令：``,help`` ``,status`` ``,ping`` ``,pause`` ``,resume`` ``,reboot``（项目级）``,restart``（账号级）``,id``。
+内置命令：``,help`` ``,status`` ``,ping`` ``,pause`` ``,resume`` ``,restart``（账号级）``,id``。
 插件可以通过 ``register_plugin_command`` 追加额外命令（不会覆盖内置）。
 
 Sprint2 #2 起新增 4 类"模板命令"：reply_text / forward_to / run_plugin / ai。
@@ -22,8 +22,6 @@ from telethon import TelegramClient, events
 from ..redis_client import get_redis
 from ..settings import settings
 from ..util.sudo_permissions import (
-    build_sudo_chat_scope,
-    build_sudo_command_scope,
     normalize_sudo_chat_ids,
     normalize_sudo_commands,
     sudo_chat_allowed,
@@ -719,19 +717,6 @@ async def _cmd_restart_account(client, event, args, account_id):
     await client.disconnect()
 
 
-@builtin("reboot", aliases=("rb",), doc="重启整个项目（等效 make restart）")
-async def _cmd_restart_project(client, event, args, account_id):
-    """触发项目级重启：后台异步执行 ``make restart``，当前会话会短暂中断。"""
-    import asyncio
-    from pathlib import Path
-
-    # .../backend/app/worker/command.py -> 项目根目录
-    root = Path(__file__).resolve().parents[3]
-    cmd = f"cd {root} && nohup make restart >> logs/restart-trigger.log 2>&1 &"
-    await event.edit("已触发项目重启（make restart），服务会短暂中断 10-30 秒。")
-    await asyncio.create_subprocess_exec("/bin/zsh", "-lc", cmd, start_new_session=True)
-
-
 @builtin("version", aliases=("v",), doc="显示版本号")
 async def _cmd_version(client, event, args, account_id):
     """显示当前 telebot 版本与运行环境。"""
@@ -862,25 +847,19 @@ async def _cmd_alias(client, event, args, account_id):
     await event.edit(f"未知子命令：{sub}（支持 set/del/ls）")
 
 
-@builtin("sudo", doc="管理 sudo 用户（add/del/ls）")
+@builtin("sudo", doc="查看 sudo 用户列表（ls）")
 async def _cmd_sudo(client, event, args, account_id):
-    """管理 sudo 用户（超级用户，可代表账号执行命令）。"""
-    from sqlalchemy import delete, select
+    """查看 sudo 用户（超级用户，可代表账号执行命令）授权摘要。"""
+    from sqlalchemy import select
 
     from ..db.base import AsyncSessionLocal
     from ..db.models.account import SudoUser
 
     if not args:
-        await event.edit(
-            "用法：,sudo add <tg_user_id> [--display-name <name>] "
-            "[--chat-ids <id1,id2>|--all-chats] [--commands <cmd1,cmd2>|--all-commands]\n"
-            "     ,sudo del <tg_user_id>\n"
-            "     ,sudo ls\n"
-            "说明：默认不授予任何对话/命令权限，必须显式配置白名单或全部。"
-        )
+        await event.edit("用法：,sudo ls（仅只读查询）")
         return
 
-    sub = args[0]
+    sub = args[0].lower()
 
     if sub in ("ls", "list"):
         async with AsyncSessionLocal() as db:
@@ -902,138 +881,7 @@ async def _cmd_sudo(client, event, args, account_id):
         await event.edit("Sudo 用户列表：\n" + "\n".join(lines))
         return
 
-    if sub == "del":
-        if len(args) < 2:
-            await event.edit("用法：,sudo del <tg_user_id>")
-            return
-        try:
-            tg_user_id = int(args[1])
-        except ValueError:
-            await event.edit(f"无效的 tg_user_id：{args[1]}")
-            return
-        async with AsyncSessionLocal() as db:
-            result = await db.execute(
-                delete(SudoUser).where(
-                    SudoUser.account_id == account_id,
-                    SudoUser.tg_user_id == tg_user_id
-                )
-            )
-            await db.commit()
-        if result.rowcount:
-            if _ctx is not None and _ctx.sudo_users:
-                _ctx.sudo_users.pop(tg_user_id, None)
-            await event.edit(f"已删除 sudo 用户：TG用户 {tg_user_id}")
-        else:
-            await event.edit(f"sudo 用户 {tg_user_id} 不存在")
-        return
-
-    if sub == "add":
-        if len(args) < 2:
-            await event.edit(
-                "用法：,sudo add <tg_user_id> [--display-name <name>] "
-                "[--chat-ids <id1,id2>|--all-chats] [--commands <cmd1,cmd2>|--all-commands]"
-            )
-            return
-        try:
-            tg_user_id = int(args[1])
-        except ValueError:
-            await event.edit(f"无效的 tg_user_id：{args[1]}")
-            return
-        
-        # 解析可选参数
-        display_name = None
-        allowed_chat_ids: list[int] = []
-        allowed_commands: list[str] = []
-        allow_all_chats = False
-        allow_all_commands = False
-        
-        rest_args = args[2:]
-        i = 0
-        while i < len(rest_args):
-            if rest_args[i] == "--display-name" and i + 1 < len(rest_args):
-                display_name = rest_args[i + 1]
-                i += 2
-            elif rest_args[i] == "--chat-ids" and i + 1 < len(rest_args):
-                chat_str = rest_args[i + 1]
-                try:
-                    allowed_chat_ids = [
-                        int(x.strip()) for x in chat_str.split(",") if x.strip()
-                    ]
-                except ValueError:
-                    await event.edit(f"无效的 chat_ids：{chat_str}")
-                    return
-                allow_all_chats = False
-                i += 2
-            elif rest_args[i] == "--all-chats":
-                allow_all_chats = True
-                allowed_chat_ids = []
-                i += 1
-            elif rest_args[i] == "--commands" and i + 1 < len(rest_args):
-                cmd_str = rest_args[i + 1]
-                allowed_commands = [x.strip() for x in cmd_str.split(",") if x.strip()]
-                allow_all_commands = False
-                i += 2
-            elif rest_args[i] == "--all-commands":
-                allow_all_commands = True
-                allowed_commands = []
-                i += 1
-            else:
-                i += 1
-
-        stored_chat_scope = build_sudo_chat_scope(
-            allowed_chat_ids,
-            allow_all=allow_all_chats,
-        )
-        stored_command_scope = build_sudo_command_scope(
-            allowed_commands,
-            allow_all=allow_all_commands,
-        )
-        
-        async with AsyncSessionLocal() as db:
-            existing = (
-                await db.execute(
-                    select(SudoUser).where(
-                        SudoUser.account_id == account_id,
-                        SudoUser.tg_user_id == tg_user_id
-                    )
-                )
-            ).scalar_one_or_none()
-            if existing:
-                existing.display_name = display_name
-                existing.allowed_chat_ids = stored_chat_scope
-                existing.allowed_commands = stored_command_scope
-            else:
-                db.add(SudoUser(
-                    account_id=account_id,
-                    tg_user_id=tg_user_id,
-                    display_name=display_name,
-                    allowed_chat_ids=stored_chat_scope,
-                    allowed_commands=stored_command_scope,
-                ))
-            await db.commit()
-
-        if _ctx is not None:
-            _ctx.sudo_users[tg_user_id] = {
-                "display_name": display_name,
-                "allowed_chat_ids": stored_chat_scope,
-                "allowed_commands": stored_command_scope,
-            }
-
-        await event.edit(
-            f"已添加/更新 sudo 用户：TG用户 {tg_user_id}（{display_name or '无'}）\n"
-            f"允许对话：{_format_sudo_chat_scope(stored_chat_scope)}\n"
-            f"允许命令：{_format_sudo_command_scope(stored_command_scope)}"
-        )
-        return
-
-    await event.edit(f"未知子命令：{sub}（支持 add/del/ls）")
-
-
-@builtin("plugin", doc="远程插件管理（list/install/remove/enable/disable/update）")
-async def _cmd_plugin(client, event, args, account_id):
-    """远程插件管理入口，委托给 commands.plugin_cmd。"""
-    from .commands.plugin_cmd import handle_plugin_cmd
-    await handle_plugin_cmd(client, event, args, account_id)
+    await event.edit("仅支持只读查询：,sudo ls")
 
 
 _register_builtin_aliases()
