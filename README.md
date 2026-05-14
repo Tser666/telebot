@@ -172,6 +172,8 @@ docker compose up -d --build
 
 默认前端监听宿主机 80 端口。公网 HTTPS 部署请参考 [docs/DEPLOY-PUBLIC.md](docs/DEPLOY-PUBLIC.md)。
 
+Compose 会持久化数据库、Redis、Telegram session、远程插件安装目录和插件仓库缓存。不要把 `plugins/installed`、`data/plugin_repos` 改成容器内临时目录，否则重建 web 容器后远程插件文件会丢失，表现为“命令能收到但插件没有反应”。
+
 ### 小 VPS 内存建议
 
 生产 Compose 默认采用偏保守的资源参数：PostgreSQL 缓存、Redis 上限、后端 DB/Redis 连接池都按单人自托管场景收紧。每个已激活 Telegram 账号仍会常驻一个独立 worker 进程，账号数是内存占用的主要变量；小机器上建议只启用实际需要在线的账号和插件。

@@ -94,9 +94,13 @@ if is_alive "$BACKEND_PID"; then
   ok "后端已在运行 (pid=$(cat "$BACKEND_PID"))，跳过"
 else
   log "启动后端 uvicorn :8000${RELOAD_FLAG:+ (reload)}"
-  ( cd backend && . .venv/bin/activate && \
+  (
+    cd backend
+    . .venv/bin/activate
     nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 $RELOAD_FLAG \
-      >> "$BACKEND_LOG" 2>&1 & echo $! > "$BACKEND_PID" )
+      >> "$BACKEND_LOG" 2>&1 &
+    echo $! > "$BACKEND_PID"
+  )
   sleep 1
   if ! is_alive "$BACKEND_PID"; then
     err "后端启动失败，最近日志："
@@ -116,9 +120,12 @@ if is_alive "$FRONTEND_PID"; then
   ok "前端已在运行 (pid=$(cat "$FRONTEND_PID"))，跳过"
 else
   log "启动前端 vite :5173"
-  ( cd frontend && \
+  (
+    cd frontend
     nohup pnpm dev --host 0.0.0.0 --port 5173 \
-      >> "$FRONTEND_LOG" 2>&1 & echo $! > "$FRONTEND_PID" )
+      >> "$FRONTEND_LOG" 2>&1 &
+    echo $! > "$FRONTEND_PID"
+  )
   sleep 2
   if ! is_alive "$FRONTEND_PID"; then
     err "前端启动失败，最近日志："
