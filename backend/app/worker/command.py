@@ -24,11 +24,16 @@ from ..settings import settings
 from ..util.sudo_permissions import (
     normalize_sudo_chat_ids,
     normalize_sudo_commands,
-    sudo_chat_allowed,
-    sudo_command_allowed,
     sudo_scope_all,
 )
 from .ipc import CMD_PAUSE, CMD_RESUME, cmd_channel, make_cmd
+from .commands.sudo_guard import (
+    check_sudo_permission as _check_sudo_permission_impl,
+    has_dispatch_target as _has_dispatch_target_impl,
+    is_self_chat as _is_self_chat_impl,
+    looks_like_command_name as _looks_like_command_name_impl,
+    should_report_incoming_sudo_denial as _should_report_incoming_sudo_denial_impl,
+)
 
 log = logging.getLogger(__name__)
 
@@ -420,102 +425,28 @@ def _ensure_html_safe(text: str) -> str:
 
 
 async def _check_sudo_permission(event, cmd: str, account_id: int) -> tuple[bool, str]:
-    """检查 sudo 权限。
-    
-    Returns:
-        (allowed, error_message)
-    """
-    if _ctx is None or not _ctx.sudo_enabled:
-        return False, "sudo 系统未开启"
-    if not _ctx.sudo_users:
-        return False, "sudo 系统未配置"
-    
-    sender = await event.get_sender()
-    tg_user_id = getattr(sender, "id", None)
-    if tg_user_id is None:
-        return False, "无法识别发送者"
-    
-    sudo_config = _ctx.sudo_users.get(tg_user_id)
-    if sudo_config is None:
-        return False, f"TG 用户 {tg_user_id} 不在 sudo 列表中"
-    
-    # 检查 chat_id 白名单：空列表/NULL 不再表示全部，而是默认拒绝。
-    allowed_chats = sudo_config.get("allowed_chat_ids", [])
-    chat_id = getattr(event, "chat_id", None)
-    if not sudo_chat_allowed(allowed_chats, chat_id):
-        if not sudo_scope_all(allowed_chats) and not normalize_sudo_chat_ids(allowed_chats):
-            return False, "未配置允许对话，sudo 默认拒绝"
-        return False, f"此对话（chat_id={chat_id}）不在白名单中"
-    
-    # 检查命令白名单：空列表/NULL 不再表示全部，而是默认拒绝。
-    allowed_cmds = sudo_config.get("allowed_commands", [])
-    if not sudo_command_allowed(allowed_cmds, cmd):
-        if not sudo_scope_all(allowed_cmds) and not normalize_sudo_commands(allowed_cmds):
-            return False, "未配置允许命令，sudo 默认拒绝"
-        return False, f"命令 `{cmd}` 不在白名单中"
-    
-    return True, ""
+    return await _check_sudo_permission_impl(_ctx, event, cmd)
 
 
 def _should_report_incoming_sudo_denial(error_msg: str) -> bool:
-    """incoming sudo 拒绝是否需要在群里回提示。
-
-    未开启 sudo、发送者不是 sudo 用户、或 sudo 用户还没配置作用域时，静默忽略。
-    这样普通群友发了类似 ``.xxx`` 的消息时，不会莫名收到 userbot 的拒绝提示。
-    """
-    silent_fragments = (
-        "sudo 系统未开启",
-        "sudo 系统未配置",
-        "不在 sudo 列表中",
-        "未配置允许对话",
-        "未配置允许命令",
-    )
-    return not any(fragment in error_msg for fragment in silent_fragments)
+    return _should_report_incoming_sudo_denial_impl(error_msg)
 
 
 def _looks_like_command_name(cmd: str, *, prefix: str = ".") -> bool:
-    """判断 sudo 前缀后的 token 是否像一个真实命令名。
-
-    ``.`` 是常见 sudo 前缀，但群聊里用户也会发送 ``..``、``...`` 或小数点
-    表情/占位文本。旧逻辑会把这些内容当成 sudo 命令并公开回复权限拒绝。
-    这里先过滤纯标点和重复前缀，让普通聊天内容不会进入 sudo 权限链路。
-    """
-    name = str(cmd or "").strip()
-    if not name:
-        return False
-    if prefix and name.startswith(prefix):
-        return False
-    return any(ch.isalnum() or ch == "_" for ch in name)
+    return _looks_like_command_name_impl(cmd, prefix=prefix)
 
 
 def _has_dispatch_target(cmd: str, args_raw: str = "") -> bool:
-    """sudo incoming 只对真实可派发命令做权限提示。
-
-    已授权 sudo 用户在未授权群里误发 ``...`` 时不应收到公开拒绝；
-    但 ``.ping`` / ``.模板名`` / ``.插件命令`` 这类真实命令仍会进入权限检查。
-    """
-    if cmd in _BUILTIN_ALIAS_TO_PRIMARY:
-        return True
-    if _ctx is not None:
-        if cmd in _ctx.templates:
-            return True
-        if _ctx.aliases:
-            full_rest = f"{cmd} {args_raw}".strip() if args_raw else cmd
-            for alias in _ctx.aliases:
-                if full_rest == alias or full_rest.startswith(alias + " "):
-                    return True
-    return False
+    return _has_dispatch_target_impl(
+        cmd,
+        args_raw=args_raw,
+        builtin_alias_to_primary=_BUILTIN_ALIAS_TO_PRIMARY,
+        ctx=_ctx,
+    )
 
 
 def _is_self_chat(event) -> bool:
-    """sudo incoming 只允许在账号自身 chat（收藏夹语义）触发。"""
-    if _ctx is None or _ctx.self_tg_user_id is None:
-        return False
-    try:
-        chat_id = int(getattr(event, "chat_id", 0) or 0)
-    except Exception:
-        return False
-    return chat_id == int(_ctx.self_tg_user_id)
+    return _is_self_chat_impl(event, ctx=_ctx)
 
 
 def _replied_media_placeholder(msg: Any) -> str:

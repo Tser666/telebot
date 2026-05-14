@@ -24,6 +24,13 @@ from app.worker.command import (
     make_command_handler,
     set_command_context,
 )
+from app.worker.commands.sudo_guard import (
+    check_sudo_permission as guard_check_sudo_permission,
+    has_dispatch_target as guard_has_dispatch_target,
+    is_self_chat as guard_is_self_chat,
+    looks_like_command_name as guard_looks_like_command_name,
+    should_report_incoming_sudo_denial as guard_should_report_incoming_sudo_denial,
+)
 
 # ════════════════════════════════════════════════════════════
 # 1) CommandContext sudo 字段
@@ -387,8 +394,86 @@ def test_sudo_self_chat_guard():
         event = MagicMock()
         event.chat_id = 999
         assert _is_self_chat(event) is True
+        assert guard_is_self_chat(event, ctx=wcmd._ctx) is True
         event.chat_id = -1002090852236
         assert _is_self_chat(event) is False
+        assert guard_is_self_chat(event, ctx=wcmd._ctx) is False
+    finally:
+        wcmd._ctx = old
+
+
+def test_sudo_guard_name_and_denial_helpers():
+    """新模块的命名识别与拒绝提示规则应与旧行为一致。"""
+    assert guard_looks_like_command_name("ping", prefix=".") is True
+    assert guard_looks_like_command_name(".", prefix=".") is False
+    assert guard_looks_like_command_name("...", prefix=".") is False
+    assert guard_should_report_incoming_sudo_denial("sudo 系统未开启") is False
+    assert guard_should_report_incoming_sudo_denial("命令 `reboot` 不在白名单中") is True
+
+
+def test_sudo_guard_dispatch_target_checks_builtin_template_and_alias():
+    """新模块应继续识别 builtin、模板和别名派发目标。"""
+    ctx = CommandContext(
+        account_id=1,
+        templates={"hello": {"type": "reply_text"}},
+        providers={},
+        command_prefix=",",
+        aliases={"问候": "hello"},
+    )
+    assert guard_has_dispatch_target(
+        "ping",
+        builtin_alias_to_primary={"ping": "ping"},
+        ctx=ctx,
+    ) is True
+    assert guard_has_dispatch_target(
+        "hello",
+        builtin_alias_to_primary={},
+        ctx=ctx,
+    ) is True
+    assert guard_has_dispatch_target(
+        "问候",
+        builtin_alias_to_primary={},
+        ctx=ctx,
+    ) is True
+    assert guard_has_dispatch_target(
+        "not-a-command",
+        builtin_alias_to_primary={},
+        ctx=ctx,
+    ) is False
+
+
+@pytest.mark.asyncio
+async def test_sudo_guard_permission_matches_command_wrapper():
+    """command.py 的包装函数应与新模块返回一致。"""
+    from app.worker import command as wcmd
+
+    old = wcmd._ctx
+    ctx = CommandContext(
+        account_id=1,
+        templates={},
+        providers={},
+        command_prefix=",",
+        sudo_enabled=True,
+        sudo_users={
+            111: {
+                "display_name": "alice",
+                "allowed_chat_ids": ["*"],
+                "allowed_commands": ["ping"],
+            }
+        },
+    )
+    wcmd._ctx = ctx
+    try:
+        sender = MagicMock()
+        sender.id = 111
+        event = AsyncMock()
+        event.get_sender = AsyncMock(return_value=sender)
+        event.chat_id = -100111
+
+        wrapper_allowed, wrapper_msg = await _check_sudo_permission(event, "ping", 1)
+        guard_allowed, guard_msg = await guard_check_sudo_permission(ctx, event, "ping")
+        assert wrapper_allowed == guard_allowed
+        assert wrapper_msg == guard_msg
     finally:
         wcmd._ctx = old
 
