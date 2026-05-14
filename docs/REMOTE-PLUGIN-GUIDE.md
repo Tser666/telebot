@@ -169,6 +169,9 @@ __all__ = ["PLUGIN_CLASS", "MANIFEST"]
 
 ## 3. 安装与启用流程
 
+> 安全策略更新（PR1）：远程插件的安装、更新、启用、禁用、卸载等运维入口仅保留 Web/API。
+> 普通 Telegram 命令层不再支持 `,plugin install/remove/enable/disable/update`。
+
 Web UI 或 API 安装远程插件时，后端会执行：
 
 ```text

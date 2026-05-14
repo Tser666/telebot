@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
+from fastapi import HTTPException
 
 from app.crypto import decrypt_str, encrypt_str
 from app.db.models.command import LLMProvider
@@ -23,6 +24,7 @@ from app.schemas.command import (
     LLMProviderCreate,
 )
 from app.services.command_service import _provider_to_out
+from app.services import command_service
 from app.services.llm_client import (
     LLMError,
     OpenAIClient,
@@ -98,6 +100,41 @@ def test_template_name_must_match_regex() -> None:
     # 空串
     with pytest.raises(ValueError):
         CommandTemplateCreate(name="", type="reply_text", config={"text": ""})
+
+
+def test_builtin_reserved_words_drop_removed_reboot_aliases() -> None:
+    """PR1 后，reboot/rb 不应继续占用模板保留词。"""
+    assert "reboot" not in command_service._BUILTIN_RESERVED_WORDS
+    assert "rb" not in command_service._BUILTIN_RESERVED_WORDS
+
+
+def test_builtin_reserved_words_keep_active_builtin_commands() -> None:
+    """仍在用的内置命令继续保留冲突保护。"""
+    assert "restart" in command_service._BUILTIN_RESERVED_WORDS
+    assert "help" in command_service._BUILTIN_RESERVED_WORDS
+    assert "version" in command_service._BUILTIN_RESERVED_WORDS
+
+
+@pytest.mark.asyncio
+async def test_validate_template_keywords_unique_still_rejects_active_builtin() -> None:
+    """模板命令名仍不能与当前内置命令冲突。"""
+    class _Rows:
+        def scalars(self) -> "_Rows":
+            return self
+
+        def all(self) -> list[object]:
+            return []
+
+    class _DB:
+        async def execute(self, _query):
+            return _Rows()
+
+    with pytest.raises(HTTPException) as ei:
+        await command_service._validate_template_keywords_unique(
+            _DB(), name="restart", aliases=[], current_id=None
+        )
+    detail = ei.value.detail or {}
+    assert detail.get("code") == "TEMPLATE_ALIAS_CONFLICT"
 
 
 def test_template_reply_text_requires_text() -> None:
