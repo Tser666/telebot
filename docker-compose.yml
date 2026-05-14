@@ -101,6 +101,9 @@ services:
     volumes:
       # session 加密文件落盘目录，volume 持久化
       - sessions:/app/sessions
+      # 远程插件安装产物和插件仓库缓存必须持久化；否则重建 web 容器后插件文件会丢失
+      - plugins_installed:/app/plugins/installed
+      - plugin_repos:/app/data/plugin_repos
     healthcheck:
       # 用 /readyz 做真实探活：DB + Redis 任一异常即视为 unhealthy
       # urlopen 显式 timeout=4：让应用层超时先于 docker 的 5s 触发，错误更清晰
@@ -132,3 +135,5 @@ volumes:
   pgdata:
   redisdata:
   sessions:
+  plugins_installed:
+  plugin_repos:

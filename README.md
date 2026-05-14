@@ -172,6 +172,8 @@ docker compose up -d --build
 
 默认前端监听宿主机 80 端口。公网 HTTPS 部署请参考 [docs/DEPLOY-PUBLIC.md](docs/DEPLOY-PUBLIC.md)。
 
+Compose 会持久化数据库、Redis、Telegram session、远程插件安装目录和插件仓库缓存。不要把 `plugins/installed`、`data/plugin_repos` 改成容器内临时目录，否则重建 web 容器后远程插件文件会丢失，表现为“命令能收到但插件没有反应”。
+
 ### 小 VPS 内存建议
 
 `scripts/_lib.sh::auto_tune_env` 在 `make up` / `make prod-up` 启动时会按宿主机

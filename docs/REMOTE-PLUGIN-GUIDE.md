@@ -182,6 +182,8 @@ Web UI 或 API 安装远程插件时，后端会执行：
 8. 广播 CMD_RELOAD_CONFIG，让 worker 重新扫描插件
 ```
 
+Docker 部署时，`plugins/installed/{name}/` 和 `data/plugin_repos/` 必须挂载到持久化卷。否则 `docker compose up -d --build` 重建 web 容器后，数据库可能还保留插件开关，但插件文件或仓库缓存已经从容器临时文件系统消失，最终表现为远程插件命令没有响应。
+
 启用远程插件有两层开关：
 
 | 开关 | 含义 |

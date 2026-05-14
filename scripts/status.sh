@@ -21,14 +21,14 @@ log "组件状态"
 
 # Postgres
 if docker compose -f docker-compose.dev.yml ps postgres 2>/dev/null | grep -q "Up"; then
-  print_row "Postgres" OK "5432 容器健康"
+  print_row "Postgres" OK "宿主 15432 → 容器 5432 健康"
 else
   print_row "Postgres" DOWN "未运行（make up 启动）"
 fi
 
 # Redis
 if docker compose -f docker-compose.dev.yml ps redis 2>/dev/null | grep -q "Up"; then
-  print_row "Redis" OK "6379 容器健康"
+  print_row "Redis" OK "宿主 16379 → 容器 6379 健康"
 else
   print_row "Redis" DOWN "未运行"
 fi
