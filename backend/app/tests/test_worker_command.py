@@ -203,7 +203,24 @@ def test_re_escape_special_prefix():
     assert not pat.match("aping")
 
 
-def test_restart_commands_registered():
-    """守门测试：项目级/账号级重启命令必须都存在。"""
+def test_only_account_restart_command_registered():
+    """守门测试：仅保留账号级 restart，不再保留项目级 reboot/rb。"""
     assert "restart" in _BUILTIN
-    assert "reboot" in _BUILTIN
+    assert "reboot" not in _BUILTIN
+    assert "rb" not in _BUILTIN
+    assert "plugin" not in _BUILTIN
+
+
+@pytest.mark.asyncio
+async def test_help_hides_removed_high_risk_commands():
+    """help 不应展示已删除高危命令。"""
+    client = AsyncMock()
+    event = AsyncMock()
+    await _BUILTIN["help"].handler(client, event, [], 1)
+    msg = event.edit.call_args[0][0]
+    assert "reboot" not in msg
+    assert "rb" not in msg
+    assert "plugin" not in msg
+    assert "sudo add" not in msg
+    assert "sudo del" not in msg
+    assert "restart" in msg
