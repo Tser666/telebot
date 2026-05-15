@@ -1,15 +1,16 @@
 // 账号列表：卡片网格形式（移动端单列），含启停 / 详情 / 删除（二次确认）操作
-import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft,
   ArrowRight,
   HelpCircle,
   Package,
   Plus,
   Power,
+  Sparkles,
   Trash2,
+  Wand,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -33,12 +34,58 @@ import {
 import { getErrMsg } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
 
-const NEW_ACCOUNT_GUIDE_SEEN_KEY = "telebot.accounts.new_account_guide_seen.v2";
+const NEW_ACCOUNT_GUIDE_SEEN_KEY = "telebot.accounts.new_account_guide_seen.v3";
+
+type GuideStep = {
+  icon: typeof Plus;
+  title: string;
+  desc: string;
+  actionLabel: string;
+  actionTo: string;
+};
+
+const GUIDE_STEPS: GuideStep[] = [
+  {
+    icon: Plus,
+    title: "1. 添加并启用账号",
+    desc: "先新增 Telegram 账号并启用它，系统会为该账号启动独立 worker。",
+    actionLabel: "去添加账号",
+    actionTo: "/accounts/new",
+  },
+  {
+    icon: Wand,
+    title: "2. 设置命令前缀",
+    desc: "在系统设置里确定命令开头字符，比如 ,ai。",
+    actionLabel: "去设置前缀",
+    actionTo: "/settings?tab=platform",
+  },
+  {
+    icon: Package,
+    title: "3. 启用命令模板或调用插件",
+    desc: "去插件中心启用模板或插件，然后就能在 Telegram 里直接调用。",
+    actionLabel: "去插件中心",
+    actionTo: "/plugins",
+  },
+];
+
+function getGuideStepByPath(pathname: string, search: string): number {
+  if (pathname === "/accounts" || pathname === "/accounts/new") return 0;
+  if (pathname === "/settings" && new URLSearchParams(search).get("tab") === "platform") return 1;
+  if (pathname === "/plugins" || pathname.startsWith("/plugins/")) return 2;
+  return 0;
+}
 
 export function AccountList() {
   const nav = useNavigate();
+  const location = useLocation();
   const qc = useQueryClient();
   const [guideOpen, setGuideOpen] = useState(false);
+  const [guideExpanded, setGuideExpanded] = useState(false);
+  const currentStep = useMemo(
+    () => getGuideStepByPath(location.pathname, location.search),
+    [location.pathname, location.search],
+  );
+
   const { data, isLoading } = useQuery({
     queryKey: ["accounts"],
     queryFn: listAccounts,
@@ -46,7 +93,10 @@ export function AccountList() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (localStorage.getItem(NEW_ACCOUNT_GUIDE_SEEN_KEY) === "1") return;
+    if (localStorage.getItem(NEW_ACCOUNT_GUIDE_SEEN_KEY) === "1") {
+      setGuideExpanded(false);
+      return;
+    }
     setGuideOpen(true);
     localStorage.setItem(NEW_ACCOUNT_GUIDE_SEEN_KEY, "1");
   }, []);
@@ -71,7 +121,7 @@ export function AccountList() {
   });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-24">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold tracking-tight">账号管理</h1>
@@ -92,15 +142,21 @@ export function AccountList() {
       <NewAccountGuideDialog
         open={guideOpen}
         onOpenChange={setGuideOpen}
+        currentStep={currentStep}
         onRunStep={(step) => {
           setGuideOpen(false);
-          if (step === 0) {
-            nav("/accounts/new");
-            return;
-          }
-          nav("/plugins");
+          nav(GUIDE_STEPS[step].actionTo);
         }}
       />
+
+      {!guideOpen ? (
+        <GuideFloatingCard
+          expanded={guideExpanded}
+          currentStep={currentStep}
+          onToggle={() => setGuideExpanded((v) => !v)}
+          onGo={() => nav(GUIDE_STEPS[currentStep].actionTo)}
+        />
+      ) : null}
 
       {isLoading ? (
         <div className="flex h-32 items-center justify-center">
@@ -182,33 +238,16 @@ export function AccountList() {
 function NewAccountGuideDialog({
   open,
   onOpenChange,
+  currentStep,
   onRunStep,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  currentStep: number;
   onRunStep: (step: number) => void;
 }) {
-  const [currentStep, setCurrentStep] = useState(0);
-  const steps = [
-    {
-      icon: Plus,
-      title: "1. 添加并启用账号",
-      desc: "先新增 Telegram 账号并启用它，系统会为该账号启动独立 worker。",
-      actionLabel: "去添加账号",
-    },
-    {
-      icon: Package,
-      title: "2. 启用命令模板或调用插件",
-      desc: "去插件中心复用命令模板，或开启需要的插件；远程插件可在“安装插件”里添加。真正发命令前，先确认系统里的命令前缀。",
-      actionLabel: "去插件中心",
-    },
-  ];
-  const step = steps[currentStep];
-  const percent = ((currentStep + 1) / steps.length) * 100;
-
-  useEffect(() => {
-    if (open) setCurrentStep(0);
-  }, [open]);
+  const step = GUIDE_STEPS[currentStep];
+  const percent = ((currentStep + 1) / GUIDE_STEPS.length) * 100;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -216,14 +255,14 @@ function NewAccountGuideDialog({
         <DialogHeader>
           <DialogTitle>新账号怎么开始？</DialogTitle>
           <DialogDescription>
-            一次做一步，做完就点下一步，不用一次记住全部流程。
+            现在是三步流程，先做当前这一步，完成后继续下一步。
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3 rounded-2xl border bg-gradient-to-br from-sky-50 via-background to-emerald-50 p-4 dark:from-sky-950/30 dark:via-background dark:to-emerald-950/20">
           <div className="flex items-center justify-between text-xs text-muted-foreground">
             <span>
-              第 {currentStep + 1} 步 / 共 {steps.length} 步
+              第 {currentStep + 1} 步 / 共 {GUIDE_STEPS.length} 步
             </span>
             <span>{Math.round(percent)}%</span>
           </div>
@@ -238,50 +277,69 @@ function NewAccountGuideDialog({
               <step.icon className="h-5 w-5" />
             </div>
             <div className="text-sm font-semibold">{step.title}</div>
-            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              {step.desc}
-            </p>
-            {currentStep === 1 ? (
-              <Button
-                asChild
-                variant="outline"
-                size="sm"
-                className="mt-3"
-                onClick={() => onOpenChange(false)}
-              >
-                <Link to="/settings?tab=platform">设置命令前缀</Link>
-              </Button>
-            ) : null}
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{step.desc}</p>
           </div>
         </div>
 
         <DialogFooter className="gap-2 sm:justify-between">
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setCurrentStep((s) => Math.max(0, s - 1))}
-              disabled={currentStep === 0}
-            >
-              <ArrowLeft className="mr-1 h-4 w-4" /> 上一步
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() =>
-                setCurrentStep((s) => Math.min(steps.length - 1, s + 1))
-              }
-              disabled={currentStep === steps.length - 1}
-            >
-              下一步 <ArrowRight className="ml-1 h-4 w-4" />
-            </Button>
-            <Button variant="ghost" onClick={() => onOpenChange(false)}>
-              先看看
-            </Button>
-          </div>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>
+            先看看
+          </Button>
           <Button onClick={() => onRunStep(currentStep)}>
             {step.actionLabel} <ArrowRight className="ml-1 h-4 w-4" />
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function GuideFloatingCard({
+  expanded,
+  currentStep,
+  onToggle,
+  onGo,
+}: {
+  expanded: boolean;
+  currentStep: number;
+  onToggle: () => void;
+  onGo: () => void;
+}) {
+  const step = GUIDE_STEPS[currentStep];
+  const percent = ((currentStep + 1) / GUIDE_STEPS.length) * 100;
+
+  if (!expanded) {
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        className="fixed bottom-4 left-4 z-40 rounded-full border bg-primary p-3 text-primary-foreground shadow-lg transition hover:scale-105"
+        aria-label="打开新手指引"
+      >
+        <Sparkles className="h-5 w-5 animate-pulse" />
+      </button>
+    );
+  }
+
+  return (
+    <div className="fixed bottom-4 left-4 z-40 w-[300px] rounded-2xl border bg-card/95 p-4 shadow-xl backdrop-blur">
+      <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
+        <span>新手指引</span>
+        <button type="button" onClick={onToggle} className="hover:text-foreground">
+          收起
+        </button>
+      </div>
+      <div className="mb-2 text-sm font-semibold">{step.title}</div>
+      <p className="text-xs leading-relaxed text-muted-foreground">{step.desc}</p>
+      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full bg-primary transition-all"
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+      <Button className="mt-3 w-full" size="sm" onClick={onGo}>
+        {step.actionLabel} <ArrowRight className="ml-1 h-4 w-4" />
+      </Button>
+    </div>
   );
 }

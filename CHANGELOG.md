@@ -17,6 +17,25 @@
 
 ---
 
+## [0.14.6] — 2026-05-16 · polish · 新手指引与 AI 用量增强
+
+### Added
+- 系统设置的“命令前缀”下新增 Telegram 左右气泡预览，展示“回复原文 → 发出命令 → AI 返回结果”的真实触发感。
+- 新手指引升级为三步：添加并启用账号、设置命令前缀、启用命令模板或调用插件，并在账号 / 设置 / 插件页面提供左下角呼吸悬浮入口。
+- AI 最近调用增加摘要卡片，展示请求数、成功数、失败数、Fallback 次数、总 Token 与平均耗时。
+
+### Changed
+- 插件安装页移除重复的“按账号启用”Tab，安装页只负责安装 / 更新 / 卸载，账号级启用和配置统一回插件中心首页。
+- 插件安装页补充“返回上一页”，深链进入时可回到插件中心。
+- AI 最近调用表格改为中文表头，并补充 fallback / 错误类型信息。
+
+### Verification
+- `git diff --check` 通过。
+- `pnpm --dir frontend build` 通过。
+- `PYTHONPYCACHEPREFIX=/private/tmp/telebot_pycache backend/.venv/bin/python -m py_compile backend/app/api/llm_usage.py backend/app/main.py` 通过。
+
+---
+
 ## [0.14.5] — 2026-05-16 · fix · 恢复远程插件安装入口
 
 ### Added

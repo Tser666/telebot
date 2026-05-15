@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, Download, ShieldCheck, SlidersHorizontal, UserPlus } from "lucide-react";
+import { ArrowRight, Bell, Download, ShieldCheck, SlidersHorizontal, Sparkles, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -35,11 +35,46 @@ interface KillSwitchState {
 }
 
 type RuntimeLogLevel = "debug" | "info" | "warn" | "error";
+const NEW_ACCOUNT_GUIDE_SEEN_KEY = "telebot.accounts.new_account_guide_seen.v3";
+
+const GUIDE_STEPS = [
+  {
+    title: "1. 添加并启用账号",
+    desc: "先新增 Telegram 账号并启用它，系统会为该账号启动独立 worker。",
+    actionLabel: "去添加账号",
+    actionTo: "/accounts/new",
+  },
+  {
+    title: "2. 设置命令前缀",
+    desc: "在系统设置里确定命令开头字符，比如 ,ai。",
+    actionLabel: "去设置前缀",
+    actionTo: "/settings?tab=platform",
+  },
+  {
+    title: "3. 启用命令模板或调用插件",
+    desc: "去插件中心启用模板或插件，然后就能在 Telegram 里直接调用。",
+    actionLabel: "去插件中心",
+    actionTo: "/plugins",
+  },
+];
+
+function getGuideStepByPath(pathname: string, search: string): number {
+  if (pathname === "/accounts" || pathname === "/accounts/new") return 0;
+  if (pathname === "/settings" && new URLSearchParams(search).get("tab") === "platform") return 1;
+  if (pathname === "/plugins" || pathname.startsWith("/plugins/")) return 2;
+  return 0;
+}
 
 export function SettingsIndex() {
   const qc = useQueryClient();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const [tab, setTab] = useState<"account" | "platform" | "security" | "migration">("account");
+  const [guideExpanded, setGuideExpanded] = useState(false);
+  const currentStep = useMemo(
+    () => getGuideStepByPath(location.pathname, location.search),
+    [location.pathname, location.search],
+  );
 
   const settingsQ = useQuery({
     queryKey: ["system", "settings"],
@@ -102,6 +137,12 @@ export function SettingsIndex() {
       setTab(tabParam);
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (localStorage.getItem(NEW_ACCOUNT_GUIDE_SEEN_KEY) !== "1") return;
+    setGuideExpanded(false);
+  }, []);
 
   const savePrefix = useMutation({
     mutationFn: () => patchSystemSettings({ command_prefix: prefix }),
@@ -183,7 +224,7 @@ export function SettingsIndex() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-24">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">系统设置</h1>
         <p className="text-sm text-muted-foreground">
@@ -256,6 +297,37 @@ export function SettingsIndex() {
                 >
                   保存
                 </Button>
+              </div>
+              <div className="mt-4 rounded-xl border bg-background p-3 text-xs">
+                <div className="mb-3 font-medium">触发预览</div>
+                <div className="rounded-2xl border bg-gradient-to-b from-sky-50 to-emerald-50 p-3 dark:from-sky-950/30 dark:to-emerald-950/20">
+                  <div className="space-y-3">
+                    <div className="ml-auto max-w-[86%] rounded-2xl rounded-br-md bg-sky-500 px-3 py-2 text-white shadow-sm">
+                      <div className="mb-1 rounded-lg border-l-2 border-white/70 bg-white/15 px-2 py-1 text-[11px] leading-relaxed text-white/90">
+                        这是一段被回复的原文。
+                      </div>
+                      <div className="font-mono">{prefix || ","}ai 请总结这段内容</div>
+                    </div>
+                    <div className="max-w-[92%] rounded-2xl rounded-bl-md border bg-card px-3 py-2 text-foreground shadow-sm">
+                      <div className="font-semibold">(๑•̌.•̑๑)ˀ̣ˀ̣ˀ̣ 好奇</div>
+                      <div className="mt-2 rounded-lg border-l-2 bg-muted/40 px-2 py-1 text-muted-foreground">
+                        这是一段被回复的原文。
+                      </div>
+                      <div className="mt-2 rounded-lg border-l-2 bg-muted/40 px-2 py-1 text-muted-foreground">
+                        请总结这段内容
+                      </div>
+                      <div className="mt-3 font-semibold">ᕦ(ˇò_ó)ᕤ 回答</div>
+                      <p className="mt-2 text-muted-foreground">
+                        这是 AI 回答示例，已按当前消息模板渲染。
+                      </p>
+                      <div className="mt-2 rounded-lg border-l-2 bg-muted/40 px-2 py-1 text-muted-foreground">
+                        这里是从第三行开始的回答内容。
+                      </div>
+                      <div className="my-3 text-center text-muted-foreground">━━━━━━━━━━━━━━━</div>
+                      <div className="text-center font-semibold">✦ gpt-5.4 · OpenAI ✦</div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -475,6 +547,63 @@ export function SettingsIndex() {
           <ConfigBackup />
         </TabsContent>
       </Tabs>
+      <GuideFloatingCard
+        expanded={guideExpanded}
+        currentStep={currentStep}
+        onToggle={() => setGuideExpanded((v) => !v)}
+      />
+    </div>
+  );
+}
+
+function GuideFloatingCard({
+  expanded,
+  currentStep,
+  onToggle,
+}: {
+  expanded: boolean;
+  currentStep: number;
+  onToggle: () => void;
+}) {
+  const step = GUIDE_STEPS[currentStep];
+  const action = currentStep === 1 ? GUIDE_STEPS[2] : step;
+  const percent = ((currentStep + 1) / GUIDE_STEPS.length) * 100;
+
+  if (!expanded) {
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        className="fixed bottom-4 left-4 z-40 rounded-full border bg-primary p-3 text-primary-foreground shadow-lg transition hover:scale-105"
+        aria-label="打开新手指引"
+      >
+        <Sparkles className="h-5 w-5 animate-pulse" />
+      </button>
+    );
+  }
+
+  return (
+    <div className="fixed bottom-4 left-4 z-40 w-[300px] rounded-2xl border bg-card/95 p-4 shadow-xl backdrop-blur">
+      <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
+        <span>新手指引</span>
+        <button type="button" onClick={onToggle} className="hover:text-foreground">
+          收起
+        </button>
+      </div>
+      <div className="mb-2 text-sm font-semibold">{step.title}</div>
+      <p className="text-xs leading-relaxed text-muted-foreground">{step.desc}</p>
+      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full bg-primary transition-all"
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+      <Button className="mt-3 w-full" size="sm" asChild>
+        <Link to={action.actionTo}>
+          {currentStep === 1 ? "下一步：去插件中心" : action.actionLabel}
+          <ArrowRight className="ml-1 h-4 w-4" />
+        </Link>
+      </Button>
     </div>
   );
 }

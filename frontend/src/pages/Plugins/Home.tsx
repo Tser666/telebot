@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { FlaskConical, Package2, SatelliteDish, Settings2 } from "lucide-react";
+import {
+  ArrowRight,
+  FlaskConical,
+  Package2,
+  SatelliteDish,
+  Settings2,
+  Sparkles,
+} from "lucide-react";
 
 import { getFeatureMatrix } from "@/api/features";
 import { Spinner } from "@/components/ui/misc";
@@ -26,6 +33,7 @@ export function PluginsHome() {
   const nav = useNavigate();
   const [searchParams] = useSearchParams();
   const [selectedAid, setSelectedAid] = useState<number | null>(null);
+  const [guideExpanded, setGuideExpanded] = useState(false);
   const [bannerVisible, setBannerVisible] = useState(() => {
     if (typeof window === "undefined") return false;
     return localStorage.getItem(DANGEROUS_CMD_BANNER_KEY) !== "1";
@@ -94,7 +102,7 @@ export function PluginsHome() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-24">
       {bannerVisible ? (
         <Card className="border-amber-300 bg-amber-50">
           <CardHeader className="pb-2">
@@ -250,6 +258,60 @@ export function PluginsHome() {
           selectedFeatures={selectedAccount?.features ?? {}}
         />
       </div>
+      <GuideFloatingCard
+        expanded={guideExpanded}
+        onToggle={() => setGuideExpanded((v) => !v)}
+        onGo={() => nav("/plugins/manage?tab=plugins")}
+      />
+    </div>
+  );
+}
+
+function GuideFloatingCard({
+  expanded,
+  onToggle,
+  onGo,
+}: {
+  expanded: boolean;
+  onToggle: () => void;
+  onGo: () => void;
+}) {
+  const percent = 100;
+
+  if (!expanded) {
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        className="fixed bottom-4 left-4 z-40 rounded-full border bg-primary p-3 text-primary-foreground shadow-lg transition hover:scale-105"
+        aria-label="打开新手指引"
+      >
+        <Sparkles className="h-5 w-5 animate-pulse" />
+      </button>
+    );
+  }
+
+  return (
+    <div className="fixed bottom-4 left-4 z-40 w-[300px] rounded-2xl border bg-card/95 p-4 shadow-xl backdrop-blur">
+      <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
+        <span>新手指引</span>
+        <button type="button" onClick={onToggle} className="hover:text-foreground">
+          收起
+        </button>
+      </div>
+      <div className="mb-2 text-sm font-semibold">3. 启用命令模板或调用插件</div>
+      <p className="text-xs leading-relaxed text-muted-foreground">
+        在本页选账号，启用需要的模板或插件；远程插件先点“安装插件”添加。
+      </p>
+      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full bg-primary transition-all"
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+      <Button className="mt-3 w-full" size="sm" onClick={onGo}>
+        安装远程插件 <ArrowRight className="ml-1 h-4 w-4" />
+      </Button>
     </div>
   );
 }

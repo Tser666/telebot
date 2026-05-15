@@ -22,6 +22,15 @@ export function AIUsage() {
   );
 }
 
+function SummaryTile({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-md border bg-muted/20 p-3">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="mt-1 text-lg font-semibold">{value}</p>
+    </div>
+  );
+}
+
 export function RecentUsageContent() {
   const providersQ = useQuery({
     queryKey: ["llm-providers"],
@@ -90,16 +99,30 @@ export function RecentUsageContent() {
     );
   }
 
-  const rows = usageQ.data || [];
+  const usage = usageQ.data;
+  const rows = usage?.items || [];
+  const summary = usage?.summary;
+
   return (
     <Card>
       <CardHeader>
         <CardTitle className="inline-flex items-center gap-2">
           <History className="h-4 w-4" /> 最近调用
         </CardTitle>
-        <CardDescription>展示最近 20 条 LLM 调用记录（最小可用视图）。</CardDescription>
+        <CardDescription>展示最近 20 条 LLM 调用记录与核心摘要。</CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-4">
+        {summary && (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+            <SummaryTile label="请求数" value={summary.request_count} />
+            <SummaryTile label="成功" value={summary.success_count} />
+            <SummaryTile label="失败" value={summary.failed_count} />
+            <SummaryTile label="Fallback" value={summary.fallback_count} />
+            <SummaryTile label="总 Token" value={summary.total_tokens} />
+            <SummaryTile label="平均耗时" value={`${summary.avg_latency_ms}ms`} />
+          </div>
+        )}
+
         {rows.length === 0 ? (
           <p className="rounded-md border border-dashed py-8 text-center text-sm text-muted-foreground">
             暂无调用记录。触发一次 AI 命令后再回来查看。
@@ -112,27 +135,32 @@ export function RecentUsageContent() {
                 <TableHead>来源</TableHead>
                 <TableHead>模型提供商</TableHead>
                 <TableHead>模型</TableHead>
-                <TableHead>Token 数</TableHead>
+                <TableHead>Token</TableHead>
                 <TableHead>耗时</TableHead>
-                <TableHead>状态</TableHead>
+                <TableHead>结果</TableHead>
+                <TableHead>fallback</TableHead>
+                <TableHead>错误</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell className="text-xs text-muted-foreground">{new Date(r.created_at).toLocaleString()}</TableCell>
-                  <TableCell className="font-mono text-xs">{r.source || "-"}</TableCell>
-                  <TableCell>{r.provider_name || (r.provider_id ? `#${r.provider_id}` : "-")}</TableCell>
-                  <TableCell className="font-mono text-xs">{r.model || "-"}</TableCell>
-                  <TableCell>{(r.input_tokens || 0) + (r.output_tokens || 0)}</TableCell>
-                  <TableCell>{r.latency_ms != null ? `${r.latency_ms}ms` : "-"}</TableCell>
-                  <TableCell>
-                    <Badge variant={r.success ? "success" : "warn"}>
-                      {r.success ? (r.used_fallback ? "成功 · fallback" : "成功") : (r.error_type || "失败")}
-                    </Badge>
-                  </TableCell>
-                </TableRow>
-              ))}
+              {rows.map((r) => {
+                const tokens = (r.input_tokens || 0) + (r.output_tokens || 0);
+                return (
+                  <TableRow key={r.id}>
+                    <TableCell className="text-xs text-muted-foreground">{new Date(r.created_at).toLocaleString()}</TableCell>
+                    <TableCell className="font-mono text-xs">{r.source || "-"}</TableCell>
+                    <TableCell>{r.provider_name || (r.provider_id ? `#${r.provider_id}` : "-")}</TableCell>
+                    <TableCell className="font-mono text-xs">{r.model || "-"}</TableCell>
+                    <TableCell>{tokens}</TableCell>
+                    <TableCell>{r.latency_ms != null ? `${r.latency_ms}ms` : "-"}</TableCell>
+                    <TableCell>
+                      <Badge variant={r.success ? "success" : "warn"}>{r.success ? "成功" : "失败"}</Badge>
+                    </TableCell>
+                    <TableCell>{r.used_fallback ? "已使用" : "-"}</TableCell>
+                    <TableCell className="font-mono text-xs">{r.error_type || "-"}</TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         )}
