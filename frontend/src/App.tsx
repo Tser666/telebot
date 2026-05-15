@@ -1,5 +1,5 @@
 import React, { Suspense, lazy } from "react";
-import { Navigate, Route, Routes, useParams } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 
 import { AppShell } from "@/components/layout/AppShell";
 import { RequireAuth } from "@/components/layout/RequireAuth";
@@ -23,41 +23,18 @@ const CodexImageConfigPage = lazy(() => import("@/pages/Features/CodexImageConfi
 const ForwardConfig = lazy(() => import("@/pages/Features/Forward").then(m => ({ default: m.ForwardConfig })));
 const SchedulerConfig = lazy(() => import("@/pages/Features/Scheduler").then(m => ({ default: m.SchedulerConfig })));
 const Game24ConfigPage = lazy(() => import("@/pages/Features/Game24Config").then(m => ({ default: m.Game24ConfigPage })));
-const FeatureTodoPage = lazy(() => import("@/pages/Features/TodoPage").then(m => ({ default: m.FeatureTodoPage })));
 const Logs = lazy(() => import("@/pages/Logs").then(m => ({ default: m.Logs })));
 const SettingsIndex = lazy(() => import("@/pages/Settings/Index").then(m => ({ default: m.SettingsIndex })));
 const PluginsHome = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsHome })));
 const PluginsTemplatesPage = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsTemplatesPage })));
 const PluginsAliasesPage = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsAliasesPage })));
 const PluginsSchedulerPage = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsSchedulerPage })));
-const PluginsLegacyExtensionsPage = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsLegacyExtensionsPage })));
 const AIIndex = lazy(() => import("@/pages/AI/Index").then(m => ({ default: m.AIIndex })));
 const AIProviders = lazy(() => import("@/pages/AI/Providers").then(m => ({ default: m.AIProviders })));
 const AIRouting = lazy(() => import("@/pages/AI/Routing").then(m => ({ default: m.AIRouting })));
 const AIUsage = lazy(() => import("@/pages/AI/Usage").then(m => ({ default: m.AIUsage })));
 
 type AppErrorBoundaryState = { hasError: boolean };
-
-// 已知有专属配置页的 feature key 列表
-const FEATURE_CONFIG_PAGES: Record<string, { title: string; description: string }> = {
-  auto_reply: { title: "自动回复", description: "不存在专属配置页路由" },
-  autorepeat: { title: "自动复读", description: "不存在专属配置页路由" },
-  codex_image: { title: "Codex 图片生成", description: "不存在专属配置页路由" },
-  forward: { title: "消息转发", description: "不存在专属配置页路由" },
-  scheduler: { title: "定时任务", description: "不存在专属配置页路由" },
-  game24: { title: "24 点游戏", description: "不存在专属配置页路由" },
-};
-
-// 通配路由组件：已知 feature 显示 TodoPage，未知 feature 也显示占位
-function FeatureCatchAll() {
-  const { featureKey } = useParams<{ featureKey: string }>();
-  const key = featureKey ?? "unknown";
-  const info = FEATURE_CONFIG_PAGES[key] ?? {
-    title: key,
-    description: `功能「${key}」的配置页面尚未实现。可通过 API 直连完成基础配置。`,
-  };
-  return <FeatureTodoPage title={info.title} description={info.description} />;
-}
 
 function PageFallback() {
   return (
@@ -178,14 +155,6 @@ export default function App() {
                 </Suspense>
               }
             />
-            <Route
-              path=":aid/features/:featureKey"
-              element={
-                <Suspense fallback={<PageFallback />}>
-                  <FeatureCatchAll />
-                </Suspense>
-              }
-            />
           </Route>
           <Route
             path="plugins"
@@ -220,21 +189,6 @@ export default function App() {
             }
           />
           <Route
-            path="plugins-legacy"
-            element={
-              <Suspense fallback={<PageFallback />}>
-                <PluginsLegacyExtensionsPage />
-              </Suspense>
-            }
-          />
-          <Route
-            path="scheduler"
-            element={<Navigate to="/plugins/scheduler" replace />}
-          />
-          <Route path="matrix" element={<Navigate to="/plugins" replace />} />
-          <Route path="extensions" element={<Navigate to="/plugins" replace />} />
-          <Route path="remote-plugins" element={<Navigate to="/plugins" replace />} />
-          <Route
             path="logs"
             element={
               <Suspense fallback={<PageFallback />}>
@@ -251,16 +205,6 @@ export default function App() {
             }
           />
           <Route
-            path="settings/commands"
-            element={<Navigate to="/plugins/templates" replace />}
-          />
-          <Route
-            path="templates"
-            element={<Navigate to="/plugins/templates" replace />}
-          />
-          <Route path="settings/aliases" element={<Navigate to="/plugins/aliases" replace />} />
-          <Route path="settings/plugins" element={<Navigate to="/plugins" replace />} />
-          <Route
             path="ai"
             element={
               <Suspense fallback={<PageFallback />}>
@@ -268,7 +212,6 @@ export default function App() {
               </Suspense>
             }
           />
-          <Route path="ai-settings" element={<Navigate to="/ai" replace />} />
           <Route
             path="ai/providers"
             element={
@@ -292,10 +235,6 @@ export default function App() {
                 <AIUsage />
               </Suspense>
             }
-          />
-          <Route
-            path="settings/llm-providers"
-            element={<Navigate to="/ai/providers" replace />}
           />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
