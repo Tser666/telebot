@@ -46,7 +46,7 @@ const CATEGORIES: CategoryDef[] = [
   { key: "system_settings", label: "系统设置", desc: "命令前缀等全局配置" },
   { key: "command_templates", label: "自定义命令模板", desc: "所有回复/转发/AI 命令模板" },
   { key: "account_commands", label: "账号-命令绑定", desc: "每个账号启用了哪些命令" },
-  { key: "llm_providers", label: "LLM Provider", desc: "AI 模型提供商配置", sensitive: ["api_key"] },
+  { key: "llm_providers", label: "模型提供商", desc: "AI 模型提供商配置", sensitive: ["api_key"] },
   { key: "forward_rules", label: "消息转发规则", desc: "自动转发配置" },
   { key: "auto_reply_rules", label: "自动回复规则", desc: "自动回复配置" },
   { key: "rate_limit_templates", label: "风控模板", desc: "限速规则模板" },

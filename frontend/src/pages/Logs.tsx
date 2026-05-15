@@ -78,20 +78,20 @@ export function Logs() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">日志中心</h1>
         <p className="text-sm text-muted-foreground">
-          Runtime 与 Audit 分开展示，避免混查；默认轻量查询窗口
+          运行日志与审计日志分开展示，避免混查；默认轻量查询窗口
         </p>
       </div>
 
       <Tabs value={mainTab} onValueChange={(v) => setMainTab(v as MainTab)}>
         <TabsList>
-          <TabsTrigger value="runtime">Runtime</TabsTrigger>
-          <TabsTrigger value="audit">Audit</TabsTrigger>
+          <TabsTrigger value="runtime">运行日志</TabsTrigger>
+          <TabsTrigger value="audit">审计日志</TabsTrigger>
         </TabsList>
 
         <TabsContent value="runtime" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Runtime 过滤</CardTitle>
+              <CardTitle className="text-base">运行日志过滤</CardTitle>
               <CardDescription>账号 / 级别 / 插件 / 关键词 / 自动刷新</CardDescription>
             </CardHeader>
             <CardContent>
@@ -198,8 +198,8 @@ export function Logs() {
         <TabsContent value="audit" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Audit 过滤</CardTitle>
-              <CardDescription>用户 / action / 关键词（与 Runtime 过滤独立）</CardDescription>
+              <CardTitle className="text-base">审计日志过滤</CardTitle>
+              <CardDescription>用户 / 操作类型 / 关键词（与运行日志过滤独立）</CardDescription>
             </CardHeader>
             <CardContent>
               <AuditFilters
@@ -425,7 +425,7 @@ function AuditLogTable({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Audit 日志</CardTitle>
+        <CardTitle className="text-base">审计日志</CardTitle>
         <CardDescription>列：ts / user_id / action / target / detail 摘要</CardDescription>
       </CardHeader>
       <CardContent>

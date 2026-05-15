@@ -289,7 +289,7 @@ export function LLMProviders() {
                 <strong>「Fetch 模型列表」</strong>就能自动拉取并可手动选择要启用的模型。<br />
                 <span className="text-muted-foreground/80">
                   modality（模态）+ tags（标签）+ cost_tier（成本档）这三项决定「自动路由」模式下
-                  该模型提供商所配置的模型 是否被选中——详见 AI 设置页顶部的推荐配置。
+                  该模型提供商所配置的模型是否被选中——详见 AI 中心顶部的推荐配置。
                 </span>
               </CardDescription>
             </div>

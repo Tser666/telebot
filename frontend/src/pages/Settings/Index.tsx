@@ -195,12 +195,12 @@ export function SettingsIndex() {
         <CardHeader>
           <CardTitle className="text-base">已搬家</CardTitle>
           <CardDescription>
-            LLM Providers、命令模板、别名管理已迁移到新位置，旧入口已隐藏。
+            模型提供商、命令模板、别名管理已迁移到新位置，旧入口已隐藏。
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2">
           <Button asChild variant="outline" size="sm">
-            <Link to="/ai/providers">前往 AI Providers</Link>
+            <Link to="/ai/providers">前往模型提供商</Link>
           </Button>
           <Button asChild variant="outline" size="sm">
             <Link to="/plugins/templates">前往命令模板</Link>

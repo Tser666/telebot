@@ -35,6 +35,7 @@
 - B5 清理 legacy feature key：移除已无引用的 `FEATURE_LEGACY_KEYS` 导出，并补充 registry 测试确保 `group_admin` / `monitor` 不会回到内置功能列表。
 - B2/F9 先落地 `codex_image` 下沉兼容检测：暂不做物理迁移；若旧账号启用但运行节点缺实现，worker 会记录 runtime_log、标记 failed，Plugins 页显示恢复提示。
 - 移除旧前端 URL 兼容重定向：`/scheduler`、`/templates`、`/settings/commands`、`/settings/aliases`、`/settings/llm-providers`、`/ai-settings`、`/matrix`、`/extensions`、`/remote-plugins` 不再作为入口保留，统一从 `/plugins/*`、`/ai/*`、`/settings` 进入。
+- 补齐新入口的中文文案与返回体验：AI / Plugins 子页增加“返回上一页”，从菜单点击进入时返回点击前页面，直接打开深链时回到对应中心页。
 - README 与插件开发指南同步 0.14 IA、共享 feature config helper、Audit 日志和 `codex_image` 兼容策略说明。
 
 ### Verification

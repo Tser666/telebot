@@ -35,9 +35,9 @@ export function AISettings() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">AI 设置</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">路由策略</h1>
         <p className="text-sm text-muted-foreground">
-          管理 LLM 供应商凭据 + 路由元数据。这些配置被「AI 类自定义命令」复用
+          管理模型提供商凭据和路由元数据。这些配置会被「AI 类自定义命令」复用
         </p>
       </div>
 
@@ -75,7 +75,7 @@ export function AISettings() {
 }
 
 // ───────────────────────────────────────────────────────────
-// 1) AI 命令工作原理（先看这个再去配 provider）
+// 1) AI 命令工作原理（先看这个再去配模型提供商）
 // ───────────────────────────────────────────────────────────
 function HowItWorksCard({ cmdPrefix }: { cmdPrefix: string }) {
   return (
@@ -106,7 +106,7 @@ function HowItWorksCard({ cmdPrefix }: { cmdPrefix: string }) {
           </li>
           <li>
             两步配置才能用：先在右侧 <strong>模型提供商列表</strong>  新建并配置好（填 API Key 等），
-            再去 <span className="font-medium">系统设置 → 自定义命令</span> 新建 例如 type=ai
+            再去 <span className="font-medium">插件 → 命令模板</span> 新建 例如 type=ai
             的模板（命名为 <code>ai</code>），最后在账号详情勾选启用
           </li>
         </ol>
@@ -127,7 +127,7 @@ function ModalityGlossaryCard() {
     <>
       <CardHeader>
         <CardDescription>
-          配 provider 时下面三类元数据决定「自动路由」如何挑模型。点击 provider 编辑里的字段
+          配模型提供商时下面三类元数据决定「自动路由」如何挑模型。点击模型提供商编辑里的字段
           会显示同样的解释。
         </CardDescription>
       </CardHeader>
@@ -202,8 +202,8 @@ function ModalityGlossaryCard() {
             <li>原文+问题合计 ≥ 1500 字符 → tag=long_context</li>
             <li>消息含「为什么/分析/推导/对比」等 → tag∈{"{reason,smart}"}（旗舰优先）</li>
             <li>都不命中 → tag=chat 中 cost_tier 最低（最便宜）</li>
-            <li>全失败 → 调 classifier provider 让小模型判类（可选）</li>
-            <li>仍无 → 用模板里配的「独立兜底 provider」</li>
+            <li>全失败 → 调分类器模型提供商让小模型判类（可选）</li>
+            <li>仍无 → 用模板里配的「独立兜底模型提供商」</li>
             <li>仍无 → 候选池里 cost_tier 最低的那条</li>
           </ol>
         </div>
@@ -332,10 +332,10 @@ function RecommendedSetupCard({ cmdPrefix }: { cmdPrefix: string }) {
             </li>
             <li>
               再建几条 fixed 模板做强制覆盖：<code>{cmdPrefix}opus</code> / <code>{cmdPrefix}gpt</code> /
-              <code>{cmdPrefix}glm</code> / <code>{cmdPrefix}mimo</code> 各绑死一个 provider，方便手动选
+              <code>{cmdPrefix}glm</code> / <code>{cmdPrefix}mimo</code> 各绑死一个模型提供商，方便手动选
             </li>
             <li>
-              视觉场景在被回复消息含图时会自动用 modality=vision/multimodal 的 provider，
+              视觉场景在被回复消息含图时会自动用 modality=vision/multimodal 的模型提供商，
               不用单独建 <code>{cmdPrefix}看图</code> 命令
             </li>
           </ul>

@@ -270,7 +270,7 @@ function HealthGrid({ data }: { data: HealthOverview }) {
             <div className="mt-1 text-xs text-muted-foreground">
               想用 <code>,ai</code> 命令？去{" "}
               <Link to="/ai" className="underline">
-                AI 设置
+                AI 中心
               </Link>{" "}
               添加至少一个。
             </div>

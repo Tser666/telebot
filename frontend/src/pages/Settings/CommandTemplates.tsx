@@ -349,7 +349,7 @@ function buildPayload(form: FormState): {
   // ai
   const pid = Number(form.ai_provider_id);
   if (!Number.isInteger(pid) || pid <= 0)
-    return { ok: false, errMsg: "AI 类型必须选 LLM Provider" };
+    return { ok: false, errMsg: "AI 类型必须选择模型提供商" };
   const mt = form.ai_max_tokens.trim();
   const cfg: Record<string, unknown> = {
     provider_id: pid,
@@ -364,13 +364,13 @@ function buildPayload(form: FormState): {
     if (form.ai_routing_fallback_provider_id.trim()) {
       const fb = Number(form.ai_routing_fallback_provider_id);
       if (!Number.isInteger(fb) || fb <= 0)
-        return { ok: false, errMsg: "兜底 provider 必须是有效 LLM Provider" };
+        return { ok: false, errMsg: "兜底模型提供商必须有效" };
       cfg.routing_fallback_provider_id = fb;
     }
     if (form.ai_classifier_provider_id.trim()) {
       const cls = Number(form.ai_classifier_provider_id);
       if (!Number.isInteger(cls) || cls <= 0)
-        return { ok: false, errMsg: "分类器 provider 必须是有效 LLM Provider" };
+        return { ok: false, errMsg: "分类器模型提供商必须有效" };
       cfg.classifier_provider_id = cls;
     }
   }
@@ -487,14 +487,14 @@ export function CommandTemplates() {
         <CardContent>
           {providerUnavailable ? (
             <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-              AI 命令模板不可用：先去 AI -&gt; Providers 添加 provider。
+              AI 命令模板不可用：先去 AI 中心添加模型提供商。
               <Button
                 type="button"
                 variant="link"
                 className="h-auto px-1 py-0 text-xs"
                 onClick={() => nav("/ai/providers")}
               >
-                前往 /ai/providers
+                前往模型提供商
               </Button>
             </div>
           ) : null}
@@ -524,7 +524,7 @@ export function CommandTemplates() {
                         providersQ.isSuccess &&
                         typeof t.config?.provider_id === "number" &&
                         !providerIds.has(t.config.provider_id) ? (
-                          <Badge variant="destructive">provider 缺失</Badge>
+                          <Badge variant="destructive">模型提供商缺失</Badge>
                         ) : null}
                       </div>
                     </TableCell>
@@ -593,7 +593,7 @@ export function CommandTemplates() {
                 return;
               }
               if (editing.type === "ai" && providerUnavailable) {
-                toast.error("先去 AI -> Providers 添加 provider");
+                toast.error("先去 AI 中心添加模型提供商");
                 return;
               }
               if (editing.id) {
@@ -748,14 +748,14 @@ function CommandEditDialog({
               </Select>
               {providerUnavailable ? (
                 <p className="text-xs text-amber-700">
-                  AI 类型暂不可选，先去 AI -&gt; Providers 添加 provider。
+                  AI 类型暂不可选，先去 AI 中心添加模型提供商。
                   <Button
                     type="button"
                     variant="link"
                     className="h-auto px-1 py-0 text-xs"
                     onClick={onGoProviders}
                   >
-                    前往 /ai/providers
+                    前往模型提供商
                   </Button>
                 </p>
               ) : null}
@@ -935,7 +935,7 @@ function CommandEditDialog({
                 />
                 <p className="text-xs text-muted-foreground">
                   下拉里每条 = 一个已启用的 (提供商 × 模型) 组合。要新增/启用模型去
-                  <span className="mx-1 font-medium">AI 设置 → 模型提供商</span>编辑。
+                  <span className="mx-1 font-medium">AI 中心 → 模型提供商</span>编辑。
                   {form.ai_routing_mode === "auto"
                     ? " auto 模式下，规则未命中且未设独立兜底时走这条"
                     : ""}
@@ -1061,7 +1061,7 @@ function CommandEditDialog({
                 {form.ai_routing_mode === "auto" && (
                   <div className="space-y-3">
                     <div className="space-y-1.5">
-                      <Label>独立兜底 provider（可选）</Label>
+                      <Label>独立兜底模型提供商（可选）</Label>
                       <ProviderSelect
                         value={form.ai_routing_fallback_provider_id}
                         providers={providersQ.data}
@@ -1072,11 +1072,11 @@ function CommandEditDialog({
                         allowEmpty
                       />
                       <p className="text-xs text-muted-foreground">
-                        留空 = 直接复用上面那条「默认 / 兜底 LLM Provider」；想分开就在这选另一条
+                        留空 = 直接复用上面那条「默认 / 兜底模型提供商」；想分开就在这选另一条
                       </p>
                     </div>
                     <div className="space-y-1.5">
-                      <Label>分类器 provider（可选）</Label>
+                      <Label>分类器模型提供商（可选）</Label>
                       <ProviderSelect
                         value={form.ai_classifier_provider_id}
                         providers={providersQ.data}
@@ -1149,7 +1149,7 @@ function ProviderSelect({
   if (!providers || providers.length === 0) {
     return (
       <div className="rounded-md border px-3 py-2 text-xs alert-warning">
-        尚未配置 Provider。先到「AI 设置 → 模型提供商」新建一个
+        尚未配置模型提供商。先到「AI 中心 → 模型提供商」新建一个
       </div>
     );
   }
@@ -1200,7 +1200,7 @@ function ProviderModelSelect({
   if (!providers || providers.length === 0) {
     return (
       <div className="rounded-md border px-3 py-2 text-xs alert-warning">
-        尚未配置模型提供商。先到「AI 设置」新建一个，并在编辑里 Fetch + 启用至少一个模型
+        尚未配置模型提供商。先到「AI 中心」新建一个，并在编辑里拉取并启用至少一个模型
       </div>
     );
   }
@@ -1255,7 +1255,7 @@ function ProviderModelSelect({
   if (rows.length === 0) {
     return (
       <div className="rounded-md border px-3 py-2 text-xs alert-warning">
-        所有提供商都没启用任何模型。在「AI 设置」编辑某个提供商，启用至少一条模型再来
+        所有提供商都没启用任何模型。在「AI 中心」编辑某个提供商，启用至少一条模型再来
       </div>
     );
   }

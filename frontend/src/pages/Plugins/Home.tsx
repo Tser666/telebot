@@ -100,7 +100,7 @@ export function PluginsHome() {
           <CardHeader className="pb-2">
             <CardTitle className="text-base">0.13 安全变更提醒</CardTitle>
             <CardDescription className="text-amber-900/90">
-              Telegram 内高危命令（如 <code>,reboot</code>、<code>,plugin install</code>）已移除，请改为在 Web 控制台或 account_bot 内执行。
+              Telegram 内高危命令（如 <code>,reboot</code>、<code>,plugin install</code>）已移除，请改为在 Web 控制台或账号 Bot 内执行。
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-wrap items-center gap-2">
@@ -109,10 +109,10 @@ export function PluginsHome() {
               variant="outline"
               onClick={() => nav(selectedAid ? `/accounts/${selectedAid}?tab=bot` : "/accounts")}
             >
-              前往 account_bot
+              前往账号 Bot
             </Button>
             <Button size="sm" variant="outline" onClick={() => nav("/plugins/templates")}>
-              前往 Web 控制台入口
+              前往命令模板
             </Button>
             <Button
               size="sm"
@@ -128,16 +128,16 @@ export function PluginsHome() {
       ) : null}
       <Card>
         <CardHeader>
-          <CardTitle>Plugins 中心</CardTitle>
+          <CardTitle>插件中心</CardTitle>
           <CardDescription>
             统一收敛平台能力、内置插件、远程插件与实验性能力。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" onClick={() => nav("/plugins/templates")}>Templates</Button>
-            <Button variant="outline" onClick={() => nav("/plugins/aliases")}>Aliases</Button>
-            <Button variant="outline" onClick={() => nav("/plugins/scheduler")}>Scheduler</Button>
+            <Button variant="outline" onClick={() => nav("/plugins/templates")}>命令模板</Button>
+            <Button variant="outline" onClick={() => nav("/plugins/aliases")}>命令别名</Button>
+            <Button variant="outline" onClick={() => nav("/plugins/scheduler")}>定时任务</Button>
           </div>
 
           {accounts.length > 0 ? (
