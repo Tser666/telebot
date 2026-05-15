@@ -11,7 +11,6 @@ _LONG_MESSAGE_THRESHOLD = 3900
 
 async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> None:
     from .command import (
-        _dto_to_fake_row,
         _humanize_llm_error,
         _replied_media_placeholder,
         _safe_log_text,
@@ -321,10 +320,15 @@ async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> N
         pass
 
     # build_client 在内部解密 api_key；导入时点放函数内，避免循环依赖。
-    # complete 调用走 llm_runtime，以获得 retry + fallback；STT 仍直接使用选中的 provider。
-    from ..services.llm_client import LLMCallFailed, LLMError, LLMResult, build_client
+    # 标准 LLM 调用统一走 services.ai_runtime.invoke()，STT 仍直接使用选中的 provider。
+    from ..services.ai_runtime import invoke as invoke_ai_runtime
+    from ..services.llm_client import (
+        LLMCallFailed,
+        LLMError,
+        LLMResult,
+        build_client_from_dto,
+    )
     from ..services.llm_dto import LLMProviderDTO
-    from ..services.llm_runtime import build_fallback_chain, call_with_fallback
 
     # 使用 LLMProviderDTO 替代手搓 fake ORM row
     provider_dtos: dict[int, LLMProviderDTO] = {}
@@ -349,8 +353,8 @@ async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> N
     if has_any_audio and not has_any_image:
         stt_model = str(cfg.get("transcribe_model") or "whisper-1").strip()
         try:
-            llm = build_client(
-                _dto_to_fake_row(provider_dto),
+            llm = build_client_from_dto(
+                provider_dto,
                 override_model=override_model,
                 proxy_url=provider_dto.proxy_url,
             )
@@ -409,36 +413,19 @@ async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> N
     except (TypeError, ValueError):
         fallback_provider_id = None
 
-    chain = build_fallback_chain(
-        provider_dto,
-        providers=provider_dtos,
-        fallback_provider_id=fallback_provider_id,
-        matched_tag=routing_matched_tag,
-    )
-
-    def _build_runtime_client(
-        dto: LLMProviderDTO,
-        *,
-        override_model: str | None = None,
-        proxy_url: str | None = None,
-    ):
-        return build_client(
-            _dto_to_fake_row(dto),
-            override_model=override_model,
-            proxy_url=proxy_url or dto.proxy_url,
-        )
-
     try:
-        result, used_provider_dto, used_fallback = await call_with_fallback(
-            chain,
+        result, used_provider_dto, used_fallback = await invoke_ai_runtime(
+            provider_dto,
+            provider_dtos,
             system,
             user_msg,
             override_model=override_model,
             max_tokens=max_tokens,
             images=image_bytes_list or None,
-            client_factory=_build_runtime_client,
             account_id=account_id,
             source=f"command:{tpl.get('name') or 'ai'}",
+            fallback_provider_id=fallback_provider_id,
+            matched_tag=routing_matched_tag,
         )
         if used_provider_dto.id != provider_dto.id:
             provider_dict = ctx.providers.get(used_provider_dto.id) or used_provider_dto.to_dict()

@@ -26,9 +26,9 @@ from app.db.base import AsyncSessionLocal
 from app.db.models.command import LLMProvider
 from app.db.models.feature import FEATURE_SCHEDULER
 from app.db.models.rule import Rule
-from app.services.llm_client import LLMCallFailed, LLMError, build_client
+from app.services.ai_runtime import invoke as invoke_ai_runtime
+from app.services.llm_client import LLMCallFailed, LLMError
 from app.services.llm_dto import LLMProviderDTO
-from app.services.llm_runtime import build_fallback_chain, call_with_fallback
 from app.worker.plugins.base import PluginContext
 
 log = logging.getLogger(__name__)
@@ -147,19 +147,6 @@ def _to_positive_int(raw: Any) -> int:
     except (TypeError, ValueError):
         return 0
     return v if v > 0 else 0
-
-
-def _dto_to_fake_row(dto: LLMProviderDTO) -> LLMProvider:
-    """将 LLMProviderDTO 转为 ORM 行（向后兼容 build_client）。"""
-    return LLMProvider(
-        id=dto.id,
-        name=dto.name,
-        provider=dto.provider,
-        api_key_enc=dto.api_key_enc,
-        base_url=dto.base_url,
-        default_model=dto.default_model,
-        api_format=dto.api_format,
-    )
 
 
 class SchedulerRuleExecutor:
@@ -347,36 +334,20 @@ class SchedulerRuleExecutor:
         provider_rows = await self.get_provider_rows()
         provider_dtos = {int(p.id): LLMProviderDTO.from_orm_row(p) for p in provider_rows}
         provider_dtos[dto.id] = dto
-        fallback_id = _to_positive_int(action.get("fallback_provider_id"))
-        chain = build_fallback_chain(
-            dto,
-            providers=provider_dtos,
-            fallback_provider_id=fallback_id or None,
-            matched_tag="scheduler",
-        )
-
-        def _build_runtime_client(
-            provider_dto: LLMProviderDTO,
-            *,
-            override_model: str | None = None,
-            proxy_url: str | None = None,
-        ):
-            return build_client(
-                _dto_to_fake_row(provider_dto),
-                override_model=override_model,
-                proxy_url=proxy_url or provider_dto.proxy_url,
-            )
+        fallback_id = _to_positive_int(action.get("fallback_provider_id")) or None
 
         try:
-            result, _, _ = await call_with_fallback(
-                chain,
+            result, _, _ = await invoke_ai_runtime(
+                dto,
+                provider_dtos,
                 system_prompt,
                 prompt,
                 override_model=action.get("model"),
                 max_tokens=max_tokens,
-                client_factory=_build_runtime_client,
+                fallback_provider_id=fallback_id,
                 account_id=ctx.account_id,
                 source="scheduler",
+                matched_tag="scheduler",
             )
         except (LLMError, LLMCallFailed):
             raise

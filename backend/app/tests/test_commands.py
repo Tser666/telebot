@@ -23,8 +23,8 @@ from app.schemas.command import (
     CommandTemplateCreate,
     LLMProviderCreate,
 )
-from app.services.command_service import _provider_to_out
 from app.services import command_service
+from app.services.command_service import _provider_to_out
 from app.services.llm_client import (
     LLMError,
     OpenAIClient,
@@ -126,7 +126,7 @@ def test_builtin_reserved_words_keep_active_builtin_commands() -> None:
 async def test_validate_template_keywords_unique_still_rejects_active_builtin() -> None:
     """模板命令名仍不能与当前内置命令冲突。"""
     class _Rows:
-        def scalars(self) -> "_Rows":
+        def scalars(self) -> _Rows:
             return self
 
         def all(self) -> list[object]:
@@ -1302,20 +1302,18 @@ async def test_run_ai_rejects_image_on_non_vision_provider() -> None:
 @pytest.mark.asyncio
 async def test_run_ai_downloads_image_for_vision_provider(monkeypatch) -> None:
     """provider modality=vision 时应下载图片字节并以 ``images=[bytes]`` 传给 LLM。"""
-    from app.services import llm_client as _lc
+    from app.services import ai_runtime as service_ai_runtime
+    from app.services.llm_client import LLMResult
+    from app.services.llm_dto import LLMProviderDTO
 
-    captured: dict[str, object] = {}
-
-    class _FakeLLM:
-        async def complete(self, system, user, max_tokens=512, images=None):
-            captured["system"] = system
-            captured["user"] = user
-            captured["images"] = images
-            from app.services.llm_client import LLMResult
-
-            return LLMResult(text="一张猫的图", model="mimo-v2.5", input_tokens=1, output_tokens=1)
-
-    monkeypatch.setattr(_lc, "build_client", lambda *a, **k: _FakeLLM())
+    invoke_mock = AsyncMock(
+        return_value=(
+            LLMResult(text="一张猫的图", model="mimo-v2.5", input_tokens=1, output_tokens=1),
+            LLMProviderDTO(id=9, name="mimo-cn", provider="openai", default_model="mimo-v2.5"),
+            False,
+        )
+    )
+    monkeypatch.setattr(service_ai_runtime, "invoke", invoke_mock)
 
     wcmd.set_command_context(
         wcmd.CommandContext(
@@ -1354,11 +1352,11 @@ async def test_run_ai_downloads_image_for_vision_provider(monkeypatch) -> None:
     await wcmd._run_ai(client, event, ["这图里是什么"], tpl, account_id=1)
 
     # 校验图片字节确实被传给 LLM
-    assert captured["images"] == [fake_jpeg], "图片字节应原样传给 LLM"
+    assert invoke_mock.await_args.kwargs["images"] == [fake_jpeg], "图片字节应原样传给 LLM"
     # 反幻觉规则注入
-    assert "严格规则" in captured["system"]
+    assert "严格规则" in invoke_mock.await_args.args[2]
     # 占位符 "📷 [图片]" 不应继续出现在 user prompt（图片字节已单独发，避免双重提示）
-    assert "[图片]" not in captured["user"]
+    assert "[图片]" not in invoke_mock.await_args.args[3]
 
 
 @pytest.mark.asyncio
@@ -1367,19 +1365,18 @@ async def test_run_ai_downloads_self_photo_caption_mode(monkeypatch) -> None:
 
     回归这一条是因为之前只看 ``replied.photo``，自己发图时反而被
     反幻觉守卫误伤——明明带了图却被告知"未收到图像数据"。"""
-    from app.services import llm_client as _lc
+    from app.services import ai_runtime as service_ai_runtime
+    from app.services.llm_client import LLMResult
+    from app.services.llm_dto import LLMProviderDTO
 
-    captured: dict[str, object] = {}
-
-    class _FakeLLM:
-        async def complete(self, system, user, max_tokens=512, images=None):
-            captured["images"] = images
-            captured["user"] = user
-            from app.services.llm_client import LLMResult
-
-            return LLMResult(text="ok", model="m", input_tokens=1, output_tokens=1)
-
-    monkeypatch.setattr(_lc, "build_client", lambda *a, **k: _FakeLLM())
+    invoke_mock = AsyncMock(
+        return_value=(
+            LLMResult(text="ok", model="m", input_tokens=1, output_tokens=1),
+            LLMProviderDTO(id=9, name="v", provider="openai", default_model="m"),
+            False,
+        )
+    )
+    monkeypatch.setattr(service_ai_runtime, "invoke", invoke_mock)
 
     wcmd.set_command_context(
         wcmd.CommandContext(
@@ -1405,15 +1402,17 @@ async def test_run_ai_downloads_self_photo_caption_mode(monkeypatch) -> None:
     client = AsyncMock()
     await wcmd._run_ai(client, event, ["这是什么"], tpl, account_id=1)
 
-    assert captured["images"] == [fake_png]
+    assert invoke_mock.await_args.kwargs["images"] == [fake_png]
     self_msg.download_media.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_run_ai_self_photo_routes_to_vision_in_auto_mode(monkeypatch) -> None:
     """auto 模式下命令消息自带图也要触发视觉路由（pick_provider 看到 has_photo=True）。"""
-    from app.services import llm_client as _lc
+    from app.services import ai_runtime as service_ai_runtime
     from app.services import llm_router as _lr
+    from app.services.llm_client import LLMResult
+    from app.services.llm_dto import LLMProviderDTO
 
     captured_router: dict[str, object] = {}
 
@@ -1428,13 +1427,14 @@ async def test_run_ai_self_photo_routes_to_vision_in_auto_mode(monkeypatch) -> N
 
     monkeypatch.setattr(_lr, "pick_provider", _fake_pick)
 
-    class _FakeLLM:
-        async def complete(self, system, user, max_tokens=512, images=None):
-            from app.services.llm_client import LLMResult
-
-            return LLMResult(text="ok", model="m", input_tokens=1, output_tokens=1)
-
-    monkeypatch.setattr(_lc, "build_client", lambda *a, **k: _FakeLLM())
+    invoke_mock = AsyncMock(
+        return_value=(
+            LLMResult(text="ok", model="m", input_tokens=1, output_tokens=1),
+            LLMProviderDTO(id=9, name="v", provider="openai", default_model="m"),
+            False,
+        )
+    )
+    monkeypatch.setattr(service_ai_runtime, "invoke", invoke_mock)
 
     wcmd.set_command_context(
         wcmd.CommandContext(

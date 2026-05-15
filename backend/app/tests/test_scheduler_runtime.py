@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
-from app.worker.scheduler_runtime import PlatformScheduler
+from app.services.llm_client import LLMResult
+from app.services.llm_dto import LLMProviderDTO
+from app.worker.scheduler_runtime import PlatformScheduler, SchedulerRuleExecutor
 
 
 async def _noop_log(*args, **kwargs) -> None:  # noqa: ANN002, ANN003
@@ -110,3 +113,68 @@ async def test_runtime_job_failure_is_logged_and_kept(monkeypatch) -> None:
     assert logs
     assert logs[0][1]["source"] == "plugin"
     assert logs[0][1]["plugin_key"] == "demo"
+
+
+@pytest.mark.asyncio
+async def test_action_call_llm_uses_shared_service_invoke(monkeypatch) -> None:
+    executor = SchedulerRuleExecutor()
+    row = SimpleNamespace(
+        id=7,
+        name="primary",
+        provider="openai",
+        api_key_enc=None,
+        base_url=None,
+        default_model="gpt-4o",
+        api_format=None,
+        proxy_url=None,
+        modality="text",
+        tags=[],
+        cost_tier=2,
+    )
+    fallback = SimpleNamespace(
+        id=8,
+        name="fallback",
+        provider="openai",
+        api_key_enc=None,
+        base_url=None,
+        default_model="gpt-4o-mini",
+        api_format=None,
+        proxy_url=None,
+        modality="text",
+        tags=[],
+        cost_tier=2,
+    )
+    monkeypatch.setattr(executor, "get_provider_row", AsyncMock(return_value=row))
+    monkeypatch.setattr(executor, "get_provider_rows", AsyncMock(return_value=[row, fallback]))
+    send_mock = AsyncMock(return_value=object())
+    monkeypatch.setattr(executor, "send_with_ratelimit", send_mock)
+
+    result = LLMResult(text="done", model="gpt-4o", input_tokens=2, output_tokens=3)
+    invoke_mock = AsyncMock(
+        return_value=(
+            result,
+            LLMProviderDTO(id=7, name="primary", provider="openai", default_model="gpt-4o"),
+            False,
+        )
+    )
+    monkeypatch.setattr("app.worker.scheduler_runtime.invoke_ai_runtime", invoke_mock)
+
+    ctx = SimpleNamespace(account_id=42, log=AsyncMock())
+    action = {
+        "provider_id": 7,
+        "prompt": "hello",
+        "target_chat_id": 123,
+        "fallback_provider_id": 8,
+        "system_prompt": "sys",
+        "max_tokens": 32,
+    }
+
+    await executor.action_call_llm(ctx, action)
+
+    invoke_mock.assert_awaited_once()
+    provider_dto, provider_map, system, user = invoke_mock.await_args.args[:4]
+    assert provider_dto.id == 7
+    assert provider_map[8].name == "fallback"
+    assert system == "sys"
+    assert user == "hello"
+    send_mock.assert_awaited_once_with(ctx, 123, "done")
