@@ -383,13 +383,18 @@ export function AccountDetail() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">快捷入口</CardTitle>
-              <CardDescription>从这里直接跳到插件、命令模板和配置复制。</CardDescription>
+              <CardTitle className="text-base">新账号下一步</CardTitle>
+              <CardDescription>
+                这个区域主要给新账号配置时用：复用模板、开启插件、把成熟账号的配置复制过来。
+              </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3 md:grid-cols-3">
               <div className="rounded-lg border p-4">
-                <div className="text-xs text-muted-foreground">启用插件数</div>
+                <div className="text-xs text-muted-foreground">已启用插件</div>
                 <div className="mt-1 text-2xl font-semibold">{enabledPluginCount}</div>
+                <div className="mt-1 text-sm text-muted-foreground">
+                  新账号通常先开自动回复、转发或定时任务。
+                </div>
                 <Button asChild size="sm" variant="outline" className="mt-3 w-full justify-between">
                   <Link to={`/plugins?account=${aid}`}>
                     管理插件
@@ -398,9 +403,9 @@ export function AccountDetail() {
                 </Button>
               </div>
               <div className="rounded-lg border p-4">
-                <div className="text-xs text-muted-foreground">命令模板入口</div>
+                <div className="text-xs text-muted-foreground">复用命令模板</div>
                 <div className="mt-1 text-sm text-muted-foreground">
-                  去模板中心按账号筛选、启停和维护命令。
+                  把账号 A 已经调好的回复、转发、AI 命令分配给这个账号。
                 </div>
                 <Button asChild size="sm" variant="outline" className="mt-3 w-full justify-between">
                   <Link to={`/plugins/templates?account=${aid}`}>
@@ -410,9 +415,9 @@ export function AccountDetail() {
                 </Button>
               </div>
               <div className="rounded-lg border p-4">
-                <div className="text-xs text-muted-foreground">配置迁移</div>
+                <div className="text-xs text-muted-foreground">复制成熟配置</div>
                 <div className="mt-1 text-sm text-muted-foreground">
-                  复制插件/模板配置到其他账号。
+                  适合新账号：从一个已跑顺的账号复制规则和插件配置。
                 </div>
                 <Button asChild size="sm" variant="outline" className="mt-3 w-full justify-between">
                   <Link to={`/settings?tab=backup&source=${aid}`}>
@@ -485,7 +490,7 @@ export function AccountDetail() {
                                     size="sm"
                                     variant="outline"
                                     className="h-9 px-3"
-                                    onClick={() => nav(`/scheduler?aid=${aid}`)}
+                                    onClick={() => nav(`/plugins/scheduler?aid=${aid}`)}
                                   >
                                     配置 →
                                   </Button>

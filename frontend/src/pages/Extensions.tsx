@@ -292,7 +292,7 @@ function AccountPluginsTab() {
                             size="sm"
                             variant="outline"
                             className="h-9 px-3"
-                            onClick={() => nav(`/scheduler?aid=${selectedAccount.id}`)}
+                            onClick={() => nav(`/plugins/scheduler?aid=${selectedAccount.id}`)}
                           >
                             配置 →
                           </Button>

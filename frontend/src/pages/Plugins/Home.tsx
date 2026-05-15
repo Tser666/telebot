@@ -130,14 +130,35 @@ export function PluginsHome() {
         <CardHeader>
           <CardTitle>插件中心</CardTitle>
           <CardDescription>
-            统一收敛平台能力、内置插件、远程插件与实验性能力。
+            一个账号一套开关；同一套命令、消息和 AI 模板可以给多个账号复用，不用每个账号重新配一遍。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" onClick={() => nav("/plugins/templates")}>命令模板</Button>
-            <Button variant="outline" onClick={() => nav("/plugins/aliases")}>命令别名</Button>
-            <Button variant="outline" onClick={() => nav("/plugins/scheduler")}>定时任务</Button>
+          <div className="grid gap-2 md:grid-cols-3">
+            <Button variant="outline" className="h-auto justify-start py-3 text-left" onClick={() => nav("/plugins/templates")}>
+              <span>
+                <span className="block font-medium">命令模板</span>
+                <span className="block text-xs text-muted-foreground">
+                  先把账号 A 调好的回复、转发、AI 命令做成模板，再分配给其他账号复用。
+                </span>
+              </span>
+            </Button>
+            <Button variant="outline" className="h-auto justify-start py-3 text-left" onClick={() => nav("/plugins/aliases")}>
+              <span>
+                <span className="block font-medium">命令别名</span>
+                <span className="block text-xs text-muted-foreground">
+                  给常用命令起短名字，减少不同账号之间重复记命令。
+                </span>
+              </span>
+            </Button>
+            <Button variant="outline" className="h-auto justify-start py-3 text-left" onClick={() => nav("/plugins/scheduler")}>
+              <span>
+                <span className="block font-medium">定时任务</span>
+                <span className="block text-xs text-muted-foreground">
+                  按账号定时发消息、跑命令或调用 AI，适合固定周期的自动动作。
+                </span>
+              </span>
+            </Button>
           </div>
 
           {accounts.length > 0 ? (
@@ -174,7 +195,7 @@ export function PluginsHome() {
       <div className="grid gap-4 lg:grid-cols-2">
         <FeatureZone
           title="平台能力"
-          hint="随 worker 启动的基础能力。"
+          hint="系统底层能力，通常不用手动配置。"
           icon={<Settings2 className="h-4 w-4" />}
           features={grouped.platform}
           selectedAccountId={selectedAccount?.id}
@@ -182,7 +203,7 @@ export function PluginsHome() {
         />
         <FeatureZone
           title="内置插件"
-          hint="内置在系统中的常规插件。"
+          hint="常用自动化能力，按账号开启后再配置规则。"
           icon={<Package2 className="h-4 w-4" />}
           features={grouped.builtin}
           selectedAccountId={selectedAccount?.id}
@@ -190,7 +211,7 @@ export function PluginsHome() {
         />
         <FeatureZone
           title="远程插件"
-          hint="通过仓库或远程渠道提供。"
+          hint="从外部仓库安装的扩展能力。"
           icon={<SatelliteDish className="h-4 w-4" />}
           features={grouped.remote}
           selectedAccountId={selectedAccount?.id}
@@ -198,7 +219,7 @@ export function PluginsHome() {
         />
         <FeatureZone
           title="实验性"
-          hint="可能依赖非稳定能力；codex_image 固定归类在此。"
+          hint="还在试验中的能力，适合先小范围账号测试。"
           icon={<FlaskConical className="h-4 w-4" />}
           features={grouped.experimental}
           selectedAccountId={selectedAccount?.id}

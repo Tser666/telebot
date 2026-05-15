@@ -252,7 +252,7 @@ export function SchedulerConfig() {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">调度中心</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">定时任务</h1>
           <p className="text-sm text-muted-foreground">
             选择账号后管理该账号的定时任务规则。
           </p>
@@ -295,9 +295,9 @@ export function SchedulerConfig() {
   return (
     <div className="space-y-6">
       <RulePageHeader
-        title={`调度中心 · 账号 #${aid}`}
-        backLabel={fromAccountRoute ? "返回账号" : "返回调度中心"}
-        backHref={fromAccountRoute ? `/accounts/${aid}?tab=features` : "/scheduler"}
+        title={`定时任务 · 账号 #${aid}`}
+        backLabel={fromAccountRoute ? "返回账号" : "返回定时任务"}
+        backHref={fromAccountRoute ? `/accounts/${aid}?tab=features` : "/plugins/scheduler"}
       />
 
       <Card>
