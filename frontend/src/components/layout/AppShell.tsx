@@ -2,14 +2,15 @@
 // 高度用 100dvh：iOS Safari 浏览器模式下避免 100vh 把内容塞到地址栏后面；
 //                PWA 全屏模式下行为与 100vh 一致。
 import { useState } from "react";
-import { Outlet, useLocation } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
-import { MobileSidebar, Sidebar } from "./Sidebar";
+import { MOBILE_PRIMARY_NAV, MobileSidebar, Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { GlobalAlertBar } from "./GlobalAlertBar";
 import { fetchMe } from "@/lib/auth";
 import { Spinner } from "@/components/ui/misc";
+import { cn } from "@/lib/utils";
 
 export function AppShell() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -44,7 +45,8 @@ export function AppShell() {
           className="
             flex-1 overflow-auto
             p-4 md:p-6
-            pb-[max(1rem,env(safe-area-inset-bottom))]
+            pb-[calc(4.25rem+env(safe-area-inset-bottom))]
+            sm:pb-[max(1rem,env(safe-area-inset-bottom))]
             pl-[max(1rem,env(safe-area-inset-left))]
             pr-[max(1rem,env(safe-area-inset-right))]
             md:pl-6 md:pr-6
@@ -54,6 +56,34 @@ export function AppShell() {
             <Outlet />
           </div>
         </main>
+        <nav
+          className="
+            fixed inset-x-0 bottom-0 z-40 border-t bg-card/95 backdrop-blur sm:hidden
+            pb-[max(0.5rem,env(safe-area-inset-bottom))]
+            pl-[max(0.5rem,env(safe-area-inset-left))]
+            pr-[max(0.5rem,env(safe-area-inset-right))]
+          "
+        >
+          <div className="grid h-14 grid-cols-4 gap-1 px-1">
+            {MOBILE_PRIMARY_NAV.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                className={({ isActive }) =>
+                  cn(
+                    "flex flex-col items-center justify-center gap-1 rounded-md text-[11px] text-muted-foreground",
+                    "hover:bg-accent hover:text-accent-foreground",
+                    isActive && "bg-accent text-accent-foreground",
+                  )
+                }
+              >
+                <item.icon className="h-4 w-4" />
+                <span>{item.label}</span>
+              </NavLink>
+            ))}
+          </div>
+        </nav>
       </div>
     </div>
   );

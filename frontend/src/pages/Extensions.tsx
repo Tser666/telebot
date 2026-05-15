@@ -90,18 +90,13 @@ import {
 } from "@/api/pluginRepo";
 import type { RemotePlugin } from "@/types/remotePlugin";
 import type { ConfigSchema } from "@/components/plugin/ConfigDialog";
+import { featureConfigPath } from "@/pages/Plugins/_shared/featureConfig";
 
 // ── 常量 ──────────────────────────────────────────────────────────
 type TabValue = "accounts" | "plugins" | "guide";
 const PLUGINS_QK = ["installed-packages"] as const;
 const REMOTE_QK = ["remote-plugins"] as const;
 const PLUGIN_REPOS_QK = ["plugin-repos"] as const;
-const FEATURE_CONFIG_PAGE_KEYS = new Set(["auto_reply", "autorepeat", "codex_image", "forward", "scheduler", "game24"]);
-
-function featureConfigPath(aid: number | null | undefined, key: string): string | null {
-  if (!aid || !FEATURE_CONFIG_PAGE_KEYS.has(key)) return null;
-  return `/accounts/${aid}/features/${key}`;
-}
 
 function formatPluginVersion(version?: string | null) {
   const v = (version || "").trim();

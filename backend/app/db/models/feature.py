@@ -19,10 +19,6 @@ FEATURE_GAME24 = "game24"
 FEATURE_AUTOREPEAT = "autorepeat"
 FEATURE_CODEX_IMAGE = "codex_image"
 
-# 历史功能 key —— 已在 v0.4.0 砍掉对应 builtin 目录与前端页面，
-# 但保留常量用于迁移期间识别 / 清理 DB 旧行（迁移 0014 会清空对应 account_feature 行）
-FEATURE_LEGACY_KEYS: tuple[str, ...] = ("group_admin", "monitor")
-
 # AccountFeature.state
 FEATURE_STATE_ACTIVE = "active"
 FEATURE_STATE_FAILED = "failed"

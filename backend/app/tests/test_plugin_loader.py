@@ -27,6 +27,7 @@ from app.worker.plugins.loader import (
     _BUILTIN_MODULES,
     _clear_installed_module_cache,
     _import_builtins,
+    _missing_plugin_error,
     _parse_prefixed_command,
     load_plugins_for_account,
     reload_account_config,
@@ -234,6 +235,12 @@ def test_clear_installed_module_cache_removes_pycache(monkeypatch, tmp_path) -> 
 def test_parse_prefixed_command_accepts_unicode_prefix() -> None:
     assert _parse_prefixed_command("。cy 100", "。") == ("cy", ["100"])
     assert _parse_prefixed_command(",cy 100", "。") is None
+
+
+def test_missing_plugin_error_uses_codex_image_migration_hint() -> None:
+    err, message = _missing_plugin_error("codex_image")
+    assert "codex_image" in err
+    assert "下沉" in message or "installed" in message
 
 
 @pytest.mark.asyncio

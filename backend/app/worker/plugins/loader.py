@@ -146,6 +146,20 @@ def _builtin_plugin_path(plugin_key: str) -> Path | None:
     return path if path.is_dir() else None
 
 
+def _missing_plugin_error(feature_key: str) -> tuple[str, str]:
+    """为缺失插件提供统一错误码与可读日志，便于前端/运维识别。"""
+    if feature_key == "codex_image":
+        return (
+            "plugin codex_image not found (possible migration to installed plugin)",
+            (
+                "feature codex_image 已启用但本地未找到插件实现。"
+                "这通常是 codex_image 下沉到 installed 后代码未就位；"
+                "已跳过加载并保持 worker 运行。"
+            ),
+        )
+    return ("plugin not found", f"feature {feature_key} 已启用但未找到插件实现")
+
+
 def _import_builtins() -> None:
     """import 内置插件包，触发各模块的 ``@register`` 装饰器写入注册表。
 
@@ -727,11 +741,12 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
             _load_installed_plugin(af.feature_key)
             cls = get_plugin(af.feature_key)
     if cls is None:
+        last_error, log_message = _missing_plugin_error(af.feature_key)
         await _log(
             redis,
             state.account_id,
             "warn",
-            f"feature {af.feature_key} 已启用但未找到插件实现",
+            log_message,
         )
         await db.execute(
             update(AccountFeature)
@@ -739,7 +754,7 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
                 AccountFeature.account_id == state.account_id,
                 AccountFeature.feature_key == af.feature_key,
             )
-            .values(state=FEATURE_STATE_FAILED, last_error="plugin not found")
+            .values(state=FEATURE_STATE_FAILED, last_error=last_error)
         )
         await db.commit()
         return

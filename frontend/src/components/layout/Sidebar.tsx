@@ -34,6 +34,10 @@ const NAV: NavItem[] = [
   { to: "/settings", label: "系统", icon: Cog },
 ];
 
+export const MOBILE_PRIMARY_NAV: NavItem[] = NAV.filter(
+  (item) => item.to === "/" || item.to === "/accounts" || item.to === "/plugins" || item.to === "/logs",
+);
+
 function NavList({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <nav className="flex-1 space-y-1 overflow-y-auto p-3 text-sm">

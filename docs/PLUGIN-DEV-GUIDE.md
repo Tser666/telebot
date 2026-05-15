@@ -465,7 +465,7 @@ except ConversationTimeout:
 
 ## 9. 插件日志
 
-插件日志会进入后台的“日志中心 → 插件日志”分页，和“消息日志”“系统日志”分开显示。
+插件日志会进入后台的“日志中心 → Runtime → 插件日志”分页，和“消息日志”“系统日志”分开显示；涉及 sudo、Config Bundle confirm、account_bot confirm 等安全决策的记录则在“日志中心 → Audit”查看。
 
 ### 如何写日志
 
@@ -725,7 +725,7 @@ config_schema={
 | 2 | `frontend/src/pages/Features/XxxConfig.tsx` | **新建**：规则列表页（参考 `AutoReply.tsx` 或 `Forward.tsx`） |
 | 3 | `backend/app/worker/plugins/builtin/xxx/manifest.py` | `config_schema["x-ui-mode"] = "rules"` |
 | 4 | `frontend/src/App.tsx` | ① import 新页面组件 ② 添加路由 `:aid/features/xxx` ③ 在 `FEATURE_CONFIG_PAGES` 中添加 key |
-| 5 | `frontend/src/pages/Accounts/Detail.tsx` / `frontend/src/pages/Extensions.tsx` | 在 `FEATURE_CONFIG_PAGE_KEYS` Set 中添加 key |
+| 5 | `frontend/src/pages/Plugins/_shared/featureConfig.ts` | 在共享的 `FEATURE_CONFIG_PAGE_KEYS` Set 中添加 key |
 | 6 | `backend/app/db/models/feature.py` | 添加 `FEATURE_XXX = "xxx"` 常量（如已有可跳过） |
 
 #### 1. types.ts — RuleConfig 接口
@@ -808,26 +808,19 @@ const FEATURE_CONFIG_PAGES: Record<string, { title: string; description: string 
 
 路由路径格式固定为 `:aid/features/{plugin_key}`，`plugin_key` 必须与 `MANIFEST.key` 一致。
 
-#### 5. FEATURE_CONFIG_PAGE_KEYS — 两个入口点
+#### 5. FEATURE_CONFIG_PAGE_KEYS — 共享入口点
 
-两个文件中的 `FEATURE_CONFIG_PAGE_KEYS` 必须同步添加：
+0.14.0 起，账号详情与 Plugins 中心统一复用同一个 helper，不再维护两份 Set。新增专属配置页时只改这一处：
 
 ```tsx
-// Detail.tsx（账号详情页 → 插件列表"配置"按钮）
-const FEATURE_CONFIG_PAGE_KEYS = new Set([
-  "auto_reply", "autorepeat", "forward", "game24", "codex_image",
-  "xxx",  // ← 新增
-]);
-
-// Extensions.tsx（插件中心 → 账号插件"配置"按钮）
+// frontend/src/pages/Plugins/_shared/featureConfig.ts
 const FEATURE_CONFIG_PAGE_KEYS = new Set([
   "auto_reply", "autorepeat", "forward", "game24", "codex_image",
   "xxx",  // ← 新增
 ]);
 ```
 
-**作用**：Set 中的 key 会让"配置"按钮跳转到专属页面路由 `/:aid/features/xxx`；
-不在 Set 中的 key 会弹 `ConfigDialog`（模式 C）。
+**作用**：Set 中的 key 会让账号详情和 Plugins 中心的"配置"按钮跳转到专属页面路由 `/accounts/:aid/features/xxx`；不在 Set 中的 key 会弹 `ConfigDialog`（模式 C）。
 
 #### 6. feature.py — 后端常量
 
@@ -958,7 +951,7 @@ config_schema={
 
 专属页面字段应与运行时实际读取的配置保持一致；`manifest.config_schema` 也要同步，避免 ConfigDialog、接口校验和文档出现三套口径。
 
-`codex_image` 目前仍是 builtin，但会通过 `experimental` / `x-experimental` 标记在 UI 和文档中提示风险；后续若下沉为可选插件，仍需保留同一组配置键以兼容现有账号数据。
+`codex_image` 目前仍保留 builtin 实现，但会通过 `experimental` / `x-experimental` 标记在 UI 和文档中提示风险。0.14.0 已补兼容检测：若旧账号启用过 `codex_image` 但运行节点缺少实现，worker 会把该功能标记为 failed 并写入 runtime log，Plugins 页会显示恢复提示；真实下沉到 installed 前仍需同步 dry-run 导入路径和旧账号数据迁移策略。
 
 ---
 
@@ -1004,7 +997,7 @@ config_schema={
 
 - `manifest.py` 声明 `config_schema["x-ui-mode"] = "platform"`
 - 前端会在账号详情和插件中心里放到“基础能力 / 平台内置”分组
-- 如果有专属页面，仍需 `App.tsx` 路由和 `FEATURE_CONFIG_PAGE_KEYS`
+- 如果有专属页面，仍需 `App.tsx` 路由和共享 `FEATURE_CONFIG_PAGE_KEYS`
 - 后端运行时由 `PlatformScheduler` 常驻初始化；调度算法与 action 执行在平台层，`scheduler` 插件壳只保留兼容入口或配置入口
 - 普通插件需要定时执行时，不要自己 `create_task` 写永久循环，优先使用 `ctx.scheduler`
 
@@ -1071,7 +1064,7 @@ class DemoPlugin(Plugin):
 - [ ] `types.ts` 中 `XxxRuleConfig` 接口与 `manifest.py` config_schema 字段一致
 - [ ] 如果有专属页面：`App.tsx` 中路由路径 `:aid/features/{key}` 与插件 key 一致
 - [ ] 如果有专属页面：`App.tsx` 中 `FEATURE_CONFIG_PAGES` 包含该 key
-- [ ] 如果有专属页面：`Detail.tsx` 和 `Extensions.tsx` 的 `FEATURE_CONFIG_PAGE_KEYS` 包含该 key
+- [ ] 如果有专属页面：`frontend/src/pages/Plugins/_shared/featureConfig.ts` 的 `FEATURE_CONFIG_PAGE_KEYS` 包含该 key
 - [ ] 如果是命令型插件：`command` 字段可配置，`Plugin.command_config_keys = {"command"}`，说明文案动态读取当前命令
 - [ ] 如果是模式 B：当前状态和使用说明位于配置表单之前
 - [ ] 如需 dry-run：`plugin.py` 导出 `_dry_run_match`，`__init__.py` re-export，`rules.py` 在 fallback 之前添加分支

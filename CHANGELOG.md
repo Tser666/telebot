@@ -28,7 +28,14 @@
 - 账号详情概览增加能力与迁移入口卡片：启用插件数、启用命令数、复制配置；旧命令 Tab 降级为迁移提示页。
 - Config Bundle 支持从 `/settings?tab=backup&source=:aid` 预填源账号；Plugins 支持 `/plugins?account=:aid` 按账号视角打开。
 - Logs 页新增 Runtime / Audit 顶层 Tab，Audit 接入 `/api/logs/audit` 并支持动态 action 过滤，便于查看 sudo、Config Bundle confirm、account_bot confirm 等安全决策记录。
+- 命令模板新增 AI provider 空态引导：没有 Provider 时禁用 AI 类型创建并跳转到 `/ai/providers`；已删除 Provider 的 AI 模板会显示“provider 缺失”警告。
+- Plugins 首页增加一次性安全迁移 banner，提示 0.13 已移除 `,reboot`、`,plugin install` 等 Telegram 内高危命令；account_bot 配置页补充危险操作二次确认提示。
+- 移动端新增 4 项底部 Tab Bar（概览、账号、插件、日志），AI 与系统设置保留在汉堡菜单；账号详情 Tabs 在窄屏改为横向滚动，避免挤压重叠。
+- 收敛专属插件配置页入口：`FEATURE_CONFIG_PAGE_KEYS` 改由 `frontend/src/pages/Plugins/_shared/featureConfig.ts` 统一维护，减少账号详情与旧插件中心双份维护。
+- B5 清理 legacy feature key：移除已无引用的 `FEATURE_LEGACY_KEYS` 导出，并补充 registry 测试确保 `group_admin` / `monitor` 不会回到内置功能列表。
+- B2/F9 先落地 `codex_image` 下沉兼容检测：暂不做物理迁移；若旧账号启用但运行节点缺实现，worker 会记录 runtime_log、标记 failed，Plugins 页显示恢复提示。
 - 旧入口 `/scheduler`、`/templates`、`/settings/commands`、`/settings/aliases`、`/settings/llm-providers`、`/ai-settings` 保留重定向，避免旧书签失效。
+- README 与插件开发指南同步 0.14 IA、共享 feature config helper、Audit 日志和 `codex_image` 兼容策略说明。
 
 ### Verification
 - `pnpm --dir frontend build` 通过。

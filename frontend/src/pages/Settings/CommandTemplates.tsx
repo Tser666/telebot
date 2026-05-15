@@ -8,6 +8,7 @@ import React, { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Plus, Trash2, Edit3 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -390,10 +391,15 @@ function buildPayload(form: FormState): {
 }
 
 export function CommandTemplates() {
+  const nav = useNavigate();
   const qc = useQueryClient();
   const listQ = useQuery({
     queryKey: ["cmd-tpl"],
     queryFn: listCommandTemplates,
+  });
+  const providersQ = useQuery({
+    queryKey: ["llm-providers"],
+    queryFn: listLLMProviders,
   });
   // 实时拉系统命令前缀，用在编辑器的"`,name` 触发"那行提示——避免硬编码逗号
   // 跟系统设置改了不一致
@@ -402,6 +408,12 @@ export function CommandTemplates() {
     queryFn: getSystemSettings,
   });
   const cmdPrefix = settingsQ.data?.command_prefix || ",";
+  const providerIds = useMemo(
+    () => new Set((providersQ.data || []).map((p) => p.id)),
+    [providersQ.data],
+  );
+  const hasProviders = (providersQ.data?.length || 0) > 0;
+  const providerUnavailable = providersQ.isSuccess && !hasProviders;
 
   const [editing, setEditing] = useState<FormState | null>(null);
 
@@ -473,6 +485,19 @@ export function CommandTemplates() {
           </div>
         </CardHeader>
         <CardContent>
+          {providerUnavailable ? (
+            <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              AI 命令模板不可用：先去 AI -&gt; Providers 添加 provider。
+              <Button
+                type="button"
+                variant="link"
+                className="h-auto px-1 py-0 text-xs"
+                onClick={() => nav("/ai/providers")}
+              >
+                前往 /ai/providers
+              </Button>
+            </div>
+          ) : null}
           {listQ.isLoading ? (
             <div className="flex h-20 items-center justify-center">
               <Spinner className="text-primary" />
@@ -493,7 +518,15 @@ export function CommandTemplates() {
                   <TableRow key={t.id}>
                     <TableCell className="font-mono text-sm">{cmdPrefix}{t.name}</TableCell>
                     <TableCell>
-                      <Badge variant="secondary">{TYPE_LABELS[t.type] || t.type}</Badge>
+                      <div className="flex flex-wrap items-center gap-1">
+                        <Badge variant="secondary">{TYPE_LABELS[t.type] || t.type}</Badge>
+                        {t.type === "ai" &&
+                        providersQ.isSuccess &&
+                        typeof t.config?.provider_id === "number" &&
+                        !providerIds.has(t.config.provider_id) ? (
+                          <Badge variant="destructive">provider 缺失</Badge>
+                        ) : null}
+                      </div>
                     </TableCell>
                     <TableCell className="max-w-[260px]">
                       <div className="flex flex-wrap gap-1">
@@ -559,6 +592,10 @@ export function CommandTemplates() {
                 toast.error("命令名只能包含字母 / 数字 / 下划线，1-64 字符");
                 return;
               }
+              if (editing.type === "ai" && providerUnavailable) {
+                toast.error("先去 AI -> Providers 添加 provider");
+                return;
+              }
               if (editing.id) {
                 updateMut.mutate(editing);
               } else {
@@ -566,6 +603,9 @@ export function CommandTemplates() {
               }
             }}
             saving={createMut.isPending || updateMut.isPending}
+            hasProviders={hasProviders}
+            providerUnavailable={providerUnavailable}
+            onGoProviders={() => nav("/ai/providers")}
           />
         )}
       </Card>
@@ -632,6 +672,9 @@ function CommandEditDialog({
   onCancel,
   onSave,
   saving,
+  hasProviders,
+  providerUnavailable,
+  onGoProviders,
 }: {
   form: FormState;
   cmdPrefix: string;
@@ -639,6 +682,9 @@ function CommandEditDialog({
   onCancel: () => void;
   onSave: () => void;
   saving: boolean;
+  hasProviders: boolean;
+  providerUnavailable: boolean;
+  onGoProviders: () => void;
 }) {
   const isEdit = !!form.id;
   const setField = <K extends keyof FormState>(k: K, v: FormState[K]) =>
@@ -695,11 +741,24 @@ function CommandEditDialog({
                 }
               >
                 {typeOptions.map(([k, label]) => (
-                  <option key={k} value={k}>
+                  <option key={k} value={k} disabled={k === "ai" && providerUnavailable}>
                     {label}（{k}）
                   </option>
                 ))}
               </Select>
+              {providerUnavailable ? (
+                <p className="text-xs text-amber-700">
+                  AI 类型暂不可选，先去 AI -&gt; Providers 添加 provider。
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="h-auto px-1 py-0 text-xs"
+                    onClick={onGoProviders}
+                  >
+                    前往 /ai/providers
+                  </Button>
+                </p>
+              ) : null}
             </div>
           </div>
 

@@ -20,11 +20,16 @@ import { isPlatformFeature } from "@/lib/plugin-modes";
 import { featureConfigPath } from "./_shared/featureConfig";
 
 type Zone = "platform" | "builtin" | "remote" | "experimental";
+const DANGEROUS_CMD_BANNER_KEY = "telebot.plugins_home.banner.v0_13_dangerous_cmds_closed";
 
 export function PluginsHome() {
   const nav = useNavigate();
   const [searchParams] = useSearchParams();
   const [selectedAid, setSelectedAid] = useState<number | null>(null);
+  const [bannerVisible, setBannerVisible] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem(DANGEROUS_CMD_BANNER_KEY) !== "1";
+  });
   const matrixQ = useQuery({
     queryKey: ["matrix"],
     queryFn: getFeatureMatrix,
@@ -53,6 +58,8 @@ export function PluginsHome() {
   }, [accounts, searchParams]);
 
   const selectedAccount = accounts.find((a) => a.id === selectedAid) ?? null;
+  const codexImageFeature = features.find((f) => f.key === "codex_image");
+  const codexImageState = selectedAccount?.features?.codex_image ?? "disabled";
 
   const grouped = useMemo(() => {
     const zones: Record<Zone, typeof features> = {
@@ -88,6 +95,37 @@ export function PluginsHome() {
 
   return (
     <div className="space-y-6">
+      {bannerVisible ? (
+        <Card className="border-amber-300 bg-amber-50">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">0.13 安全变更提醒</CardTitle>
+            <CardDescription className="text-amber-900/90">
+              Telegram 内高危命令（如 <code>,reboot</code>、<code>,plugin install</code>）已移除，请改为在 Web 控制台或 account_bot 内执行。
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => nav(selectedAid ? `/accounts/${selectedAid}?tab=bot` : "/accounts")}
+            >
+              前往 account_bot
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => nav("/plugins/templates")}>
+              前往 Web 控制台入口
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                localStorage.setItem(DANGEROUS_CMD_BANNER_KEY, "1");
+                setBannerVisible(false);
+              }}
+            >
+              我知道了，不再提示
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
       <Card>
         <CardHeader>
           <CardTitle>Plugins 中心</CardTitle>
@@ -118,6 +156,20 @@ export function PluginsHome() {
           ) : null}
         </CardContent>
       </Card>
+
+      {codexImageFeature && codexImageState === "failed" ? (
+        <Card className="border-amber-500/40 bg-amber-50/60">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base text-amber-900">codex_image 兼容提示</CardTitle>
+            <CardDescription className="text-amber-800">
+              当前账号历史上启用了 codex_image，但运行节点未检测到本地实现。系统已自动降级为失败态并保持 worker 持续运行。
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pt-0 text-sm text-amber-900">
+            如需恢复，请确认目标节点是否已安装 codex_image 对应插件包，或先在该账号关闭此功能开关。
+          </CardContent>
+        </Card>
+      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <FeatureZone

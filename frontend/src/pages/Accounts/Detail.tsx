@@ -81,14 +81,7 @@ import { Select } from "@/components/ui/select";
 import type { HumanizeConfig, ProxyTestResult } from "@/api/types";
 import { actionHint, actionLabel } from "@/lib/rate-actions";
 import type { ConfigSchema } from "@/components/plugin/ConfigDialog";
-
-// 功能列表从 feature-matrix API 动态获取，不再硬编码
-const FEATURE_CONFIG_PAGE_KEYS = new Set(["auto_reply", "autorepeat", "codex_image", "forward", "scheduler", "game24"]);
-
-function featureConfigPath(aid: number, key: string): string | null {
-  if (!aid || !FEATURE_CONFIG_PAGE_KEYS.has(key)) return null;
-  return `/accounts/${aid}/features/${key}`;
-}
+import { featureConfigPath } from "@/pages/Plugins/_shared/featureConfig";
 
 export function AccountDetail() {
   const params = useParams();
@@ -270,26 +263,26 @@ export function AccountDetail() {
       </div>
 
       <Tabs defaultValue={searchParams.get("tab") || "overview"}>
-        <TabsList>
-          <TabsTrigger value="overview" className="gap-1.5">
+        <TabsList className="flex w-full justify-start gap-1 overflow-x-auto whitespace-nowrap sm:w-auto">
+          <TabsTrigger value="overview" className="shrink-0 gap-1.5">
             <LayoutDashboard className="h-4 w-4" /> 概览
           </TabsTrigger>
-          <TabsTrigger value="features" className="gap-1.5">
+          <TabsTrigger value="features" className="shrink-0 gap-1.5">
             <Bot className="h-4 w-4" /> 插件启停
           </TabsTrigger>
-          <TabsTrigger value="commands" className="gap-1.5">
+          <TabsTrigger value="commands" className="shrink-0 gap-1.5">
             <Shield className="h-4 w-4" /> 命令
           </TabsTrigger>
-          <TabsTrigger value="bot" className="gap-1.5">
+          <TabsTrigger value="bot" className="shrink-0 gap-1.5">
             <MessageCircle className="h-4 w-4" /> Bot 联动
           </TabsTrigger>
-          <TabsTrigger value="rate" className="gap-1.5">
+          <TabsTrigger value="rate" className="shrink-0 gap-1.5">
             <Gauge className="h-4 w-4" /> 风控基础
           </TabsTrigger>
-          <TabsTrigger value="proxy" className="gap-1.5">
+          <TabsTrigger value="proxy" className="shrink-0 gap-1.5">
             <Network className="h-4 w-4" /> 出口/伪装
           </TabsTrigger>
-          <TabsTrigger value="ignored" className="gap-1.5">
+          <TabsTrigger value="ignored" className="shrink-0 gap-1.5">
             <Ban className="h-4 w-4" /> 忽略的群组
           </TabsTrigger>
         </TabsList>

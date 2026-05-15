@@ -69,3 +69,10 @@ def test_builtin_registry_marks_codex_image_experimental() -> None:
     manifest = BUILTIN_FEATURES.manifest_for("codex_image")
     assert manifest is not None
     assert getattr(manifest, "experimental", False) is True
+
+
+def test_builtin_registry_excludes_legacy_feature_keys() -> None:
+    BUILTIN_FEATURES.refresh()
+    keys = set(BUILTIN_FEATURES.keys())
+    assert "group_admin" not in keys
+    assert "monitor" not in keys
