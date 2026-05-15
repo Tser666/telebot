@@ -390,7 +390,9 @@ export function AccountDetail() {
             </CardHeader>
             <CardContent className="grid gap-3 md:grid-cols-3">
               <div className="relative flex min-h-[11rem] flex-col rounded-lg border p-4">
-                <div className="pr-12 text-xs text-muted-foreground">已启用插件</div>
+                <div className="pr-12 text-base font-semibold text-foreground">
+                  已启用插件
+                </div>
                 <div className="absolute right-4 top-3 text-2xl font-semibold leading-none">
                   {enabledPluginCount}
                 </div>
@@ -405,7 +407,9 @@ export function AccountDetail() {
                 </Button>
               </div>
               <div className="flex min-h-[11rem] flex-col rounded-lg border p-4">
-                <div className="text-xs text-muted-foreground">复用命令模板</div>
+                <div className="text-base font-semibold text-foreground">
+                  复用命令模板
+                </div>
                 <div className="mt-1 text-sm text-muted-foreground">
                   把账号 A 已经调好的回复、转发、AI 命令分配给这个账号。
                 </div>
@@ -417,7 +421,9 @@ export function AccountDetail() {
                 </Button>
               </div>
               <div className="flex min-h-[11rem] flex-col rounded-lg border p-4">
-                <div className="text-xs text-muted-foreground">复制成熟配置</div>
+                <div className="text-base font-semibold text-foreground">
+                  复制成熟配置
+                </div>
                 <div className="mt-1 text-sm text-muted-foreground">
                   适合新账号：从一个已跑顺的账号复制规则和插件配置。
                 </div>

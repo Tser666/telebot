@@ -2,7 +2,15 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, Bot, CheckCircle2, HelpCircle, Package, Plus, Power, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  HelpCircle,
+  Package,
+  Plus,
+  Power,
+  Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -25,7 +33,7 @@ import {
 import { getErrMsg } from "@/lib/api";
 import { formatDateTime } from "@/lib/utils";
 
-const NEW_ACCOUNT_GUIDE_SEEN_KEY = "telebot.accounts.new_account_guide_seen.v1";
+const NEW_ACCOUNT_GUIDE_SEEN_KEY = "telebot.accounts.new_account_guide_seen.v2";
 
 export function AccountList() {
   const nav = useNavigate();
@@ -90,15 +98,7 @@ export function AccountList() {
             nav("/accounts/new");
             return;
           }
-          if (step === 1) {
-            nav("/plugins/templates");
-            return;
-          }
-          if (step === 2) {
-            nav("/plugins");
-            return;
-          }
-          nav("/logs");
+          nav("/plugins");
         }}
       />
 
@@ -192,27 +192,15 @@ function NewAccountGuideDialog({
   const steps = [
     {
       icon: Plus,
-      title: "1. 绑定账号",
-      desc: "先新增 Telegram 账号，系统会为它启动一个独立 worker。",
-      actionLabel: "去新增账号",
+      title: "1. 添加并启用账号",
+      desc: "先新增 Telegram 账号并启用它，系统会为该账号启动独立 worker。",
+      actionLabel: "去添加账号",
     },
     {
       icon: Package,
-      title: "2. 复用模板",
-      desc: "去插件中心把已有账号的命令、消息、AI 模板分配给新账号。",
-      actionLabel: "去插件中心 / 命令模板",
-    },
-    {
-      icon: Bot,
-      title: "3. 开启插件",
-      desc: "按账号开启自动回复、转发、定时任务等能力，再少量测试。",
+      title: "2. 启用命令模板或调用插件",
+      desc: "去插件中心复用命令模板，或开启需要的插件；远程插件也从这里安装。真正发命令前，先确认系统里的命令前缀。",
       actionLabel: "去插件中心",
-    },
-    {
-      icon: CheckCircle2,
-      title: "4. 看日志确认",
-      desc: "最后看日志和最近调用，确认命令和 AI 调用真的跑通。",
-      actionLabel: "去日志",
     },
   ];
   const step = steps[currentStep];
@@ -250,7 +238,20 @@ function NewAccountGuideDialog({
               <step.icon className="h-5 w-5" />
             </div>
             <div className="text-sm font-semibold">{step.title}</div>
-            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{step.desc}</p>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              {step.desc}
+            </p>
+            {currentStep === 1 ? (
+              <Button
+                asChild
+                variant="outline"
+                size="sm"
+                className="mt-3"
+                onClick={() => onOpenChange(false)}
+              >
+                <Link to="/settings?tab=platform">设置命令前缀</Link>
+              </Button>
+            ) : null}
           </div>
         </div>
 
@@ -265,7 +266,9 @@ function NewAccountGuideDialog({
             </Button>
             <Button
               variant="outline"
-              onClick={() => setCurrentStep((s) => Math.min(steps.length - 1, s + 1))}
+              onClick={() =>
+                setCurrentStep((s) => Math.min(steps.length - 1, s + 1))
+              }
               disabled={currentStep === steps.length - 1}
             >
               下一步 <ArrowRight className="ml-1 h-4 w-4" />
