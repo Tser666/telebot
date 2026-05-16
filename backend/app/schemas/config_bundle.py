@@ -34,12 +34,19 @@ class ConfigBundleCommandLinkItem(BaseModel):
     enabled: bool = True
 
 
+class ConfigBundleIgnoredPeerItem(BaseModel):
+    peer_id: int
+    peer_kind: str
+    peer_label: str | None = None
+
+
 class ConfigBundleExport(BaseModel):
     version: Literal["1"] = "1"
     source_account: ConfigBundleSourceAccount
     rules: list[ConfigBundleRuleItem] = Field(default_factory=list)
     features: dict[str, ConfigBundleFeatureItem] = Field(default_factory=dict)
     command_links: list[ConfigBundleCommandLinkItem] = Field(default_factory=list)
+    ignored_peers: list[ConfigBundleIgnoredPeerItem] = Field(default_factory=list)
 
 
 class ConfigBundleDiffCounts(BaseModel):
@@ -49,7 +56,7 @@ class ConfigBundleDiffCounts(BaseModel):
 
 
 class ConfigBundleDiffItem(BaseModel):
-    entity: Literal["feature", "rule", "command_link"]
+    entity: Literal["feature", "rule", "command_link", "ignored_peer"]
     key: str
     action: Literal["add", "skip", "conflict"]
     fields: list[str] = Field(default_factory=list)

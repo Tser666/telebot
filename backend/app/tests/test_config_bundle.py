@@ -16,6 +16,7 @@ from app.schemas.config_bundle import (
     ConfigBundleCommandLinkItem,
     ConfigBundleExport,
     ConfigBundleFeatureItem,
+    ConfigBundleIgnoredPeerItem,
     ConfigBundleRuleItem,
     ConfigBundleSourceAccount,
 )
@@ -57,13 +58,24 @@ def test_build_config_bundle_redacts_sensitive_fields() -> None:
             SimpleNamespace(id=7, name="ping", aliases=["p"], type="reply_text"),
         )
     ]
+    ignored_peer_rows = [
+        SimpleNamespace(peer_id=-100123, peer_kind="supergroup", peer_label="测试群")
+    ]
 
-    bundle = build_config_bundle(account, feature_rows, rule_rows, command_link_rows)
+    bundle = build_config_bundle(
+        account,
+        feature_rows,
+        rule_rows,
+        command_link_rows,
+        ignored_peer_rows,
+    )
 
     assert bundle.source_account.id == 1
     assert bundle.features["codex_image"].config == {"safe": 1, "nested": {"keep": 2}}
     assert bundle.rules[0].config == {"chat_id": 123, "provider": "p1", "command": "send"}
     assert bundle.command_links[0].template_name == "ping"
+    assert bundle.ignored_peers[0].peer_id == -100123
+    assert bundle.ignored_peers[0].peer_label == "测试群"
 
 
 def test_assert_bundle_size_rejects_over_1mb() -> None:
@@ -194,6 +206,40 @@ def test_compare_bundles_returns_add_skip_and_conflict() -> None:
     assert any(i.entity == "feature" and i.key == "forward" and i.action == "conflict" for i in report.items)
     assert any(i.entity == "rule" and i.key == "scheduler:job" and i.action == "add" for i in report.items)
     assert any(i.entity == "command_link" and i.key == "missing_cmd" and i.action == "conflict" for i in report.items)
+
+
+def test_compare_bundles_includes_ignored_peers() -> None:
+    source = ConfigBundleExport(
+        source_account=ConfigBundleSourceAccount(id=1, label="src"),
+        ignored_peers=[
+            ConfigBundleIgnoredPeerItem(peer_id=-1001, peer_kind="supergroup", peer_label="同名群"),
+            ConfigBundleIgnoredPeerItem(peer_id=-1002, peer_kind="supergroup", peer_label="新增群"),
+            ConfigBundleIgnoredPeerItem(peer_id=-1003, peer_kind="channel", peer_label="改名频道"),
+        ],
+    )
+    target = ConfigBundleExport(
+        source_account=ConfigBundleSourceAccount(id=2, label="dst"),
+        ignored_peers=[
+            ConfigBundleIgnoredPeerItem(peer_id=-1001, peer_kind="supergroup", peer_label="同名群"),
+            ConfigBundleIgnoredPeerItem(peer_id=-1003, peer_kind="channel", peer_label="旧频道名"),
+        ],
+    )
+
+    report = compare_bundles(
+        source,
+        target,
+        available_features={},
+        available_command_templates={},
+    )
+
+    assert report.counts.add == 1
+    assert report.counts.skip == 1
+    assert report.counts.conflict == 1
+    assert any(i.entity == "ignored_peer" and i.key == "-1002" and i.action == "add" for i in report.items)
+    assert any(
+        i.entity == "ignored_peer" and i.key == "-1003" and i.action == "conflict" and i.fields == ["peer_label"]
+        for i in report.items
+    )
 
 
 @pytest.mark.asyncio
@@ -378,6 +424,44 @@ async def test_apply_bundle_confirm_only_add_when_conflicts_disabled() -> None:
     assert imported == 0
     assert skipped == 0
     assert conflicts == 1
+
+
+@pytest.mark.asyncio
+async def test_apply_bundle_confirm_imports_ignored_peers() -> None:
+    source = ConfigBundleExport(
+        source_account=ConfigBundleSourceAccount(id=1, label="src"),
+        ignored_peers=[
+            ConfigBundleIgnoredPeerItem(
+                peer_id=-100222,
+                peer_kind="supergroup",
+                peer_label="搬家的群",
+            )
+        ],
+    )
+    target = ConfigBundleExport(source_account=ConfigBundleSourceAccount(id=2, label="dst"))
+    dry_run = compare_bundles(
+        source,
+        target,
+        available_features={},
+        available_command_templates={},
+    )
+    db = _FakeDB([])
+
+    imported, skipped, conflicts, warnings = await apply_bundle_confirm(
+        db,
+        account_id=2,
+        source=source,
+        dry_run=dry_run,
+        available_command_templates={},
+        apply_conflicts=False,
+        confirm_chat_id_conflicts=False,
+    )
+
+    assert (imported, skipped, conflicts, warnings) == (1, 0, 0, [])
+    added = db.added[0]
+    assert added.account_id == 2
+    assert added.peer_id == -100222
+    assert added.peer_label == "搬家的群"
 
 
 @pytest.mark.asyncio

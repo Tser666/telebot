@@ -57,6 +57,13 @@ const CATEGORIES: CategoryDef[] = [
   { key: "notify_bots", label: "通知 Bot", desc: "通知机器人配置", sensitive: ["bot_token"] },
 ];
 
+const BUNDLE_ENTITY_LABEL: Record<string, string> = {
+  feature: "插件配置",
+  rule: "插件规则",
+  command_link: "命令绑定",
+  ignored_peer: "忽略列表",
+};
+
 export function ConfigBackup() {
   const [searchParams] = useSearchParams();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -363,7 +370,7 @@ export function ConfigBackup() {
       <CardHeader>
         <CardTitle className="text-base">账号配置包（Config Bundle）</CardTitle>
         <CardDescription>
-          大白话：把 A 账号的规则、插件配置、自定义命令绑定打包成一个 JSON 文件，再拿去给 B 账号套用。
+          大白话：把 A 账号的规则、插件配置、自定义命令绑定、忽略列表打包成一个 JSON 文件，再拿去给 B 账号套用。
           上传后会先演练对比，不会立刻改数据；只有点“确认写入”才会真正保存到目标账号。
         </CardDescription>
       </CardHeader>
@@ -372,7 +379,7 @@ export function ConfigBackup() {
           <div>
             <div className="text-sm font-medium">第 1 步：从一个账号导出配置包</div>
             <p className="text-xs text-muted-foreground">
-              适合“我已经把 1 号账号调好了，想把同一套规则复制给 2 号账号”的场景。不会导出 session、API key、Bot Token 等敏感密钥。
+              适合“我已经把 1 号账号调好了，想把同一套规则和忽略群组复制给 2 号账号”的场景。不会导出 session、API key、Bot Token 等敏感密钥。
             </p>
           </div>
           <div className="space-y-1.5 max-w-md">
@@ -473,7 +480,9 @@ export function ConfigBackup() {
                           : "border-border text-muted-foreground",
                     ].join(" ")}
                   >
-                    <span className="font-medium">{item.entity}</span>
+                    <span className="font-medium">
+                      {BUNDLE_ENTITY_LABEL[item.entity] ?? item.entity}
+                    </span>
                     {" · "}
                     <span>{item.key}</span>
                     {" · "}

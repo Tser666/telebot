@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from datetime import UTC, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -18,6 +19,8 @@ from telethon.errors import (
     SessionPasswordNeededError,
 )
 
+from app.crypto import decrypt_bytes, decrypt_str, encrypt_bytes, encrypt_str
+from app.db.models.account import ACCOUNT_STATUS_ACTIVE, ACCOUNT_STATUS_LOGIN_REQUIRED, Account
 from app.services import login_service
 from app.services.device_profile import HARDCODED_FALLBACK
 
@@ -85,6 +88,26 @@ async def test_start_login_success_returns_token():
     assert pending.phone_code_hash == "fake_hash_xyz"
     fake_client.connect.assert_awaited_once()
     fake_client.send_code_request.assert_awaited_once_with("+8613800000000")
+
+
+@pytest.mark.asyncio
+async def test_start_login_relogin_rejects_phone_mismatch():
+    """重登必须锁定原手机号，避免覆盖成另一个 Telegram 账号。"""
+
+    db = AsyncMock()
+    db.get = AsyncMock(return_value=SimpleNamespace(id=7, phone="+8613800000000"))
+
+    with pytest.raises(login_service.HTTPException) as exc_info:
+        await login_service.start_login(
+            db,
+            api_id=1,
+            api_hash="h",
+            phone="+8613900000000",
+            account_id=7,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "ACCOUNT_PHONE_MISMATCH"
 
 
 @pytest.mark.asyncio
@@ -279,6 +302,93 @@ async def test_start_login_rejects_when_pending_limit_exceeded(monkeypatch):
         )
     assert exc_info.value.status_code == 429
     assert exc_info.value.detail["code"] == "LOGIN_PENDING_LIMITED"
+
+
+@pytest.mark.asyncio
+async def test_finalize_relogin_overwrites_session_and_keeps_account_id():
+    """重登已有账号时覆盖 session/API 凭据，不新建账号也不清配置。"""
+
+    old = Account(
+        id=7,
+        phone="+8613800000000",
+        display_name="旧账号",
+        tg_user_id=12345,
+        api_id_enc=encrypt_str("old-api-id"),
+        api_hash_enc=encrypt_str("old-api-hash"),
+        session_enc=encrypt_bytes(b"old-session"),
+        status=ACCOUNT_STATUS_LOGIN_REQUIRED,
+    )
+    db = AsyncMock()
+    db.get = AsyncMock(return_value=old)
+    db.commit = AsyncMock()
+    fake_client = AsyncMock()
+    fake_client.get_me = AsyncMock(
+        return_value=SimpleNamespace(id=12345, username="new_name", first_name="新名字")
+    )
+    fake_client.session = SimpleNamespace(save=lambda: "new-session")
+    fake_client.disconnect = AsyncMock(return_value=None)
+    pending = login_service._PendingLogin(
+        client=fake_client,
+        api_id=999,
+        api_hash="new-api-hash",
+        phone="+8613800000000",
+        account_id=7,
+        proxy_id=3,
+    )
+    token = "relogin-token"
+    login_service._PENDING[token] = pending
+
+    with patch.object(login_service, "get_redis", side_effect=RuntimeError("no redis")):
+        aid = await login_service.finalize(db, token, pending)
+
+    assert aid == 7
+    assert old.status == ACCOUNT_STATUS_ACTIVE
+    assert old.proxy_id == 3
+    assert old.tg_username == "new_name"
+    assert decrypt_str(old.api_id_enc) == "999"
+    assert decrypt_str(old.api_hash_enc) == "new-api-hash"
+    assert decrypt_bytes(old.session_enc).decode() == "new-session"
+    assert token not in login_service._PENDING
+
+
+@pytest.mark.asyncio
+async def test_finalize_relogin_rejects_identity_mismatch():
+    """已知 tg_user_id 的老账号不能被另一个 Telegram 用户覆盖。"""
+
+    old = Account(
+        id=7,
+        phone="+8613800000000",
+        display_name="旧账号",
+        tg_user_id=12345,
+        api_id_enc=encrypt_str("old-api-id"),
+        api_hash_enc=encrypt_str("old-api-hash"),
+        session_enc=encrypt_bytes(b"old-session"),
+        status=ACCOUNT_STATUS_LOGIN_REQUIRED,
+    )
+    db = AsyncMock()
+    db.get = AsyncMock(return_value=old)
+    fake_client = AsyncMock()
+    fake_client.get_me = AsyncMock(return_value=SimpleNamespace(id=99999, username="wrong"))
+    fake_client.session = SimpleNamespace(save=lambda: "wrong-session")
+    fake_client.disconnect = AsyncMock(return_value=None)
+    pending = login_service._PendingLogin(
+        client=fake_client,
+        api_id=999,
+        api_hash="new-api-hash",
+        phone="+8613800000000",
+        account_id=7,
+    )
+    token = "wrong-token"
+    login_service._PENDING[token] = pending
+
+    with pytest.raises(login_service.HTTPException) as exc_info:
+        await login_service.finalize(db, token, pending)
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "ACCOUNT_IDENTITY_MISMATCH"
+    assert decrypt_bytes(old.session_enc) == b"old-session"
+    assert token not in login_service._PENDING
+    fake_client.disconnect.assert_awaited()
 
 
 # ── 端到端（占位，等整合阶段连真 PG 时启用） ──────────────────────

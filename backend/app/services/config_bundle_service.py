@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.models.command import AccountCommandLink, CommandTemplate
 from ..db.models.feature import AccountFeature
+from ..db.models.ignored_peer import IgnoredPeer
 from ..db.models.rule import Rule
 from ..schemas.config_bundle import (
     ConfigBundleCommandLinkItem,
@@ -18,6 +19,7 @@ from ..schemas.config_bundle import (
     ConfigBundleDryRunResponse,
     ConfigBundleExport,
     ConfigBundleFeatureItem,
+    ConfigBundleIgnoredPeerItem,
     ConfigBundleRuleItem,
     ConfigBundleSourceAccount,
 )
@@ -107,6 +109,7 @@ def build_config_bundle(
     feature_rows,
     rule_rows,
     command_link_rows,
+    ignored_peer_rows=None,
 ) -> ConfigBundleExport:
     """把账号及其配置行拼成 bundle。"""
     features: dict[str, ConfigBundleFeatureItem] = {}
@@ -142,11 +145,21 @@ def build_config_bundle(
         for _link_row, tpl in sorted(command_link_rows, key=lambda item: str(item[1].name))
     ]
 
+    ignored_peers = [
+        ConfigBundleIgnoredPeerItem(
+            peer_id=int(row.peer_id),
+            peer_kind=str(row.peer_kind),
+            peer_label=row.peer_label,
+        )
+        for row in sorted(ignored_peer_rows or [], key=lambda r: int(r.peer_id))
+    ]
+
     return ConfigBundleExport(
         source_account=_build_source_account(account),
         rules=rules,
         features=features,
         command_links=command_links,
+        ignored_peers=ignored_peers,
     )
 
 
@@ -157,7 +170,13 @@ def _index_bundle(bundle: ConfigBundleExport) -> dict[str, dict[str, Any]]:
         for item in bundle.rules
     }
     commands = {item.template_name: item.model_dump(mode="json") for item in bundle.command_links}
-    return {"features": features, "rules": rules, "command_links": commands}
+    ignored_peers = {str(item.peer_id): item.model_dump(mode="json") for item in bundle.ignored_peers}
+    return {
+        "features": features,
+        "rules": rules,
+        "command_links": commands,
+        "ignored_peers": ignored_peers,
+    }
 
 
 def compare_bundles(
@@ -291,6 +310,30 @@ def compare_bundles(
             )
             counts.skip += 1
 
+    for peer_key, item in src["ignored_peers"].items():
+        current = dst["ignored_peers"].get(peer_key)
+        if current is None:
+            items.append(ConfigBundleDiffItem(entity="ignored_peer", key=peer_key, action="add"))
+            counts.add += 1
+            continue
+        changed = []
+        for field in ("peer_kind", "peer_label"):
+            if item.get(field) != current.get(field):
+                changed.append(field)
+        if changed:
+            items.append(
+                ConfigBundleDiffItem(
+                    entity="ignored_peer",
+                    key=peer_key,
+                    action="conflict",
+                    fields=sorted(dict.fromkeys(changed)),
+                )
+            )
+            counts.conflict += 1
+        else:
+            items.append(ConfigBundleDiffItem(entity="ignored_peer", key=peer_key, action="skip"))
+            counts.skip += 1
+
     return ConfigBundleDryRunResponse(
         source_account=source.source_account,
         target_account=target.source_account,
@@ -319,6 +362,7 @@ async def apply_bundle_confirm(
     src_features = source.features
     src_rules = {f"{item.feature_key}:{item.name}": item for item in source.rules}
     src_cmds = {item.template_name: item for item in source.command_links}
+    src_ignored_peers = {str(item.peer_id): item for item in source.ignored_peers}
 
     if apply_conflicts and not confirm_chat_id_conflicts:
         has_chat_id_conflict = any(
@@ -414,6 +458,29 @@ async def apply_bundle_confirm(
                     account_id=account_id,
                     template_id=int(tpl.id),
                     enabled=True,
+                )
+            )
+            imported += 1
+            continue
+
+        if item.entity == "ignored_peer":
+            src_peer = src_ignored_peers.get(key)
+            if src_peer is None:
+                conflicts += 1
+                warnings.append(f"missing ignored peer payload: {key}")
+                continue
+            await db.execute(
+                delete(IgnoredPeer).where(
+                    IgnoredPeer.account_id == account_id,
+                    IgnoredPeer.peer_id == int(src_peer.peer_id),
+                )
+            )
+            db.add(
+                IgnoredPeer(
+                    account_id=account_id,
+                    peer_id=int(src_peer.peer_id),
+                    peer_kind=src_peer.peer_kind,
+                    peer_label=src_peer.peer_label,
                 )
             )
             imported += 1

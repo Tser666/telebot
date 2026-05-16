@@ -11,6 +11,7 @@ from sqlalchemy import select
 from ..db.models.account import Account
 from ..db.models.command import AccountCommandLink, CommandTemplate
 from ..db.models.feature import AccountFeature, Feature
+from ..db.models.ignored_peer import IgnoredPeer
 from ..db.models.rule import Rule
 from ..deps import CurrentUser, DBSession
 from ..schemas.config_bundle import (
@@ -44,6 +45,9 @@ async def _load_bundle(db, aid: int) -> ConfigBundleExport:
         await db.execute(select(AccountFeature).where(AccountFeature.account_id == aid))
     ).scalars().all()
     rule_rows = (await db.execute(select(Rule).where(Rule.account_id == aid))).scalars().all()
+    ignored_peer_rows = (
+        await db.execute(select(IgnoredPeer).where(IgnoredPeer.account_id == aid))
+    ).scalars().all()
     command_link_rows = (
         await db.execute(
             select(AccountCommandLink, CommandTemplate)
@@ -51,7 +55,13 @@ async def _load_bundle(db, aid: int) -> ConfigBundleExport:
             .where(AccountCommandLink.account_id == aid, AccountCommandLink.enabled.is_(True))
         )
     ).all()
-    return build_config_bundle(account, feature_rows, rule_rows, command_link_rows)
+    return build_config_bundle(
+        account,
+        feature_rows,
+        rule_rows,
+        command_link_rows,
+        ignored_peer_rows,
+    )
 
 
 async def _available_feature_map(db) -> dict[str, str]:

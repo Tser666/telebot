@@ -76,6 +76,12 @@ def _err(code: str, message: str, status: int = 400) -> HTTPException:
     return HTTPException(status_code=status, detail={"code": code, "message": message})
 
 
+def _phone_digits(value: str | None) -> str:
+    """只保留数字，用于判断 +86 / 86 这类格式差异下是否为同一号码。"""
+
+    return "".join(ch for ch in str(value or "") if ch.isdigit())
+
+
 async def _build_proxy_tuple(db: AsyncSession, proxy_id: int | None):
     """根据 proxy_id 构造 Telethon 所需的 proxy 元组。
 
@@ -116,6 +122,17 @@ async def start_login(
     async with _LOCK:
         if len(_PENDING) >= max_pending:
             raise _err("LOGIN_PENDING_LIMITED", "当前登录请求过多，请稍后再试", 429)
+
+    if account_id is not None:
+        acc = await db.get(Account, account_id)
+        if not acc:
+            raise _err("ACCOUNT_NOT_FOUND", "账号不存在", 404)
+        if _phone_digits(acc.phone) != _phone_digits(phone):
+            raise _err(
+                "ACCOUNT_PHONE_MISMATCH",
+                "重登手机号必须与当前账号一致，避免把别人的 session 覆盖到这个账号。",
+                409,
+            )
 
     proxy_tuple = await _build_proxy_tuple(db, proxy_id)
     # 解析设备伪装：调用方指定 → 系统默认 → 硬编码兜底
@@ -245,9 +262,23 @@ async def finalize(db: AsyncSession, token: str, pending: _PendingLogin) -> int:
         # 重新登录已有账号：替换 session、状态置回 active；顺手回填 tg 身份
         acc = await db.get(Account, pending.account_id)
         if not acc:
+            await _safe_disconnect(pending.client)
+            await _cleanup(token)
             raise _err("ACCOUNT_NOT_FOUND", "账号不存在", 404)
+        if acc.tg_user_id is not None and tg_user_id is not None and acc.tg_user_id != tg_user_id:
+            await _safe_disconnect(pending.client)
+            await _cleanup(token)
+            raise _err(
+                "ACCOUNT_IDENTITY_MISMATCH",
+                "登录到的 Telegram 用户与当前账号不一致，已拒绝覆盖 session。",
+                409,
+            )
+        acc.phone = pending.phone
+        acc.api_id_enc = encrypt_str(str(pending.api_id))
+        acc.api_hash_enc = encrypt_str(pending.api_hash)
         acc.session_enc = encrypt_bytes(session_str.encode())
         acc.status = ACCOUNT_STATUS_ACTIVE
+        acc.proxy_id = pending.proxy_id
         if tg_user_id is not None:
             acc.tg_user_id = tg_user_id
         # username 即使为 None 也覆盖：用户可能在 TG 主动清掉了用户名

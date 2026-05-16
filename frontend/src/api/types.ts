@@ -71,6 +71,7 @@ export interface AccountStartLoginRequest {
   api_id: number;
   api_hash: string;
   phone: string;
+  account_id?: number | null;
   proxy_id?: number | null;
   device_profile_id?: number | null;
 }
@@ -215,12 +216,19 @@ export interface ConfigBundleCommandLinkItem {
   enabled: boolean;
 }
 
+export interface ConfigBundleIgnoredPeerItem {
+  peer_id: number;
+  peer_kind: string;
+  peer_label?: string | null;
+}
+
 export interface ConfigBundleExport {
   version: "1";
   source_account: ConfigBundleSourceAccount;
   rules: ConfigBundleRuleItem[];
   features: Record<string, ConfigBundleFeatureItem>;
   command_links: ConfigBundleCommandLinkItem[];
+  ignored_peers: ConfigBundleIgnoredPeerItem[];
 }
 
 export interface ConfigBundleDiffCounts {
@@ -230,7 +238,7 @@ export interface ConfigBundleDiffCounts {
 }
 
 export interface ConfigBundleDiffItem {
-  entity: "feature" | "rule" | "command_link";
+  entity: "feature" | "rule" | "command_link" | "ignored_peer";
   key: string;
   action: "add" | "skip" | "conflict";
   fields: string[];

@@ -99,6 +99,7 @@ async def login_start(
         api_id=req.api_id,
         api_hash=req.api_hash,
         phone=req.phone,
+        account_id=req.account_id,
         proxy_id=req.proxy_id,
         device_profile_id=req.device_profile_id,
     )
@@ -106,8 +107,10 @@ async def login_start(
         db,
         user.id,
         "account.login.start",
-        target=f"phone:{req.phone}",
+        target=f"account:{req.account_id}" if req.account_id else f"phone:{req.phone}",
         detail={
+            "account_id": req.account_id,
+            "phone": req.phone,
             "proxy_id": req.proxy_id,
             "device_profile_id": req.device_profile_id,
         },

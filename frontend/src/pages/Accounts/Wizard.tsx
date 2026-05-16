@@ -1,6 +1,6 @@
 // 账号绑定 4 步向导：API 凭据 → 验证码 → (可选)2FA → 完成（可复制其他账号配置）
-import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Check, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
@@ -19,6 +19,7 @@ import {
 import { Spinner } from "@/components/ui/misc";
 import {
   cloneConfig,
+  getAccount,
   listAccounts,
   login2fa,
   loginCode,
@@ -36,6 +37,8 @@ const ERR_MAP: Record<string, string> = {
   FLOOD_WAIT: "Telegram 限流，请稍后再试",
   PHONE_INVALID: "手机号格式不正确",
   SESSION_EXPIRED: "登录会话已过期，请重新开始",
+  ACCOUNT_PHONE_MISMATCH: "重登手机号必须与当前账号一致",
+  ACCOUNT_IDENTITY_MISMATCH: "登录到的 Telegram 用户与当前账号不一致，已拒绝覆盖",
 };
 function readableError(err: unknown): string {
   const code = getErrCode(err);
@@ -47,7 +50,10 @@ type Step = 1 | 2 | 3 | 4;
 
 export function AccountWizard() {
   const nav = useNavigate();
+  const [searchParams] = useSearchParams();
   const qc = useQueryClient();
+  const reloginAid = Number(searchParams.get("relogin") || 0) || null;
+  const isRelogin = reloginAid != null;
 
   const [step, setStep] = useState<Step>(1);
 
@@ -67,6 +73,12 @@ export function AccountWizard() {
   // 完成后的目标账号 ID
   const [createdAid, setCreatedAid] = useState<number | null>(null);
 
+  const reloginAccountQ = useQuery({
+    queryKey: ["account", reloginAid],
+    queryFn: () => getAccount(reloginAid!),
+    enabled: isRelogin,
+  });
+
   // 代理列表（用于第 1 步下拉）
   const proxiesQ = useQuery({
     queryKey: ["proxies"],
@@ -78,9 +90,15 @@ export function AccountWizard() {
   const accountsQ = useQuery({
     queryKey: ["accounts"],
     queryFn: listAccounts,
-    enabled: step === 4,
+    enabled: step === 4 && !isRelogin,
   });
   const [cloneFrom, setCloneFrom] = useState<string>("");
+
+  useEffect(() => {
+    if (!reloginAccountQ.data) return;
+    setPhone(reloginAccountQ.data.phone);
+    setProxyId(reloginAccountQ.data.proxy_id ? String(reloginAccountQ.data.proxy_id) : "");
+  }, [reloginAccountQ.data]);
 
   // ===================== mutations =====================
   const startMut = useMutation({
@@ -89,6 +107,7 @@ export function AccountWizard() {
         api_id: Number(apiId),
         api_hash: apiHash.trim(),
         phone: phone.trim(),
+        account_id: reloginAid,
         proxy_id: proxyId ? Number(proxyId) : null,
       }),
     onSuccess: (res) => {
@@ -108,9 +127,14 @@ export function AccountWizard() {
         toast.info("该账号已启用两步验证，请输入密码");
       } else {
         setCreatedAid(res.account_id);
-        setStep(4);
         qc.invalidateQueries({ queryKey: ["accounts"] });
-        toast.success("绑定成功");
+        qc.invalidateQueries({ queryKey: ["account", res.account_id] });
+        toast.success(isRelogin ? "重新登录成功，已覆盖当前账号 session" : "绑定成功");
+        if (isRelogin) {
+          nav(`/accounts/${res.account_id}`, { replace: true });
+        } else {
+          setStep(4);
+        }
       }
     },
     onError: (err) => toast.error(readableError(err)),
@@ -121,9 +145,14 @@ export function AccountWizard() {
       login2fa({ login_token: loginToken!, password: twoFa }),
     onSuccess: (res) => {
       setCreatedAid(res.account_id);
-      setStep(4);
       qc.invalidateQueries({ queryKey: ["accounts"] });
-      toast.success("绑定成功");
+      qc.invalidateQueries({ queryKey: ["account", res.account_id] });
+      toast.success(isRelogin ? "重新登录成功，已覆盖当前账号 session" : "绑定成功");
+      if (isRelogin) {
+        nav(`/accounts/${res.account_id}`, { replace: true });
+      } else {
+        setStep(4);
+      }
     },
     onError: (err) => toast.error(readableError(err)),
   });
@@ -159,8 +188,19 @@ export function AccountWizard() {
         <Button variant="ghost" size="sm" onClick={() => nav(-1)}>
           <ArrowLeft className="mr-1 h-4 w-4" /> 返回
         </Button>
-        <h1 className="text-2xl font-semibold tracking-tight">新增账号</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          {isRelogin ? `重新登录账号 #${reloginAid}` : "新增账号"}
+        </h1>
       </div>
+
+      {isRelogin ? (
+        <Card className="border-amber-200 bg-amber-50/70 dark:border-amber-900 dark:bg-amber-950/25">
+          <CardContent className="pt-4 text-sm text-amber-950 dark:text-amber-100">
+            这次不会新建账号，也不会删除原配置。成功后只覆盖当前账号的
+            session、API 凭据和运行状态，忽略群组、插件规则、命令绑定都会保留。
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* 步进条 */}
       <ol className="flex items-center gap-2 text-sm">
@@ -194,7 +234,9 @@ export function AccountWizard() {
       {step === 1 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">步骤 1 · API 凭据</CardTitle>
+            <CardTitle className="text-base">
+              步骤 1 · {isRelogin ? "重新录入 API 凭据" : "API 凭据"}
+            </CardTitle>
             <CardDescription>
               在{" "}
               <a
@@ -206,6 +248,7 @@ export function AccountWizard() {
                 my.telegram.org
               </a>{" "}
               申请 API ID / Hash
+              {isRelogin ? "。MASTER_KEY 变更后需要重新输入，系统会用新密钥保存。" : ""}
             </CardDescription>
           </CardHeader>
           <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -226,7 +269,13 @@ export function AccountWizard() {
                 placeholder="+8613800000000"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
+                readOnly={isRelogin}
               />
+              {isRelogin ? (
+                <p className="text-xs text-muted-foreground">
+                  重登模式会锁定原手机号，避免把其他 Telegram 账号覆盖到当前配置上。
+                </p>
+              ) : null}
             </div>
             <div className="space-y-1.5">
               <Label>出口代理（可选）</Label>
@@ -257,7 +306,7 @@ export function AccountWizard() {
                 }}
                 disabled={startMut.isPending}
               >
-                {startMut.isPending ? "发送中…" : "下一步"}
+                {startMut.isPending ? "发送中…" : isRelogin ? "发送重登验证码" : "下一步"}
               </Button>
             </div>
           </CardContent>
@@ -291,7 +340,7 @@ export function AccountWizard() {
                 onClick={() => smsCode && codeMut.mutate()}
                 disabled={codeMut.isPending || !smsCode}
               >
-                {codeMut.isPending ? "提交中…" : "下一步"}
+                {codeMut.isPending ? "提交中…" : isRelogin ? "完成重登" : "下一步"}
               </Button>
             </div>
           </CardContent>

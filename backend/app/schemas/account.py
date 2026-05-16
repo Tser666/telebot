@@ -12,6 +12,8 @@ class AccountStartLoginRequest(BaseModel):
     api_id: int
     api_hash: str
     phone: str
+    # 为空 = 新增账号；有值 = 重新登录并覆盖该账号的 session / API 凭据。
+    account_id: int | None = None
     proxy_id: int | None = None
     # 设备伪装：影响 TG 设备列表里看到的 device_model / system_version / app_version；
     # 不传 = 用系统默认 profile

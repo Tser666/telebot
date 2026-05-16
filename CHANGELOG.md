@@ -17,6 +17,41 @@
 
 ---
 
+## [0.14.17] — 2026-05-16 · fix · 支持原账号重新登录覆盖 session
+
+### Fixed
+- 新增“重新登录并保留配置”入口：账号处于 `login_required` 时可直接从账号详情发起重登，成功后覆盖原账号 session，不再需要删除账号或手动迁移忽略群组。
+- 登录向导支持 `relogin` 模式：锁定原手机号、复用原账号 ID，重登成功后返回当前账号详情页。
+- 后端重登会同时用当前 `MASTER_KEY` 重新加密保存 session、API ID、API Hash，并恢复账号为 active，解决只换 session 但 API 凭据仍旧密钥加密的问题。
+- 后端增加手机号与 Telegram 用户 ID 校验，避免把其他 Telegram 账号误覆盖到当前账号配置上。
+
+### Verification
+- `git diff --check` 通过。
+- `backend/.venv/bin/ruff check backend/app/api/accounts.py backend/app/services/login_service.py backend/app/schemas/account.py backend/app/tests/test_accounts.py` 通过。
+- `PYTHONPYCACHEPREFIX=/private/tmp/telebot_pycache backend/.venv/bin/python -m pytest backend/app/tests/test_accounts.py backend/app/tests/test_config_bundle.py` 通过。
+- `pnpm --dir frontend exec tsc -b --noEmit` 通过。
+- `pnpm --dir frontend build` 通过。
+
+---
+
+## [0.14.16] — 2026-05-16 · fix · Config Bundle 支持忽略列表迁移
+
+### Fixed
+- 账号级 Config Bundle 现在会导出、dry-run 和 confirm 写入忽略列表，支持把旧账号几十个忽略群组迁移到重新登录后的新账号。
+- Config Bundle dry-run 结果增加“忽略列表”实体展示，避免只迁移插件规则和命令绑定时遗漏账号级忽略名单。
+- 设置页 Config Bundle 文案补充“忽略列表”，明确它适用于账号配置迁移，不包含 session / API key / Bot Token 等敏感登录凭据。
+
+### Verification
+- `git diff --check` 通过。
+- `backend/.venv/bin/ruff check backend/app/api/config_bundle.py backend/app/services/config_bundle_service.py backend/app/schemas/config_bundle.py backend/app/tests/test_config_bundle.py` 通过。
+- `PYTHONPYCACHEPREFIX=/private/tmp/telebot_pycache backend/.venv/bin/python -m pytest backend/app/tests/test_config_bundle.py` 通过（11 passed）。
+- `pnpm --dir frontend exec tsc -b --noEmit` 通过。
+- `pnpm --dir frontend build` 通过。
+- 本地读取 `aid=1` Config Bundle：`features=7`、`rules=2`、`command_links=5`、`ignored_peers=56`、`size_bytes=8275`。
+- 本地全量备份 round-trip：导出包含 `ignored_peers=56`；同文件导入结果 `imported=0`、`skipped=86`、`warnings=0`。
+
+---
+
 ## [0.14.15] — 2026-05-16 · polish · 优化命令前缀触发预览
 
 ### Changed

@@ -9,6 +9,7 @@ import {
   Bot,
   ChevronRight,
   Gauge,
+  KeyRound,
   LayoutDashboard,
   Loader2,
   MessageCircle,
@@ -351,6 +352,14 @@ export function AccountDetail() {
               </dl>
 
               <div className="flex flex-wrap gap-2">
+                {acc.status === "login_required" ? (
+                  <Button asChild size="sm">
+                    <Link to={`/accounts/new?relogin=${aid}`}>
+                      <KeyRound className="mr-1 h-4 w-4" />
+                      重新登录并保留配置
+                    </Link>
+                  </Button>
+                ) : null}
                 <Button
                   variant="outline"
                   size="sm"
@@ -359,6 +368,14 @@ export function AccountDetail() {
                   <Power className="mr-1 h-4 w-4" />
                   {acc.status === "active" ? "暂停账号" : "启动账号"}
                 </Button>
+                {acc.status !== "login_required" ? (
+                  <Button asChild variant="outline" size="sm">
+                    <Link to={`/accounts/new?relogin=${aid}`}>
+                      <KeyRound className="mr-1 h-4 w-4" />
+                      重新登录
+                    </Link>
+                  </Button>
+                ) : null}
                 <Button
                   variant="outline"
                   size="sm"
