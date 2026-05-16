@@ -25,7 +25,7 @@
 
 - 账号隔离：每账号独立 worker 进程，默认不共享运行态内存与会话。
 - 权限边界：管理权限、账号权限与插件权限都以账号作用域为主，不跨账号隐式升级。
-- 插件边界：插件应只依赖公开 PluginContext 与稳定 API，不直接耦合内部私有实现。
+- 插件边界：插件应只依赖公开 PluginContext 与稳定 API，不直接耦合内部私有实现；第三方插件的 `ctx.client`（以及命令 handler 的 `client` 参数）均为 sandbox client。
 
 PluginContext 的可用字段、禁止事项与最小示例见 `docs/PLUGIN-DEV-GUIDE.md`（PR9）。
 

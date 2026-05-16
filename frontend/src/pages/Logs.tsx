@@ -349,7 +349,7 @@ function AuditFilters({
 }) {
   const actionsQ = useQuery({
     queryKey: ["logs", "audit", "actions"],
-    queryFn: () => listAuditLogs({ limit: 100 }),
+    queryFn: () => listAuditLogs({ limit: 500 }),
     staleTime: 30_000,
   });
 
@@ -403,21 +403,25 @@ function AuditLogTable({
   const qUserId = Number.isInteger(uid) && uid > 0 ? uid : undefined;
 
   const logsQ = useQuery({
-    queryKey: ["logs", "audit", { user_id: qUserId, limit: 100 }],
-    queryFn: () => listAuditLogs({ user_id: qUserId, limit: 100 }),
+    queryKey: [
+      "logs",
+      "audit",
+      { user_id: qUserId, action: action || undefined, keyword: search || undefined, limit: 100 },
+    ],
+    queryFn: () =>
+      listAuditLogs({
+        user_id: qUserId,
+        action: action || undefined,
+        keyword: search.trim() || undefined,
+        limit: 100,
+      }),
   });
 
   const filtered = useMemo(() => {
     const all = logsQ.data ?? [];
-    const q = search.trim().toLowerCase();
-    return all.filter((l) => {
-      if (action && l.action !== action) return false;
-      if (!q) return true;
-      const detailText = l.detail ? JSON.stringify(l.detail).toLowerCase() : "";
-      const targetText = (l.target || "").toLowerCase();
-      return l.action.toLowerCase().includes(q) || targetText.includes(q) || detailText.includes(q);
-    });
-  }, [logsQ.data, action, search]);
+    if (!action) return all;
+    return all.filter((l) => l.action === action);
+  }, [logsQ.data, action]);
 
   const endpointMissing = isAxiosError(logsQ.error) &&
     (logsQ.error.response?.status === 404 || logsQ.error.response?.status === 405);

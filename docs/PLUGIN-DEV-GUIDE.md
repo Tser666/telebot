@@ -205,7 +205,7 @@ class PluginContext:
         """创建与 bot 的对话会话。"""
 ```
 
-注意：内置插件会拿到完整运行时能力；远程/第三方插件的 `ctx.client` 会被 `SandboxClient` 包装，`ctx.engine` 和 `ctx.redis` 为 `None`，只能通过声明过的权限和 `ctx.scheduler` facade 使用有限能力。
+注意：内置插件会拿到完整运行时能力；远程/第三方插件拿到的是受限上下文：`ctx.client` 为 `SandboxClient`，命令 handler 中传入的 `client` 参数与 `ctx.client` 同源（同样是 sandbox client），`ctx.engine` 和 `ctx.redis` 为 `None`，只能通过声明过的权限和 `ctx.scheduler` facade 使用有限能力。
 
 ### 4.1 可用上下文与访问方式（PluginContext Contract）
 

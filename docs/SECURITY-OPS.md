@@ -53,23 +53,23 @@ bash deploy/backup-keys.sh           # 默认 gpg 对称加密，输出 keys-bac
 
 V1 的目标是上线，不是零风险。以下三项是**已识别 + 已评估 + 已接受**的现状：
 
-### 2.1 CSRF 防护未实现
+### 2.1 CSRF：已实现 header-based gate，double-submit 作为增强项
 
-**现状**：cookie 用 `SameSite=Lax + HttpOnly + Secure(可选)`。所有写操作走
-POST/PATCH/DELETE/PUT，浏览器在跨站点请求里**不会**自动带 cookie。
+**现状**：后端已实现基于请求头的 CSRF gate：写操作除 cookie 外还要求前端附带受控自定义头，
+并结合 `Content-Type: application/json` 与 `SameSite` 策略形成双重门槛。普通跨站 form/图片请求无法满足该 gate。
 
-**风险范围**：低。攻击路径需要：
+**风险范围**：低。攻击路径仍需要：
 1. 用户在登录态访问到一个**与本站同源**的被注入页面（XSS 或子域名失控），
-2. 或浏览器存在零日漏洞绕过 SameSite。
+2. 或浏览器存在可绕过同源/头部约束的高危漏洞。
 
 **缓解措施**：
 - 不嵌入第三方 iframe；CSP 严格化。
 - 子域名最小化，避免 `*.your-domain.com` 共享 cookie。
-- Web 端写操作均要求 `Content-Type: application/json` + axios `withCredentials`，
-  攻击者通过普通 form POST 触发不到。
+- Web 端写操作均要求 `Content-Type: application/json` + 受控自定义头 + `withCredentials`。
+- 后端对缺失 gate 头的写请求直接拒绝。
 
-**未来计划**：V1.5 引入 double-submit cookie token（前端从 cookie 读取 csrf_token，
-作为请求头回传，后端校验两侧一致）。
+**未来计划**：V1.5 可在现有 gate 之上叠加 double-submit cookie token（前端从 cookie 读取 csrf_token，
+作为请求头回传，后端校验两侧一致），进一步收紧浏览器边界。
 
 ### 2.2 MASTER_KEY 轮换未实现
 

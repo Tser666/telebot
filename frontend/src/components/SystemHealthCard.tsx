@@ -50,12 +50,22 @@ function ToneText({ tone, text }: { tone: Tone; text: string }) {
 
 export function SystemHealthCard() {
   const [open, setOpen] = useState(false);
+  const qc = useQueryClient();
   const q = useQuery({
     queryKey: ["system", "health-overview"],
     queryFn: getHealthOverview,
-    // 60s 默认（原 30s）：health-overview 内部并行 6 路探测，对小机器是周期性脉冲。
-    // 与 HealthDot 共享 cache key —— 一次请求两个组件复用。
-    refetchInterval: 60_000,
+    // 异常态更快刷新，避免短时误报停留太久。
+    refetchInterval: (query) => {
+      const data = query.state.data as HealthOverview | undefined;
+      if (!data) return 15_000;
+      const unhealthy = !data.db.ok ||
+        !data.redis.ok ||
+        !data.alembic.ok ||
+        ((data.workers.runtime_desired_running ?? 0) >
+          (data.workers.runtime_desired_running_alive ?? 0)) ||
+        (data.workers.runtime_failing ?? 0) > 0;
+      return unhealthy ? 8_000 : 60_000;
+    },
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
   });
@@ -65,6 +75,22 @@ export function SystemHealthCard() {
       <CardHeader>
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-base">系统状态</CardTitle>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            onClick={() =>
+              qc.invalidateQueries({ queryKey: ["system", "health-overview"] })
+            }
+          >
+            {q.isFetching ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" />
+            )}
+            刷新
+          </Button>
           <Button
             type="button"
             variant="ghost"
@@ -115,6 +141,16 @@ function HealthGrid({ data }: { data: HealthOverview }) {
     : data.alembic.error
     ? "err"
     : "warn";
+  const workerDead = data.workers.by_status["dead"] ?? 0;
+  const workerReauth = data.workers.by_status["login_required"] ?? 0;
+  const runtimeDesired = data.workers.runtime_desired_running ?? 0;
+  const runtimeAlive = data.workers.runtime_desired_running_alive ?? 0;
+  const runtimeFailing = data.workers.runtime_failing ?? 0;
+  const runtimeMissing = Math.max(0, runtimeDesired - runtimeAlive);
+  const workersTone: Tone =
+    data.workers.total === 0 || workerDead || workerReauth || runtimeFailing || runtimeMissing
+      ? "warn"
+      : "ok";
 
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -358,14 +394,7 @@ function HealthGrid({ data }: { data: HealthOverview }) {
           </Link>
         }
         subtitle="每个账号有独立的 worker 子进程在跑"
-        tone={
-          data.workers.total === 0
-            ? "warn"
-            : (data.workers.by_status["dead"] ?? 0) > 0 ||
-              (data.workers.by_status["login_required"] ?? 0) > 0
-            ? "warn"
-            : "ok"
-        }
+        tone={workersTone}
         techName="account / worker"
         right={
           <Badge variant="secondary" className="text-xs">
@@ -383,19 +412,14 @@ function HealthGrid({ data }: { data: HealthOverview }) {
         ) : (
           <>
             <ToneText
-              tone={
-                (data.workers.by_status["dead"] ?? 0) > 0 ||
-                (data.workers.by_status["login_required"] ?? 0) > 0
-                  ? "warn"
-                  : "ok"
-              }
+              tone={workersTone}
               text={(() => {
-                const dead = data.workers.by_status["dead"] ?? 0;
-                const reauth = data.workers.by_status["login_required"] ?? 0;
-                if (dead || reauth) {
+                if (workerDead || workerReauth || runtimeFailing || runtimeMissing) {
                   const parts = [];
-                  if (reauth) parts.push(`${reauth} 个需重登`);
-                  if (dead) parts.push(`${dead} 个已停用`);
+                  if (workerReauth) parts.push(`${workerReauth} 个需重登`);
+                  if (workerDead) parts.push(`${workerDead} 个已停用`);
+                  if (runtimeFailing) parts.push(`${runtimeFailing} 个 worker 正在重试`);
+                  if (runtimeMissing) parts.push(`worker 存活 ${runtimeAlive}/${runtimeDesired}`);
                   return `⚠ ${parts.join("、")}`;
                 }
                 return `✓ ${data.workers.total} 个账号状态正常`;
@@ -418,6 +442,11 @@ function HealthGrid({ data }: { data: HealthOverview }) {
                   );
                 })}
             </div>
+            <TechDetails>
+              运行态：存活 {data.workers.runtime_alive}/{data.workers.runtime_total}
+              {runtimeDesired > 0 ? `；应运行 ${runtimeAlive}/${runtimeDesired}` : ""}
+              {runtimeFailing > 0 ? `；重试中 ${runtimeFailing}` : ""}
+            </TechDetails>
           </>
         )}
       </HealthBlock>

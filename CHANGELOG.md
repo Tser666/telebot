@@ -17,6 +17,81 @@
 
 ---
 
+## [0.15.5] — 2026-05-16 · fix · 修复 CI 插件导入路径
+
+### Fixed
+- 为 backend CI job 设置 `PYTHONPATH=..`，确保从 `backend/` 工作目录运行 pytest 时可导入仓库根目录的第三方插件包。
+
+### Verification
+- `PYTHONPATH=.. MASTER_KEY=... JWT_SECRET=... ../backend/.venv/bin/python -m pytest app/tests/test_codex_image_errors.py` 通过。
+
+---
+
+## [0.15.4] — 2026-05-16 · fix · 修复 CI 测试环境变量
+
+### Fixed
+- 为 backend CI job 注入测试专用 `MASTER_KEY` 与 `JWT_SECRET`，避免远端 pytest 在 settings collection 阶段因缺少必填配置失败。
+
+### Verification
+- `backend/.venv/bin/ruff check backend/app` 通过。
+- `pnpm --dir frontend build` 通过。
+
+---
+
+## [0.15.3] — 2026-05-16 · fix · 修复 CI 后端 lint
+
+### Fixed
+- 修复 `account_bot` 数据模型 import 排序，使新增 backend CI gate 在远端环境通过。
+
+### Verification
+- `backend/.venv/bin/ruff check backend/app/db/models/account_bot.py` 通过。
+
+---
+
+## [0.15.2] — 2026-05-16 · fix · 完成审查后续收口
+
+### Fixed
+- Config Bundle dry-run/confirm 增加预览签名绑定，目标账号配置快照、可用 feature/template、文件或冲突选项变化后必须重新预览。
+- Config Bundle chat/peer/group 相关嵌套字段冲突现在会触发二次确认；缺失 feature/template 等不可恢复冲突会被 blocked。
+- Config Bundle confirm 写库成功后会通知目标账号 worker reload 配置、命令和忽略列表。
+- feature/rule/audit/runtime log 等路径统一敏感字段脱敏且避免误伤 `max_tokens` 等非敏感计数字段，Codex Image token 改为 write-only 展示。
+- 健康检查纳入 worker runtime 存活与失败计数，异常态刷新更快并支持手动刷新；Audit 日志筛选改为后端过滤。
+- 修正 account_bot 测试接口前端类型漂移，`testAccountBot` 现在返回后端实际响应。
+- README、安全运维、远程插件、插件开发和部署文档同步当前安全边界与 TelePilot 命名。
+
+### Added
+- 新增 Config Bundle 签名、blocked conflict、worker reload 回归测试。
+- 新增敏感字段脱敏、日志查询筛选、健康检查 worker runtime 聚合测试。
+
+### Verification
+- `backend/.venv/bin/ruff check backend/app/api/config_bundle.py backend/app/api/features.py backend/app/api/logs.py backend/app/api/rules.py backend/app/api/system_health.py backend/app/schemas/config_bundle.py backend/app/services/audit.py backend/app/services/config_bundle_service.py backend/app/services/redactor.py backend/app/worker/supervisor.py backend/app/tests/test_config_bundle.py backend/app/tests/test_logs_api.py backend/app/tests/test_redaction_security.py backend/app/tests/test_supervisor_reliable_consumer.py backend/app/tests/test_system_health.py` 通过。
+- `PYTHONPYCACHEPREFIX=/private/tmp/telepilot_pycache backend/.venv/bin/python -m pytest backend/app/tests/test_config_bundle.py backend/app/tests/test_redaction_security.py backend/app/tests/test_supervisor_reliable_consumer.py backend/app/tests/test_system_health.py backend/app/tests/test_logs_api.py` 通过（46 passed）。
+- `PYTHONPYCACHEPREFIX=/private/tmp/telepilot_pycache backend/.venv/bin/python -m pytest backend` 通过（590 passed, 2 skipped）。
+- `pnpm --dir frontend build` 通过。
+
+---
+
+## [0.15.1] — 2026-05-16 · fix · 收紧远程插件与自动命令安全边界
+
+### Fixed
+- 远程插件与插件仓库 API 现在要求 Web 登录态，避免未登录请求触发安装、启停、更新、卸载等高风险操作。
+- 第三方插件命令 handler 现在接收沙箱 client，不再绕过 manifest 权限拿到原始 Telethon client。
+- account_bot 的 Telegram 远程插件 install/update/uninstall/第三方启停改为 admin-only，并新增 Web 端细粒度高风险开关；默认全部关闭，执行前仍需二次确认。
+- scheduler 与自动回复触发命令时新增账号级白名单控制；非白名单命令会被拦截并记录，不再默认复用 Telegram 命令分发。
+
+### Added
+- 新增 account_bot 远程插件高风险策略迁移与前端配置入口。
+- 新增主 CI workflow，覆盖后端 ruff/pytest、前端 build 与版本号同步检查。
+- 新增远程插件鉴权、插件沙箱命令 client、account_bot 远程插件策略、自动命令白名单相关回归测试。
+
+### Verification
+- `backend/.venv/bin/ruff check backend/app/api/account_bots.py backend/app/api/plugin_repo.py backend/app/api/remote_plugin.py backend/app/schemas/account_bot.py backend/app/services/account_bot_runtime.py backend/app/services/account_bot_service.py backend/app/worker/command.py backend/app/worker/plugins/loader.py backend/app/worker/scheduler_runtime.py backend/app/worker/runtime.py backend/app/worker/plugins/builtin/auto_reply/plugin.py backend/app/tests/test_account_bot.py backend/app/tests/test_plugin_security_regression.py backend/app/tests/test_remote_plugin_repo_auth.py backend/app/tests/test_worker_command.py` 通过。
+- `PYTHONPYCACHEPREFIX=/private/tmp/telepilot_pycache backend/.venv/bin/python -m pytest backend/app/tests/test_account_bot.py backend/app/tests/test_plugin_security_regression.py backend/app/tests/test_remote_plugin_repo_auth.py backend/app/tests/test_worker_command.py backend/app/tests/test_scheduler_runtime.py` 通过（64 passed）。
+- `PYTHONPYCACHEPREFIX=/private/tmp/telepilot_pycache backend/.venv/bin/python -m pytest backend` 通过（576 passed, 2 skipped）。
+- `pnpm --dir frontend build` 通过。
+
+---
+
 ## [0.15.0] — 2026-05-16 · feature · TelePilot rename 收口
 
 ### Changed

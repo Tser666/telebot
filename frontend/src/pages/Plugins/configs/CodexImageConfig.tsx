@@ -161,12 +161,12 @@ export function CodexImageConfigPage() {
   const [customInstructions, setCustomInstructions] = useState(DEFAULT_CONFIG.custom_instructions);
   const [dirty, setDirty] = useState(false);
   const [showToken, setShowToken] = useState(false);
+  const [hasToken, setHasToken] = useState(false);
 
   useEffect(() => {
     setCommand(currentConfig.command ?? DEFAULT_CONFIG.command);
-    if (currentConfig.access_token !== undefined) {
-      setAccessToken(currentConfig.access_token);
-    }
+    setAccessToken("");
+    setHasToken(Boolean(currentConfig.access_token));
     if (currentConfig.model !== undefined) {
       setModel(currentConfig.model);
     }
@@ -203,6 +203,9 @@ export function CodexImageConfigPage() {
     },
     onSuccess: () => {
       toast.success("配置已保存（worker 热加载）");
+      setHasToken(Boolean(accessToken.trim()) || hasToken);
+      setAccessToken("");
+      setShowToken(false);
       setDirty(false);
       qc.invalidateQueries({ queryKey: ["account", aid, "features"] });
       qc.invalidateQueries({ queryKey: ["matrix"] });
@@ -254,12 +257,6 @@ export function CodexImageConfigPage() {
     has_reference: "是",
     revised_prompt: "A cinematic futuristic city above a sea of clouds.",
   };
-
-  function maskToken(token: string): string {
-    if (!token) return "(未配置)";
-    if (token.length <= 10) return `${token.slice(0, 2)}***${token.slice(-2)}`;
-    return `${token.slice(0, 4)}***${token.slice(-4)}`;
-  }
 
   if (!aid) return <p>账号 ID 不合法</p>;
   if (featuresQ.isLoading) {
@@ -371,14 +368,14 @@ export function CodexImageConfigPage() {
             <p className="text-xs text-muted-foreground">
               从{" "}
               <code className="mx-0.5">.codex/auth.json</code>{" "}
-              中获取的 access token，用于鉴权 Codex API。
+              中获取的 access token，用于鉴权 Codex API。出于安全原因，已保存 token 不会回显。
             </p>
             <div className="flex gap-2">
               <Input
                 id="access-token"
                 className="font-mono flex-1"
                 type={showToken ? "text" : "password"}
-                placeholder="eyJhbGciOi..."
+                placeholder={hasToken ? "留空表示保留现有 Token；输入新值可覆盖" : "eyJhbGciOi..."}
                 value={accessToken}
                 onChange={(e) => {
                   setAccessToken(e.target.value);
@@ -398,9 +395,14 @@ export function CodexImageConfigPage() {
                 )}
               </Button>
             </div>
-            {!showToken && accessToken && (
+            {hasToken && !accessToken && (
               <p className="text-xs text-muted-foreground">
-                当前：{maskToken(accessToken)}
+                当前：已配置
+              </p>
+            )}
+            {accessToken && (
+              <p className="text-xs text-muted-foreground">
+                当前：将使用新输入的 Token 覆盖
               </p>
             )}
           </div>
@@ -669,9 +671,9 @@ export function CodexImageConfigPage() {
                 variant="ghost"
                 onClick={() => {
                   setCommand(currentConfig.command ?? DEFAULT_CONFIG.command);
-                  if (currentConfig.access_token !== undefined) {
-                    setAccessToken(currentConfig.access_token);
-                  }
+                  setAccessToken("");
+                  setHasToken(Boolean(currentConfig.access_token));
+                  setShowToken(false);
                   if (currentConfig.model !== undefined) {
                     setModel(currentConfig.model);
                   }

@@ -114,9 +114,12 @@ export async function exportConfigBundle(
 export async function dryRunConfigBundle(
   aid: number,
   file: File,
+  options: { applyConflicts: boolean; confirmChatIdConflicts: boolean },
 ): Promise<ConfigBundleDryRunResponse> {
   const form = new FormData();
   form.append("file", file);
+  form.append("apply_conflicts", String(options.applyConflicts));
+  form.append("confirm_chat_id_conflicts", String(options.confirmChatIdConflicts));
   const { data } = await api.post<ConfigBundleDryRunResponse>(
     `/api/accounts/${aid}/config-bundle/dry-run`,
     form,
@@ -130,12 +133,13 @@ export async function dryRunConfigBundle(
 export async function confirmConfigBundle(
   aid: number,
   file: File,
-  options: { applyConflicts: boolean; confirmChatIdConflicts: boolean },
+  options: { applyConflicts: boolean; confirmChatIdConflicts: boolean; previewSignature: string },
 ): Promise<ConfigBundleConfirmResponse> {
   const form = new FormData();
   form.append("file", file);
   form.append("apply_conflicts", String(options.applyConflicts));
   form.append("confirm_chat_id_conflicts", String(options.confirmChatIdConflicts));
+  form.append("preview_signature", options.previewSignature);
   const { data } = await api.post<ConfigBundleConfirmResponse>(
     `/api/accounts/${aid}/config-bundle/confirm`,
     form,

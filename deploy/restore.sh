@@ -26,6 +26,7 @@ fi
 PG_USER=${POSTGRES_USER:-telebot}
 PG_DB=${POSTGRES_DB:-telebot}
 VOLUME_NAME=${SESSIONS_VOLUME:-telebot_sessions}
+# 兼容说明：默认值沿用 telebot 历史命名；如你的部署已改名，请用 .env 或环境变量覆盖。
 
 read -r -p "确认要把数据库 [$PG_DB] 与 sessions volume [$VOLUME_NAME] 全部覆盖恢复？(yes/N) " ans
 [[ "$ans" == "yes" ]] || { echo "已取消"; exit 0; }

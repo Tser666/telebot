@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
@@ -14,6 +15,7 @@ from ..db.models.feature import AccountFeature, Feature
 from ..db.models.ignored_peer import IgnoredPeer
 from ..db.models.rule import Rule
 from ..deps import CurrentUser, DBSession
+from ..redis_client import get_redis
 from ..schemas.config_bundle import (
     ConfigBundleConfirmResponse,
     ConfigBundleDryRunResponse,
@@ -26,10 +28,19 @@ from ..services.config_bundle_service import (
     apply_bundle_confirm,
     assert_bundle_size,
     build_config_bundle,
+    build_preview_context_digest,
+    build_preview_signature,
     compare_bundles,
+)
+from ..worker.ipc import (
+    CMD_RELOAD_COMMANDS,
+    CMD_RELOAD_CONFIG,
+    CMD_RELOAD_IGNORED,
+    publish_cmd_with_ack,
 )
 
 router = APIRouter(tags=["config-bundle"])
+log = logging.getLogger(__name__)
 
 
 def _bad(code: str, message: str, status: int = 400) -> HTTPException:
@@ -111,6 +122,8 @@ async def dry_run_config_bundle(
     _user: CurrentUser,
     request: Request,
     file: UploadFile = File(...),
+    apply_conflicts: bool = Form(False),
+    confirm_chat_id_conflicts: bool = Form(False),
 ) -> ConfigBundleDryRunResponse:
     content_length = request.headers.get("content-length")
     if content_length is not None:
@@ -134,12 +147,37 @@ async def dry_run_config_bundle(
         raise _bad("BUNDLE_INVALID", "bundle 结构不符合规范") from exc
 
     target_bundle = await _load_bundle(db, aid)
-    return compare_bundles(
+    available_features = await _available_feature_map(db)
+    available_templates = await _available_command_templates(db)
+    report = compare_bundles(
         source_bundle,
         target_bundle,
-        available_features=await _available_feature_map(db),
-        available_command_templates=await _available_command_templates(db),
+        available_features=available_features,
+        available_command_templates=available_templates,
     )
+    report.preview_signature = build_preview_signature(
+        account_id=aid,
+        file_content=content,
+        apply_conflicts=apply_conflicts,
+        confirm_chat_id_conflicts=confirm_chat_id_conflicts,
+        preview_context_digest=build_preview_context_digest(
+            target=target_bundle,
+            available_features=available_features,
+            available_command_templates=available_templates,
+        ),
+    )
+    return report
+
+
+async def _notify_worker_reload(account_id: int) -> None:
+    try:
+        redis = get_redis()
+        for cmd in (CMD_RELOAD_CONFIG, CMD_RELOAD_COMMANDS, CMD_RELOAD_IGNORED):
+            ok = await publish_cmd_with_ack(redis, account_id, cmd)
+            if not ok:
+                log.debug("worker %s 未确认 aid=%s，将由周期 reconcile 收敛", cmd, account_id)
+    except Exception:  # noqa: BLE001
+        log.debug("通知 worker reload 失败 aid=%s", account_id, exc_info=True)
 
 
 @router.post(
@@ -154,6 +192,7 @@ async def confirm_config_bundle(
     file: UploadFile = File(...),
     apply_conflicts: bool = Form(False),
     confirm_chat_id_conflicts: bool = Form(False),
+    preview_signature: str = Form(""),
 ) -> ConfigBundleConfirmResponse:
     content_length = request.headers.get("content-length")
     if content_length is not None:
@@ -179,13 +218,29 @@ async def confirm_config_bundle(
     target_bundle = await _load_bundle(db, aid)
     available_features = await _available_feature_map(db)
     available_templates = await _available_command_templates(db)
+    expected_signature = build_preview_signature(
+        account_id=aid,
+        file_content=content,
+        apply_conflicts=apply_conflicts,
+        confirm_chat_id_conflicts=confirm_chat_id_conflicts,
+        preview_context_digest=build_preview_context_digest(
+            target=target_bundle,
+            available_features=available_features,
+            available_command_templates=available_templates,
+        ),
+    )
+    if preview_signature != expected_signature:
+        raise _bad(
+            "PREVIEW_SIGNATURE_MISMATCH",
+            "预览与确认参数不一致或目标配置已变化，请重新 dry-run 后再确认写入",
+        )
+
     dry_run = compare_bundles(
         source_bundle,
         target_bundle,
         available_features=available_features,
         available_command_templates=available_templates,
     )
-
     try:
         imported, skipped, conflicts, warnings = await apply_bundle_confirm(
             db,
@@ -214,6 +269,8 @@ async def confirm_config_bundle(
         },
     )
     await db.commit()
+    if imported > 0:
+        await _notify_worker_reload(aid)
 
     return ConfigBundleConfirmResponse(
         source_account=source_bundle.source_account,
@@ -222,4 +279,5 @@ async def confirm_config_bundle(
         skipped=skipped,
         conflicts=conflicts,
         warnings=warnings,
+        preview_signature=expected_signature,
     )

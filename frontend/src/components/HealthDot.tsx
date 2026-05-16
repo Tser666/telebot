@@ -34,7 +34,11 @@ function aggregateTone(h: HealthOverview): Tone {
   if (!h.alembic.ok) return "warn";
   if (h.providers.total > 0 && h.providers.with_api_key < h.providers.total)
     return "warn";
-  if ((h.workers.by_status["dead"] ?? 0) > 0) return "warn";
+  if ((h.workers.runtime_failing ?? 0) > 0) return "warn";
+  if (
+    (h.workers.runtime_desired_running ?? 0) >
+    (h.workers.runtime_desired_running_alive ?? 0)
+  ) return "warn";
   if ((h.workers.by_status["login_required"] ?? 0) > 0) return "warn";
   // 全绿
   return "ok";
@@ -55,6 +59,17 @@ function summarize(h: HealthOverview): string[] {
   const reauth = h.workers.by_status["login_required"] ?? 0;
   if (reauth) out.push(`⚠ ${reauth} 个账号需重登`);
   if (dead) out.push(`⚠ ${dead} 个账号已停用`);
+  if ((h.workers.runtime_failing ?? 0) > 0) {
+    out.push(`⚠ ${h.workers.runtime_failing} 个 worker 正在重试`);
+  }
+  if (
+    (h.workers.runtime_desired_running ?? 0) >
+    (h.workers.runtime_desired_running_alive ?? 0)
+  ) {
+    out.push(
+      `⚠ worker 存活 ${h.workers.runtime_desired_running_alive}/${h.workers.runtime_desired_running}`,
+    );
+  }
   if (h.workers.total === 0) out.push("ℹ 还没绑定 TG 账号");
   return out;
 }
@@ -64,8 +79,13 @@ export function HealthDot() {
   const q = useQuery({
     queryKey: ["system", "health-overview"],
     queryFn: getHealthOverview,
-    // 与 SystemHealthCard 共享 cache key；保持周期一致以充分复用。
-    refetchInterval: 60_000,
+    // 异常态更快刷新，平稳态降低探测频率。
+    refetchInterval: (query) => {
+      const data = query.state.data as HealthOverview | undefined;
+      if (!data) return 15_000;
+      const degraded = aggregateTone(data) !== "ok";
+      return degraded ? 8_000 : 60_000;
+    },
     refetchIntervalInBackground: false,
   });
 

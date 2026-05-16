@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # 每日备份脚本：dump 数据库 + 打包 session volume
 # 使用：在仓库根目录执行 ./deploy/backup.sh
-# 推荐 cron：0 3 * * * cd /opt/telebot && ./deploy/backup.sh >> /var/log/telebot-backup.log 2>&1
+# 推荐 cron：0 3 * * * cd /opt/telepilot && ./deploy/backup.sh >> /var/log/telepilot-backup.log 2>&1
+# 兼容说明：默认 BACKUP_DIR/SESSIONS_VOLUME 仍使用 telebot 命名，避免影响历史部署。
 set -euo pipefail
 
 # 时间戳与目标目录

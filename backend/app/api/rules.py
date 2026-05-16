@@ -39,6 +39,7 @@ from ..schemas.rule import (
     RuleUpdate,
 )
 from ..services import audit
+from ..services.redactor import redact_value
 from ..worker.ipc import CMD_RELOAD_CONFIG, cmd_channel, make_cmd, publish_cmd_with_ack
 
 log = logging.getLogger(__name__)
@@ -79,7 +80,9 @@ async def _notify_reload(aid: int) -> None:
 
 
 def _to_out(r: Rule) -> RuleOut:
-    return RuleOut.model_validate(r)
+    out = RuleOut.model_validate(r)
+    out.config = redact_value(dict(out.config or {}))
+    return out
 
 
 def _auto_reply_dry_run_match(*args):
@@ -262,7 +265,7 @@ async def patch_rule(
         user.id,
         "rule.update",
         target=f"account:{aid}/feature:{key}/rule:{rid}",
-        detail=data,
+        detail={"fields": sorted(data.keys())},
     )
     await db.commit()
     await _notify_reload(aid)

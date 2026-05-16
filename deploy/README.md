@@ -2,6 +2,7 @@
 
 > 本文档面向部署人员，说明本地（Mac）开发环境与 VPS 生产环境的搭建步骤。
 > 全部配置/命令均假设当前目录为仓库根目录 `telepilot/`。
+> 兼容说明：部分 Docker 默认值（如 `POSTGRES_*`、volume 名）仍沿用 `telebot` 历史命名，请按现状保留或显式覆盖，不需要做仓库 rename。
 
 ---
 
@@ -164,7 +165,7 @@ docker compose logs -f web        # 查看后端日志
 `/etc/caddy/Caddyfile`：
 
 ```Caddyfile
-userbot.example.com {
+telepilot.example.com {
     reverse_proxy localhost:80
 }
 ```
@@ -177,15 +178,15 @@ sudo systemctl reload caddy
 
 ```bash
 sudo apt install -y nginx certbot python3-certbot-nginx
-sudo certbot --nginx -d userbot.example.com
+sudo certbot --nginx -d telepilot.example.com
 ```
 
-`/etc/nginx/sites-available/userbot.conf`（关键片段）：
+`/etc/nginx/sites-available/telepilot.conf`（关键片段）：
 
 ```nginx
 server {
     listen 443 ssl http2;
-    server_name userbot.example.com;
+    server_name telepilot.example.com;
     # certbot 自动注入 ssl_certificate / ssl_certificate_key
 
     client_max_body_size 50M;
@@ -275,6 +276,6 @@ docker compose up -d --build      # 重建并滚动重启
 
 ## 四、参考文档
 
-- 产品需求：`teleuserbot.md`
-- 接口/契约：`CONTRACTS.md`
+- 项目约定：`README.md`
+- 接口与安全约束：`docs/TELEPILOT-ARCHITECTURE.md`
 - 多 Agent 分工：`AGENTS.md`

@@ -73,6 +73,10 @@ export async function listRuntimeLogs(
 // 操作日志（Dashboard 摘要 + 后续审计页用）
 export interface AuditLogQuery {
   user_id?: number;
+  action?: string;
+  target?: string;
+  keyword?: string;
+  detail?: string;
   since?: string;
   limit?: number;
 }

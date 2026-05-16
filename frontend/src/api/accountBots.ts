@@ -2,6 +2,7 @@ import { api } from "@/lib/api";
 import type {
   AccountBotConfig,
   AccountBotConfigUpdate,
+  AccountBotTestResponse,
   AccountBotUser,
   AccountBotUserCreate,
   AccountBotUserUpdate,
@@ -20,8 +21,14 @@ export async function updateAccountBot(
   return data;
 }
 
-export async function testAccountBot(aid: number, text?: string): Promise<void> {
-  await api.post(`/api/accounts/${aid}/bot/test`, { text });
+export async function testAccountBot(
+  aid: number,
+  text?: string,
+): Promise<AccountBotTestResponse> {
+  const { data } = await api.post<AccountBotTestResponse>(`/api/accounts/${aid}/bot/test`, {
+    text,
+  });
+  return data;
 }
 
 export async function restartAccountBotRuntime(aid: number): Promise<void> {

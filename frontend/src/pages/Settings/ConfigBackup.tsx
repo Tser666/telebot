@@ -180,7 +180,11 @@ export function ConfigBackup() {
   });
 
   const dryRunBundleMut = useMutation({
-    mutationFn: async (file: File) => dryRunConfigBundle(Number(bundleTargetAid), file),
+    mutationFn: async (file: File) =>
+      dryRunConfigBundle(Number(bundleTargetAid), file, {
+        applyConflicts,
+        confirmChatIdConflicts,
+      }),
     onSuccess: (data) => {
       setBundleResult(data);
       toast.success(
@@ -193,9 +197,11 @@ export function ConfigBackup() {
   const confirmBundleMut = useMutation({
     mutationFn: async () => {
       if (!bundleFile) throw new Error("请先上传 bundle 并完成 dry-run");
+      if (!bundleResult?.preview_signature) throw new Error("预览已失效，请重新 dry-run");
       return confirmConfigBundle(Number(bundleTargetAid), bundleFile, {
         applyConflicts,
         confirmChatIdConflicts,
+        previewSignature: bundleResult.preview_signature,
       });
     },
     onSuccess: (data) => {
@@ -233,6 +239,18 @@ export function ConfigBackup() {
     },
     [dryRunBundleMut],
   );
+
+  useEffect(() => {
+    setBundleResult(null);
+    setBundleConfirmResult(null);
+  }, [bundleTargetAid]);
+
+  useEffect(() => {
+    if (bundleResult) {
+      setBundleResult(null);
+      setBundleConfirmResult(null);
+    }
+  }, [applyConflicts, confirmChatIdConflicts]);
 
   return (
     <>
@@ -524,7 +542,12 @@ export function ConfigBackup() {
                 </div>
                 <Button
                   onClick={() => confirmBundleMut.mutate()}
-                  disabled={!bundleFile || !bundleTargetAid || confirmBundleMut.isPending}
+                  disabled={
+                    !bundleFile ||
+                    !bundleTargetAid ||
+                    !bundleResult?.preview_signature ||
+                    confirmBundleMut.isPending
+                  }
                   className="gap-1.5"
                 >
                   <CheckCircle2 className="h-4 w-4" />

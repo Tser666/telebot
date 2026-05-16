@@ -52,6 +52,7 @@ from ..db.models.log import RuntimeLog
 from ..db.models.rate_limit import RateLimitEvent
 from ..db.models.system import SystemSetting
 from ..redis_client import get_redis
+from ..services.redactor import redact_text, redact_value
 from .entry import worker_entry
 from .ipc import (
     CMD_PAUSE,
@@ -701,8 +702,8 @@ def _build_runtime_log_row(raw: str) -> RuntimeLog | None:
             account_id=d.get("account_id"),
             level=d.get("level", "info"),
             source=d.get("source"),
-            message=d.get("message", ""),
-            detail=d.get("detail"),
+            message=redact_text(str(d.get("message", ""))),
+            detail=redact_value(d.get("detail")) if d.get("detail") is not None else None,
         )
     except Exception:
         return None
@@ -723,11 +724,11 @@ async def _build_runtime_log_row_with_retention(raw: str) -> RuntimeLog | None:
             level=level,
             source=d.get("source"),
             message=_truncate_text(
-                str(d.get("message", "")),
+                redact_text(str(d.get("message", ""))),
                 int(cfg.get("runtime_log_max_message_chars", 2000) or 2000),
             ),
             detail=_truncate_detail(
-                d.get("detail"),
+                redact_value(d.get("detail")) if d.get("detail") is not None else None,
                 int(cfg.get("runtime_log_max_detail_chars", 8000) or 0),
             ),
         )

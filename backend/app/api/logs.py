@@ -15,10 +15,11 @@ from typing import Any
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import String, cast, or_, select
 
 from ..db.models.log import AuditLog, RuntimeLog
 from ..deps import CurrentUser, DBSession
+from ..services.redactor import redact_text, redact_value
 
 router = APIRouter(tags=["logs"])
 
@@ -59,8 +60,8 @@ class RuntimeLogItem(BaseModel):
             account_id=row.account_id,
             level=row.level,
             source=row.source,
-            message=row.message,
-            detail=row.detail,
+            message=redact_text(row.message),
+            detail=redact_value(row.detail) if row.detail is not None else None,
         )
 
     model_config = ConfigDict(from_attributes=True)
@@ -72,6 +73,10 @@ async def list_audit_logs(
     db: DBSession,
     _user: CurrentUser,
     user_id: int | None = Query(None, description="按 web_user 过滤"),
+    action: str | None = Query(None, description="按 action 精确过滤"),
+    target: str | None = Query(None, description="target 模糊匹配"),
+    keyword: str | None = Query(None, description="action/target/detail 模糊匹配"),
+    detail: str | None = Query(None, description="detail(JSON 字符串)模糊匹配"),
     since: datetime | None = Query(None, description="ISO 时间，仅返回此后的日志"),
     limit: int = Query(50, ge=1, le=500),
 ) -> list[AuditLogItem]:
@@ -79,10 +84,35 @@ async def list_audit_logs(
     stmt = select(AuditLog).order_by(AuditLog.ts.desc()).limit(limit)
     if user_id is not None:
         stmt = stmt.where(AuditLog.user_id == user_id)
+    if action:
+        stmt = stmt.where(AuditLog.action == action)
+    if target:
+        stmt = stmt.where(AuditLog.target.ilike(f"%{target}%"))
+    if detail:
+        stmt = stmt.where(cast(AuditLog.detail, String).ilike(f"%{detail}%"))
+    if keyword:
+        like = f"%{keyword}%"
+        stmt = stmt.where(
+            or_(
+                AuditLog.action.ilike(like),
+                AuditLog.target.ilike(like),
+                cast(AuditLog.detail, String).ilike(like),
+            )
+        )
     if since is not None:
         stmt = stmt.where(AuditLog.ts >= since)
     rows = (await db.execute(stmt)).scalars().all()
-    return [AuditLogItem.model_validate(r) for r in rows]
+    return [
+        AuditLogItem(
+            id=r.id,
+            ts=r.ts,
+            user_id=r.user_id,
+            action=r.action,
+            target=r.target,
+            detail=redact_value(r.detail) if r.detail is not None else None,
+        )
+        for r in rows
+    ]
 
 
 # ── /api/logs/runtime ────────────────────────────────────────────

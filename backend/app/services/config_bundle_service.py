@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
 
@@ -23,20 +24,9 @@ from ..schemas.config_bundle import (
     ConfigBundleRuleItem,
     ConfigBundleSourceAccount,
 )
+from .redactor import redact_value
 
 MAX_BUNDLE_BYTES = 1_048_576
-
-_SENSITIVE_KEY_HINTS = (
-    "api_key",
-    "access_token",
-    "bot_token",
-    "codex_token",
-    "session",
-    "secret",
-    "password",
-    "totp",
-)
-
 
 class BundleTooLarge(ValueError):
     """导出 / 上传 bundle 超过 1MB。"""
@@ -55,25 +45,9 @@ class BundleConfirmError(ValueError):
         self.message = message
 
 
-def _is_sensitive_key(key: str) -> bool:
-    lowered = key.lower()
-    return lowered.endswith("_enc") or any(hint in lowered for hint in _SENSITIVE_KEY_HINTS)
-
-
 def sanitize_bundle_value(value: Any) -> Any:
     """递归移除 bundle 里的敏感字段。"""
-    if isinstance(value, dict):
-        out: dict[str, Any] = {}
-        for key, item in value.items():
-            if isinstance(key, str) and _is_sensitive_key(key):
-                continue
-            out[str(key) if not isinstance(key, str) else key] = sanitize_bundle_value(item)
-        return out
-    if isinstance(value, list):
-        return [sanitize_bundle_value(item) for item in value]
-    if isinstance(value, tuple):
-        return [sanitize_bundle_value(item) for item in value]
-    return value
+    return redact_value(value, drop_sensitive_keys=True)
 
 
 def bundle_json_bytes(bundle: ConfigBundleExport) -> bytes:
@@ -93,6 +67,132 @@ def assert_bundle_size(bundle: ConfigBundleExport) -> bytes:
 def _config_diff_fields(source_cfg: dict[str, Any], target_cfg: dict[str, Any]) -> list[str]:
     keys = sorted(set(source_cfg) | set(target_cfg))
     return [key for key in keys if source_cfg.get(key) != target_cfg.get(key)]
+
+
+_CHAT_ID_EXACT_KEYS = {"chat_id", "target_chat_id"}
+_CHAT_ID_HINT_KEYS = {
+    "source_peers",
+    "group_ids",
+    "peer",
+    "peers",
+    "chat",
+    "chats",
+    "group",
+    "groups",
+}
+_CHAT_ID_HINT_PARTS = ("peer", "chat", "group")
+
+
+def _contains_chat_id_signal(path: str, key: str, value: Any) -> bool:
+    lowered_key = key.lower()
+    lowered_path = path.lower()
+    if lowered_key in _CHAT_ID_EXACT_KEYS:
+        return True
+    if lowered_key in _CHAT_ID_HINT_KEYS and isinstance(value, (list, tuple, dict, int, str)):
+        return True
+    if lowered_key.endswith("_chat_id") or lowered_key.endswith("_peer_id") or lowered_key.endswith("_group_id"):
+        return True
+    if any(part in lowered_key for part in _CHAT_ID_HINT_PARTS) and lowered_key.endswith("_id"):
+        return True
+    if lowered_path.endswith(".action.target_chat_id"):
+        return True
+    return False
+
+
+def _collect_chat_id_paths(value: Any, path: str = "config") -> set[str]:
+    out: set[str] = set()
+    if isinstance(value, dict):
+        for raw_key, raw_item in value.items():
+            key = str(raw_key)
+            next_path = f"{path}.{key}"
+            if _contains_chat_id_signal(next_path, key, raw_item):
+                out.add(next_path)
+            out.update(_collect_chat_id_paths(raw_item, next_path))
+        return out
+    if isinstance(value, list):
+        for idx, item in enumerate(value):
+            out.update(_collect_chat_id_paths(item, f"{path}[{idx}]"))
+    return out
+
+
+def rule_has_chat_id_conflict(source_cfg: dict[str, Any], target_cfg: dict[str, Any]) -> bool:
+    src_paths = _collect_chat_id_paths(source_cfg)
+    dst_paths = _collect_chat_id_paths(target_cfg)
+    for path in sorted(src_paths | dst_paths):
+        src_val = _read_path(source_cfg, path)
+        dst_val = _read_path(target_cfg, path)
+        if src_val != dst_val:
+            return True
+    return False
+
+
+def _read_path(cfg: Any, path: str) -> Any:
+    cur = cfg
+    token = path.removeprefix("config.")
+    segments: list[str] = []
+    buff = ""
+    for ch in token:
+        if ch == ".":
+            if buff:
+                segments.append(buff)
+                buff = ""
+            continue
+        buff += ch
+    if buff:
+        segments.append(buff)
+    for seg in segments:
+        if "[" in seg and seg.endswith("]"):
+            name, _, rest = seg.partition("[")
+            if name:
+                if not isinstance(cur, dict):
+                    return None
+                cur = cur.get(name)
+            if not isinstance(cur, list):
+                return None
+            try:
+                idx = int(rest[:-1])
+            except ValueError:
+                return None
+            if idx < 0 or idx >= len(cur):
+                return None
+            cur = cur[idx]
+            continue
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(seg)
+    return cur
+
+
+def build_preview_signature(
+    *,
+    account_id: int,
+    file_content: bytes,
+    apply_conflicts: bool,
+    confirm_chat_id_conflicts: bool,
+    preview_context_digest: str = "",
+) -> str:
+    digest = hashlib.sha256(file_content).hexdigest()
+    raw = (
+        f"{account_id}:{digest}:{int(apply_conflicts)}:"
+        f"{int(confirm_chat_id_conflicts)}:{preview_context_digest}"
+    )
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def build_preview_context_digest(
+    *,
+    target: ConfigBundleExport,
+    available_features: dict[str, str],
+    available_command_templates: dict[str, dict[str, Any]],
+) -> str:
+    """把 dry-run 依赖的目标状态压成摘要，避免 stale preview 被确认写入。"""
+    payload = {
+        "target": target.model_dump(mode="json"),
+        "available_features": available_features,
+        "available_command_templates": available_command_templates,
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _build_source_account(account) -> ConfigBundleSourceAccount:
@@ -200,6 +300,7 @@ def compare_bundles(
                     entity="feature",
                     key=feature_key,
                     action="conflict",
+                    conflict_kind="blocked",
                     fields=["feature_key"],
                     note="feature not registered",
                 )
@@ -221,6 +322,7 @@ def compare_bundles(
                     entity="feature",
                     key=feature_key,
                     action="conflict",
+                    conflict_kind="overridable",
                     fields=sorted(dict.fromkeys(changed)),
                 )
             )
@@ -237,6 +339,7 @@ def compare_bundles(
                     entity="rule",
                     key=rule_key,
                     action="conflict",
+                    conflict_kind="blocked",
                     fields=["feature_key"],
                     note="feature not registered",
                 )
@@ -254,12 +357,15 @@ def compare_bundles(
         if int(item["priority"]) != int(current["priority"]):
             changed.append("priority")
         changed.extend(_config_diff_fields(dict(item["config"]), dict(current["config"])))
+        if rule_has_chat_id_conflict(dict(item["config"]), dict(current["config"])):
+            changed.append("chat_id")
         if changed:
             items.append(
                 ConfigBundleDiffItem(
                     entity="rule",
                     key=rule_key,
                     action="conflict",
+                    conflict_kind="overridable",
                     fields=sorted(dict.fromkeys(changed)),
                 )
             )
@@ -276,6 +382,7 @@ def compare_bundles(
                     entity="command_link",
                     key=template_name,
                     action="conflict",
+                    conflict_kind="blocked",
                     fields=["template_name"],
                     note="command template not registered",
                 )
@@ -292,6 +399,7 @@ def compare_bundles(
                     entity="command_link",
                     key=template_name,
                     action="conflict",
+                    conflict_kind="blocked",
                     fields=sorted(dict.fromkeys(changed)),
                     note="template metadata changed",
                 )
@@ -326,6 +434,7 @@ def compare_bundles(
                     entity="ignored_peer",
                     key=peer_key,
                     action="conflict",
+                    conflict_kind="overridable",
                     fields=sorted(dict.fromkeys(changed)),
                 )
             )
@@ -383,9 +492,13 @@ async def apply_bundle_confirm(
         if item.action == "skip":
             skipped += 1
             continue
-        if item.action == "conflict" and not apply_conflicts:
-            conflicts += 1
-            continue
+        if item.action == "conflict":
+            if item.conflict_kind == "blocked":
+                conflicts += 1
+                continue
+            if not apply_conflicts:
+                conflicts += 1
+                continue
 
         if item.entity == "feature":
             src = src_features.get(key)

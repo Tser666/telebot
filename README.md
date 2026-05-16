@@ -283,6 +283,7 @@ pytest -v
 ruff check app
 
 # 前端类型检查与构建
+cd ..
 pnpm -C frontend exec tsc -b --noEmit
 pnpm -C frontend build
 ```
@@ -305,7 +306,7 @@ pnpm -C frontend build
 
 ## 项目状态
 
-当前版本：`v0.15.0 · feature`
+当前版本：`v0.15.5 · fix`
 
 项目处于 Alpha / 个人自用阶段。核心链路已经能跑，但仍在快速迭代中，接口、页面和插件规范可能继续调整。欢迎 fork、参考和提 issue；大规模 PR 建议先开 issue 对齐方向。
 

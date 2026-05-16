@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.models.log import AuditLog
+from .redactor import redact_value
 
 
 async def write(
@@ -27,5 +28,12 @@ async def write(
     :param target: 目标资源的字符串描述（如 ``account:42``）。
     :param detail: 任意 JSON 附加信息（脱敏后再写入）。
     """
-    db.add(AuditLog(user_id=user_id, action=action, target=target, detail=detail))
+    db.add(
+        AuditLog(
+            user_id=user_id,
+            action=action,
+            target=target,
+            detail=redact_value(detail) if detail is not None else None,
+        )
+    )
     # 不 commit；调用方负责事务边界

@@ -118,6 +118,16 @@ class WorkersStatus(BaseModel):
     total: int = 0
     by_status: dict[str, int] = Field(default_factory=dict)
     """如 ``{"active":3,"paused":1,"login_required":1,"dead":0,"floodwait":0}``。"""
+    runtime_total: int = 0
+    """supervisor 持有的 worker 句柄总数。"""
+    runtime_alive: int = 0
+    """当前子进程 alive=true 的数量。"""
+    runtime_desired_running: int = 0
+    """desired=running 的数量。"""
+    runtime_desired_running_alive: int = 0
+    """desired=running 且 alive=true 的数量。"""
+    runtime_failing: int = 0
+    """fail_count>0 的数量。"""
 
 
 class HealthOverview(BaseModel):
@@ -303,7 +313,7 @@ async def _probe_proxies() -> ProxiesStatus:
 
 
 async def _probe_workers() -> WorkersStatus:
-    """按 ``account.status`` 统计；不区分"是否真的 worker 子进程在跑"——那是 supervisor 的事。"""
+    """返回 DB 状态分布 + supervisor runtime 聚合。"""
     try:
         async with AsyncSessionLocal() as db:
             rows = (
@@ -313,7 +323,40 @@ async def _probe_workers() -> WorkersStatus:
             ).all()
         total = sum(int(c) for _, c in rows)
         by_status = {str(s): int(c) for s, c in rows}
-        return WorkersStatus(total=total, by_status=by_status)
+        runtime_total = 0
+        runtime_alive = 0
+        runtime_desired_running = 0
+        runtime_desired_running_alive = 0
+        runtime_failing = 0
+        try:
+            from ..worker.supervisor import get_worker_runtime_snapshot
+
+            runtime_rows = get_worker_runtime_snapshot()
+            runtime_total = len(runtime_rows)
+            for row in runtime_rows:
+                alive = bool(row.get("alive"))
+                desired = str(row.get("desired") or "running")
+                fail_count = int(row.get("fail_count") or 0)
+                if alive:
+                    runtime_alive += 1
+                if desired == "running":
+                    runtime_desired_running += 1
+                    if alive:
+                        runtime_desired_running_alive += 1
+                if fail_count > 0:
+                    runtime_failing += 1
+        except Exception:
+            # runtime 快照失败时不影响 DB 状态统计
+            pass
+        return WorkersStatus(
+            total=total,
+            by_status=by_status,
+            runtime_total=runtime_total,
+            runtime_alive=runtime_alive,
+            runtime_desired_running=runtime_desired_running,
+            runtime_desired_running_alive=runtime_desired_running_alive,
+            runtime_failing=runtime_failing,
+        )
     except Exception:  # noqa: BLE001
         return WorkersStatus()
 

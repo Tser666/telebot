@@ -58,7 +58,7 @@ trap 'rm -f "$TMP"' EXIT
 chmod 600 "$TMP"
 
 {
-  echo "# Telegram Userbot key backup"
+  echo "# TelePilot key backup"
   echo "# generated at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "# host:         $(hostname 2>/dev/null || echo '?')"
   echo "#"

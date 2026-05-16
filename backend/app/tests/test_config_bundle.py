@@ -26,6 +26,8 @@ from app.services.config_bundle_service import (
     apply_bundle_confirm,
     assert_bundle_size,
     build_config_bundle,
+    build_preview_context_digest,
+    build_preview_signature,
     compare_bundles,
 )
 
@@ -76,6 +78,45 @@ def test_build_config_bundle_redacts_sensitive_fields() -> None:
     assert bundle.command_links[0].template_name == "ping"
     assert bundle.ignored_peers[0].peer_id == -100123
     assert bundle.ignored_peers[0].peer_label == "测试群"
+
+
+def test_preview_signature_changes_when_target_snapshot_changes() -> None:
+    source = ConfigBundleExport(source_account=ConfigBundleSourceAccount(id=1, label="src"))
+    body = source.model_dump_json().encode("utf-8")
+    empty_target = ConfigBundleExport(source_account=ConfigBundleSourceAccount(id=2, label="dst"))
+    changed_target = ConfigBundleExport(
+        source_account=ConfigBundleSourceAccount(id=2, label="dst"),
+        features={
+            "scheduler": ConfigBundleFeatureItem(
+                feature_key="scheduler",
+                enabled=True,
+                config={"timezone": "Asia/Shanghai"},
+            )
+        },
+    )
+    common = {
+        "account_id": 2,
+        "file_content": body,
+        "apply_conflicts": False,
+        "confirm_chat_id_conflicts": False,
+    }
+    first = build_preview_signature(
+        **common,
+        preview_context_digest=build_preview_context_digest(
+            target=empty_target,
+            available_features={"scheduler": "Scheduler"},
+            available_command_templates={},
+        ),
+    )
+    second = build_preview_signature(
+        **common,
+        preview_context_digest=build_preview_context_digest(
+            target=changed_target,
+            available_features={"scheduler": "Scheduler"},
+            available_command_templates={},
+        ),
+    )
+    assert first != second
 
 
 def test_assert_bundle_size_rejects_over_1mb() -> None:
@@ -515,3 +556,179 @@ async def test_apply_bundle_confirm_applies_conflicts_with_ack() -> None:
     assert conflicts == 0
     assert warnings == []
     assert len(db.added) == 1
+
+
+@pytest.mark.asyncio
+async def test_apply_bundle_confirm_requires_chat_id_ack_for_nested_target_chat_id() -> None:
+    source = ConfigBundleExport(
+        source_account=ConfigBundleSourceAccount(id=1, label="src"),
+        rules=[
+            ConfigBundleRuleItem(
+                feature_key="scheduler",
+                name="nested-chat",
+                enabled=True,
+                priority=10,
+                config={"action": {"target_chat_id": -10001, "cmd": "run"}},
+            )
+        ],
+    )
+    target = ConfigBundleExport(
+        source_account=ConfigBundleSourceAccount(id=2, label="dst"),
+        rules=[
+            ConfigBundleRuleItem(
+                feature_key="scheduler",
+                name="nested-chat",
+                enabled=True,
+                priority=10,
+                config={"action": {"target_chat_id": -10002, "cmd": "run"}},
+            )
+        ],
+    )
+    dry_run = compare_bundles(
+        source,
+        target,
+        available_features={"scheduler": "Scheduler"},
+        available_command_templates={},
+    )
+    db = _FakeDB([])
+    with pytest.raises(BundleConfirmError) as exc_info:
+        await apply_bundle_confirm(
+            db,
+            account_id=2,
+            source=source,
+            dry_run=dry_run,
+            available_command_templates={},
+            apply_conflicts=True,
+            confirm_chat_id_conflicts=False,
+        )
+    assert exc_info.value.code == "CHAT_ID_CONFIRM_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_apply_bundle_confirm_does_not_apply_blocked_conflict() -> None:
+    source = ConfigBundleExport(
+        source_account=ConfigBundleSourceAccount(id=1, label="src"),
+        command_links=[
+            ConfigBundleCommandLinkItem(
+                template_id=99,
+                template_name="missing-template",
+                aliases=[],
+                type="reply_text",
+                enabled=True,
+            )
+        ],
+    )
+    target = ConfigBundleExport(source_account=ConfigBundleSourceAccount(id=2, label="dst"))
+    dry_run = compare_bundles(
+        source,
+        target,
+        available_features={},
+        available_command_templates={},
+    )
+    db = _FakeDB([])
+    imported, skipped, conflicts, warnings = await apply_bundle_confirm(
+        db,
+        account_id=2,
+        source=source,
+        dry_run=dry_run,
+        available_command_templates={},
+        apply_conflicts=True,
+        confirm_chat_id_conflicts=True,
+    )
+    assert imported == 0
+    assert skipped == 0
+    assert conflicts == 1
+    assert warnings == []
+
+
+@pytest.mark.asyncio
+async def test_confirm_config_bundle_success_triggers_worker_reload(monkeypatch: pytest.MonkeyPatch) -> None:
+    source_bundle = ConfigBundleExport(
+        source_account=ConfigBundleSourceAccount(id=1, label="src"),
+        rules=[
+            ConfigBundleRuleItem(
+                feature_key="scheduler",
+                name="job",
+                enabled=True,
+                priority=1,
+                config={"chat_id": -10001},
+            )
+        ],
+    )
+    body = source_bundle.model_dump_json().encode("utf-8")
+    target_bundle = ConfigBundleExport(source_account=ConfigBundleSourceAccount(id=2, label="dst"))
+    available_features = {"scheduler": "Scheduler"}
+    expected_signature = build_preview_signature(
+        account_id=2,
+        file_content=body,
+        apply_conflicts=True,
+        confirm_chat_id_conflicts=True,
+        preview_context_digest=build_preview_context_digest(
+            target=target_bundle,
+            available_features=available_features,
+            available_command_templates={},
+        ),
+    )
+
+    load_bundle = AsyncMock(
+        side_effect=[
+            target_bundle,
+            target_bundle,
+        ]
+    )
+    monkeypatch.setattr(config_bundle_api, "_load_bundle", load_bundle)
+    monkeypatch.setattr(config_bundle_api, "_available_feature_map", AsyncMock(return_value=available_features))
+    monkeypatch.setattr(config_bundle_api, "_available_command_templates", AsyncMock(return_value={}))
+    monkeypatch.setattr(config_bundle_api, "apply_bundle_confirm", AsyncMock(return_value=(1, 0, 0, [])))
+    monkeypatch.setattr(config_bundle_api.audit, "write", AsyncMock())
+    notify = AsyncMock()
+    monkeypatch.setattr(config_bundle_api, "_notify_worker_reload", notify)
+
+    db = SimpleNamespace(commit=AsyncMock())
+    req = SimpleNamespace(headers={})
+    file = UploadFile(file=BytesIO(body), filename="bundle.json", headers=Headers({}))
+    user = SimpleNamespace(id=11)
+    resp = await config_bundle_api.confirm_config_bundle(
+        aid=2,
+        db=db,
+        user=user,
+        request=req,  # type: ignore[arg-type]
+        file=file,
+        apply_conflicts=True,
+        confirm_chat_id_conflicts=True,
+        preview_signature=expected_signature,
+    )
+    assert resp.imported == 1
+    notify.assert_awaited_once_with(2)
+
+
+@pytest.mark.asyncio
+async def test_confirm_config_bundle_rejects_mismatched_preview_signature(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_bundle = ConfigBundleExport(
+        source_account=ConfigBundleSourceAccount(id=1, label="src"),
+    )
+    body = source_bundle.model_dump_json().encode("utf-8")
+    load_bundle = AsyncMock(
+        return_value=ConfigBundleExport(source_account=ConfigBundleSourceAccount(id=2, label="dst"))
+    )
+    monkeypatch.setattr(config_bundle_api, "_load_bundle", load_bundle)
+    monkeypatch.setattr(config_bundle_api, "_available_feature_map", AsyncMock(return_value={}))
+    monkeypatch.setattr(config_bundle_api, "_available_command_templates", AsyncMock(return_value={}))
+    db = SimpleNamespace()
+    req = SimpleNamespace(headers={})
+    file = UploadFile(file=BytesIO(body), filename="bundle.json", headers=Headers({}))
+    user = SimpleNamespace(id=11)
+    with pytest.raises(HTTPException) as exc_info:
+        await config_bundle_api.confirm_config_bundle(
+            aid=2,
+            db=db,
+            user=user,
+            request=req,  # type: ignore[arg-type]
+            file=file,
+            apply_conflicts=False,
+            confirm_chat_id_conflicts=False,
+            preview_signature="bad-signature",
+        )
+    assert exc_info.value.detail["code"] == "PREVIEW_SIGNATURE_MISMATCH"

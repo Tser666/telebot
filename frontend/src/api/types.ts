@@ -103,12 +103,20 @@ export interface AccountUpdateRequest {
 
 // ===================== 账号 Bot 联动 =====================
 export type AccountBotRole = "viewer" | "operator" | "admin";
+export interface AccountBotRemotePluginPolicy {
+  enabled: boolean;
+  install: boolean;
+  update: boolean;
+  uninstall: boolean;
+  enable_disable: boolean;
+}
 
 export interface AccountBotConfig {
   account_id: number;
   enabled: boolean;
   status: string;
   has_token: boolean;
+  remote_plugin_policy: AccountBotRemotePluginPolicy;
   username?: string | null;
   last_update_id?: number | null;
   last_error?: string | null;
@@ -120,6 +128,7 @@ export interface AccountBotConfigUpdate {
   bot_token?: string | null;
   clear_token?: boolean;
   enabled?: boolean | null;
+  remote_plugin_policy?: Partial<AccountBotRemotePluginPolicy> | null;
 }
 
 export interface AccountBotUser {
@@ -148,6 +157,11 @@ export interface AccountBotUserUpdate {
   role?: AccountBotRole;
   notify_enabled?: boolean;
   enabled?: boolean;
+}
+export interface AccountBotTestResponse {
+  ok: boolean;
+  sent: number;
+  message: string;
 }
 
 // ===================== 设备伪装 =====================
@@ -241,6 +255,7 @@ export interface ConfigBundleDiffItem {
   entity: "feature" | "rule" | "command_link" | "ignored_peer";
   key: string;
   action: "add" | "skip" | "conflict";
+  conflict_kind?: "overridable" | "blocked" | null;
   fields: string[];
   note?: string | null;
 }
@@ -253,6 +268,7 @@ export interface ConfigBundleDryRunResponse {
   counts: ConfigBundleDiffCounts;
   items: ConfigBundleDiffItem[];
   warnings: string[];
+  preview_signature?: string | null;
 }
 
 export interface ConfigBundleConfirmResponse {
@@ -263,6 +279,7 @@ export interface ConfigBundleConfirmResponse {
   skipped: number;
   conflicts: number;
   warnings: string[];
+  preview_signature?: string | null;
 }
 
 // ===================== 功能 =====================
@@ -618,6 +635,11 @@ export interface WorkersHealthStatus {
   total: number;
   /** {status: count}，如 {"active":3,"paused":1,"login_required":1} */
   by_status: Record<string, number>;
+  runtime_total: number;
+  runtime_alive: number;
+  runtime_desired_running: number;
+  runtime_desired_running_alive: number;
+  runtime_failing: number;
 }
 
 export interface HealthOverview {
@@ -1054,6 +1076,10 @@ export interface SchedulerRuleConfig {
   last_fire?: string | null;
   last_result?: "ok" | "error" | string;
   last_error?: string | null;
+}
+
+export interface SchedulerFeatureConfig {
+  allowed_command_whitelist?: string[];
 }
 
 // ===== Sprint4 #2D =====

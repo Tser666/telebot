@@ -1,6 +1,7 @@
 # 公网部署指南（Caddy + HTTPS）
 
-本指南用于把 Telebot Web 面板安全暴露到公网，反向代理使用 Caddy，自动签发 HTTPS 证书。
+本指南用于把 TelePilot Web 面板安全暴露到公网，反向代理使用 Caddy，自动签发 HTTPS 证书。
+说明：仓库里部分默认卷名/数据库名仍保留 `telebot` 兼容命名，不影响对外产品名为 TelePilot。
 
 ## 目录
 
@@ -151,7 +152,7 @@ pnpm run build
 
 ```ini
 [Unit]
-Description=Telebot Backend
+Description=TelePilot Backend
 After=network.target
 
 [Service]

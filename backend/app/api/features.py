@@ -15,7 +15,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from ..db.models.account import Account
-from ..db.models.feature import Feature
+from ..db.models.feature import AccountFeature, Feature
 from ..deps import CurrentUser, DBSession
 from ..schemas.feature import (
     AccountFeatureConfigUpdate,
@@ -27,12 +27,30 @@ from ..schemas.feature import (
     PluginGlobalConfigUpdate,
 )
 from ..services import audit, feature_service
+from ..services.redactor import is_sensitive_key, redact_value
 
 router = APIRouter(tags=["features"])
 
 
 def _bad(code: str, message: str, status: int = 400) -> HTTPException:
     return HTTPException(status_code=status, detail={"code": code, "message": message})
+
+
+def _sanitize_config(config: dict[str, object]) -> dict[str, object]:
+    return redact_value(config)
+
+
+def _preserve_existing_sensitive_values(
+    existing: dict[str, object] | None, incoming: dict[str, object]
+) -> dict[str, object]:
+    merged = dict(incoming)
+    existing_dict = dict(existing or {})
+    for key, value in existing_dict.items():
+        if not is_sensitive_key(str(key)):
+            continue
+        if key not in merged or merged.get(key) in ("", None):
+            merged[key] = value
+    return merged
 
 
 # ─────────────────────────────────────────────────────
@@ -65,7 +83,7 @@ async def list_account_features(
             enabled=r.enabled,
             state=r.state,
             last_error=r.last_error,
-            config=dict(r.config or {}),
+            config=_sanitize_config(dict(r.config or {})),
         )
         for r in rows
     ]
@@ -100,6 +118,11 @@ async def patch_account_feature(
 
     # 如果提供了 config，验证 JSON Schema
     if payload.config is not None:
+        existing = await db.get(AccountFeature, (aid, key))
+        payload.config = _preserve_existing_sensitive_values(
+            dict(existing.config or {}) if existing is not None else None,
+            dict(payload.config),
+        )
         config_schema = (feature.manifest or {}).get("config_schema")
         if config_schema:
             validation = feature_service.validate_config_against_schema(
@@ -127,7 +150,7 @@ async def patch_account_feature(
         enabled=af.enabled,
         state=af.state,
         last_error=af.last_error,
-        config=dict(af.config or {}),
+        config=_sanitize_config(dict(af.config or {})),
     )
 
 
@@ -157,6 +180,11 @@ async def update_account_feature_config(
         raise _bad("FEATURE_NOT_FOUND", f"未注册的 feature: {key}", 404)
 
     # 验证 JSON Schema
+    existing = await db.get(AccountFeature, (aid, key))
+    payload.config = _preserve_existing_sensitive_values(
+        dict(existing.config or {}) if existing is not None else None,
+        dict(payload.config),
+    )
     config_schema = (feature.manifest or {}).get("config_schema")
     if config_schema:
         validation = feature_service.validate_config_against_schema(
@@ -176,7 +204,7 @@ async def update_account_feature_config(
         user.id,
         "feature.config.update",
         target=f"account:{aid}/feature:{key}",
-        detail={"config": payload.config},
+        detail={"config_keys": sorted(payload.config.keys())},
     )
     await db.commit()
     return AccountFeatureItem(
@@ -184,7 +212,7 @@ async def update_account_feature_config(
         enabled=af.enabled,
         state=af.state,
         last_error=af.last_error,
-        config=dict(af.config or {}),
+        config=_sanitize_config(dict(af.config or {})),
     )
 
 
@@ -209,8 +237,8 @@ async def get_plugin_global_config(
     global_config = await feature_service.get_plugin_global_config(db, key)
     return PluginGlobalConfigResponse(
         plugin_key=key,
-        config=global_config,
-        global_config=global_config,
+        config=_sanitize_config(global_config),
+        global_config=_sanitize_config(global_config),
     )
 
 
@@ -242,14 +270,14 @@ async def set_plugin_global_config(
         user.id,
         "feature.global_config.update",
         target=f"plugin:{key}",
-        detail={"global_config": global_config},
+        detail={"global_config_keys": sorted(global_config.keys())},
     )
     await db.commit()
 
     return PluginGlobalConfigResponse(
         plugin_key=key,
-        config=global_config,
-        global_config=global_config,
+        config=_sanitize_config(global_config),
+        global_config=_sanitize_config(global_config),
     )
 
 
@@ -278,7 +306,7 @@ async def get_effective_config(
         raise _bad("FEATURE_NOT_FOUND", f"未注册的 feature: {key}", 404)
 
     effective_config = await feature_service.get_effective_plugin_config(db, aid, key)
-    return effective_config
+    return _sanitize_config(effective_config)
 
 
 # ─────────────────────────────────────────────────────

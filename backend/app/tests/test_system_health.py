@@ -264,11 +264,27 @@ async def test_probe_workers_aggregates_by_status() -> None:
 
     fake_ctx = AsyncMock()
     fake_ctx.__aenter__.return_value = fake_session
-    with patch("app.api.system_health.AsyncSessionLocal", return_value=fake_ctx):
+    runtime_rows = [
+        {"account_id": 1, "pid": 101, "alive": True, "desired": "running", "fail_count": 0},
+        {"account_id": 2, "pid": 102, "alive": False, "desired": "running", "fail_count": 2},
+        {"account_id": 3, "pid": None, "alive": False, "desired": "stopped", "fail_count": 0},
+    ]
+    with (
+        patch("app.api.system_health.AsyncSessionLocal", return_value=fake_ctx),
+        patch(
+            "app.worker.supervisor.get_worker_runtime_snapshot",
+            return_value=runtime_rows,
+        ),
+    ):
         out = await _probe_workers()
 
     assert out.total == 5
     assert out.by_status == {"active": 3, "paused": 1, "login_required": 1}
+    assert out.runtime_total == 3
+    assert out.runtime_alive == 1
+    assert out.runtime_desired_running == 2
+    assert out.runtime_desired_running_alive == 1
+    assert out.runtime_failing == 1
 
 
 # ════════════════════════════════════════════════════════════

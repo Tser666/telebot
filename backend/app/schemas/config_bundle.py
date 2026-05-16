@@ -59,6 +59,7 @@ class ConfigBundleDiffItem(BaseModel):
     entity: Literal["feature", "rule", "command_link", "ignored_peer"]
     key: str
     action: Literal["add", "skip", "conflict"]
+    conflict_kind: Literal["overridable", "blocked"] | None = None
     fields: list[str] = Field(default_factory=list)
     note: str | None = None
 
@@ -71,6 +72,7 @@ class ConfigBundleDryRunResponse(BaseModel):
     counts: ConfigBundleDiffCounts
     items: list[ConfigBundleDiffItem] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    preview_signature: str | None = None
 
 
 class ConfigBundleConfirmResponse(BaseModel):
@@ -81,3 +83,4 @@ class ConfigBundleConfirmResponse(BaseModel):
     skipped: int
     conflicts: int
     warnings: list[str] = Field(default_factory=list)
+    preview_signature: str | None = None

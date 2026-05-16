@@ -639,7 +639,8 @@ function DevGuideTab() {
       <CardHeader>
         <CardTitle className="text-base">插件开发指南</CardTitle>
         <CardDescription>
-          源文件：<code>docs/PLUGIN-DEV-GUIDE.md</code>，构建时打包进前端
+          源文件：<code>docs/PLUGIN-DEV-GUIDE.md</code>（远程安装与沙箱规则见
+          <code className="ml-1">docs/REMOTE-PLUGIN-GUIDE.md</code>）
         </CardDescription>
       </CardHeader>
       <CardContent className="min-w-0 overflow-hidden">
