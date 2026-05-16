@@ -393,36 +393,38 @@ export function SettingsIndex() {
               ) : null}
               <div className="mt-4 max-w-[460px] rounded-xl border bg-background p-3 text-xs">
                 <div className="mb-3 font-medium">触发预览</div>
-                <div className="rounded-2xl border bg-gradient-to-b from-sky-50 to-emerald-50 p-3 dark:from-sky-950/30 dark:to-emerald-950/20">
-                  <div className="space-y-3">
-                    <div className="w-fit max-w-[78%] rounded-2xl rounded-bl-md border bg-card px-3 py-2 text-foreground shadow-sm sm:max-w-[66%]">
-                      <div className="font-mono">
+                <div className="rounded-2xl border bg-gradient-to-b from-sky-50 to-emerald-50 p-4 dark:from-sky-950/30 dark:to-emerald-950/20">
+                  <div className="space-y-2.5">
+                    <div className="w-fit max-w-[78%] rounded-2xl rounded-bl-lg border bg-card px-3.5 py-2.5 text-foreground shadow-sm sm:max-w-[66%]">
+                      <div className="font-mono text-sm">
                         这是一段被回复的原文。
                       </div>
                     </div>
-                    <div className="ml-auto w-fit max-w-[68%] rounded-2xl rounded-br-md bg-sky-500 px-3 py-2 text-white shadow-sm sm:max-w-[52%]">
-                      <div className="mb-1 inline-block max-w-full rounded-lg border-l-2 border-white/70 bg-white/15 px-2 py-1 text-[11px] leading-relaxed text-white/90">
+
+                    <div className="ml-auto w-fit max-w-[68%] rounded-2xl rounded-br-lg bg-sky-500 px-3.5 py-2.5 text-white shadow-sm sm:max-w-[52%]">
+                      <div className="mb-1.5 inline-block max-w-full rounded-lg border-l-2 border-white/70 bg-white/15 px-2 py-1 text-[11px] leading-relaxed text-white/90">
                         这是一段被回复的原文。
                       </div>
-                      <div className="font-mono">{prefix || ","}ai 请总结这段内容</div>
+                      <div className="font-mono text-sm">{prefix || ","}ai 请总结这段内容</div>
                     </div>
-                    <div className="ml-auto w-fit max-w-[78%] rounded-2xl rounded-br-md border bg-card px-3 py-2 text-foreground shadow-sm sm:max-w-[66%]">
-                      <div className="font-semibold">{prefix || ","}(๑•̌.•̑๑)ˀ̣ˀ̣ˀ̣ 好奇</div>
-                      <div className="mt-2 inline-block max-w-full rounded-lg border-l-2 bg-muted/40 px-2 py-1 text-muted-foreground">
+
+                    <div className="ml-auto w-fit max-w-[78%] rounded-2xl rounded-br-lg bg-sky-500 px-3.5 py-2.5 text-white shadow-sm sm:max-w-[66%]">
+                      <div className="font-semibold text-sm">{prefix || ","}(๑•̌.•̑๑)ˀ̣ˀ̣ˀ̣ 好奇</div>
+                      <div className="mt-2 inline-block max-w-full rounded-lg border-l-2 border-white/60 bg-white/15 px-2 py-1 text-white/90">
                         这是一段被回复的原文。
                       </div>
-                      <div className="mt-2 block w-fit max-w-full rounded-lg border-l-2 bg-muted/40 px-2 py-1 text-muted-foreground">
+                      <div className="mt-2 block w-fit max-w-full rounded-lg border-l-2 border-white/60 bg-white/15 px-2 py-1 text-white/90">
                         请总结这段内容
                       </div>
-                      <div className="mt-3 font-semibold">ᕦ(ˇò_ó)ᕤ 回答</div>
-                      <p className="mt-2 text-muted-foreground">
+                      <div className="mt-2.5 font-semibold text-sm">ᕦ(ˇò_ó)ᕤ 回答</div>
+                      <p className="mt-2 text-white/90 leading-relaxed">
                         这是 AI 回答示例，已按当前消息模板渲染。
                       </p>
-                      <div className="mt-2 inline-block max-w-full rounded-lg border-l-2 bg-muted/40 px-2 py-1 text-muted-foreground">
+                      <div className="mt-2 inline-block max-w-full rounded-lg border-l-2 border-white/60 bg-white/15 px-2 py-1 text-white/90">
                         这里是从第三行开始的回答内容。
                       </div>
-                      <div className="my-3 text-left text-muted-foreground">━━━━━━━━━━━━━━━</div>
-                      <div className="text-left font-semibold">✦ GPT-5.5 · OpenAI ✦</div>
+                      <div className="my-2.5 text-left text-white/70">━━━━━━━━━━━━━━━</div>
+                      <div className="text-left font-semibold text-white/95 text-[11px]">✦ GPT-5.5 · OpenAI ✦</div>
                     </div>
                   </div>
                 </div>

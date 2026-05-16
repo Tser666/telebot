@@ -17,6 +17,21 @@
 
 ---
 
+## [0.14.15] — 2026-05-16 · polish · 优化命令前缀触发预览
+
+### Changed
+- 设置页命令前缀预览改为更接近 Telegram 的左右对话气泡：被回复原文在左侧，用户触发命令与 AI 回复在右侧。
+- 预览气泡缩小宽度、增加内边距和蓝色回复样式，让手机端观感更真实。
+- AI 回复内的引用块、分割线和模型标识改为同色系样式，避免预览区域显得像普通表单文本。
+
+### Verification
+- `git diff --check` 通过。
+- `PYTHONPYCACHEPREFIX=/private/tmp/telebot_pycache backend/.venv/bin/python -m py_compile backend/app/__init__.py` 通过。
+- `pnpm --dir frontend exec tsc -b --noEmit` 通过。
+- `pnpm --dir frontend build` 通过。
+
+---
+
 ## [0.14.14] — 2026-05-16 · fix · 明确旧密钥导致的账号与 Bot 失效
 
 ### Fixed
