@@ -49,6 +49,7 @@ class PluginContext:
     log: Callable[..., Awaitable[None]] | None = None
     scheduler: Any = None  # SchedulerFacade
     generation: int = 0
+    account_proxy_url: str | None = None
 
     @asynccontextmanager
     async def conversation(self, peer: Any, timeout: float = 30.0) -> AsyncIterator[Any]:

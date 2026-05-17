@@ -214,6 +214,32 @@ def _clear_installed_module_cache(plugin_key: str) -> None:
         log.debug("清理 installed 插件 pycache 失败 plugin=%s", plugin_key, exc_info=True)
 
 
+def _clear_builtin_module_cache(plugin_key: str) -> None:
+    """清掉 builtin 插件包和子模块，保证目录型插件热重载能读到辅助模块变更。"""
+    import sys as _sys
+
+    mod_name = f"{__package__}.builtin.{plugin_key}"
+    for name in list(_sys.modules):
+        if name == mod_name or name.startswith(f"{mod_name}."):
+            _sys.modules.pop(name, None)
+    importlib.invalidate_caches()
+    try:
+        from .base import _REGISTRY
+
+        cls = _REGISTRY.get(plugin_key)
+        if cls is not None and getattr(cls, "_source", "builtin") == "builtin":
+            _REGISTRY.pop(plugin_key, None)
+    except Exception:  # noqa: BLE001
+        log.debug("清理 builtin 插件注册表失败 plugin=%s", plugin_key, exc_info=True)
+    try:
+        path = _builtin_plugin_path(plugin_key)
+        if path is not None:
+            for cache_dir in path.rglob("__pycache__"):
+                shutil.rmtree(cache_dir, ignore_errors=True)
+    except Exception:  # noqa: BLE001
+        log.debug("清理 builtin 插件 pycache 失败 plugin=%s", plugin_key, exc_info=True)
+
+
 def _is_safe_plugin_key(plugin_key: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z0-9_.-]+", plugin_key or ""))
 
@@ -438,6 +464,7 @@ class _AccountState:
         # 通过 system_setting key=``log_incoming_messages`` 全局打开，账号
         # 启动 / reload_config 时同步。命令派发、插件错误、业务事件不受影响。
         self.log_incoming_messages: bool = False
+        self.account_proxy_url: str | None = None
 
 
 # 进程级状态字典（一个 worker 进程通常只服务一个账号；用 dict 是为了灵活）
@@ -541,6 +568,7 @@ async def load_plugins_for_account(
     paused: asyncio.Event,
     redis: Any,
     scheduler: Any | None = None,
+    account_proxy_url: str | None = None,
 ) -> None:
     """runtime 在 ``client.connect()`` 之前调一次。
 
@@ -555,6 +583,7 @@ async def load_plugins_for_account(
     state.paused = paused
     state.redis = redis
     state.scheduler = scheduler
+    state.account_proxy_url = account_proxy_url
     state.log_incoming_messages = await _load_log_incoming_messages_setting()
     _STATES[account_id] = state
 
@@ -876,6 +905,7 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
             if state.scheduler is not None else None
         ),
         generation=state.generation,
+        account_proxy_url=state.account_proxy_url,
     )
 
     try:
@@ -1219,26 +1249,17 @@ async def reload_plugin(account_id: int, plugin_key: str | None) -> None:
         state.contexts.pop(plugin_key, None)
 
     # 2) reload 模块
-    if _builtin_plugin_path(plugin_key) is None:
+    builtin_path = _builtin_plugin_path(plugin_key)
+    if builtin_path is None:
         _clear_installed_module_cache(plugin_key)
     else:
         try:
-            # 模块化后每个 builtin 插件是子包：``manifest.py`` + ``plugin.py`` + ``__init__.py``。
-            # 按"manifest → plugin → 子包入口"顺序 reload，确保 @register 重新触发，
-            # MANIFEST / PLUGIN_CLASS 取到最新版本。
-            for sub in ("manifest", "plugin"):
-                try:
-                    m = importlib.import_module(
-                        f".builtin.{plugin_key}.{sub}", package=__package__
-                    )
-                    importlib.reload(m)
-                except ModuleNotFoundError:
-                    # 旧式单文件 builtin（理论上重构后已不存在），忽略
-                    pass
-            pkg_mod = importlib.import_module(
-                f".builtin.{plugin_key}", package=__package__
-            )
-            importlib.reload(pkg_mod)
+            # 目录型 builtin 可能有 client/importers/token_pool 等辅助模块。
+            # 直接清掉整个包再重新加载，避免 plugin.py 引到旧的子模块对象。
+            _clear_builtin_module_cache(plugin_key)
+            loaded = _load_dir(builtin_path, source="builtin")
+            if plugin_key not in loaded:
+                raise RuntimeError(f"builtin plugin {plugin_key} reload returned no plugin class")
         except Exception as exc:  # noqa: BLE001
             await _log(redis, account_id, "error", f"reload {plugin_key} 失败: {exc}")
             return

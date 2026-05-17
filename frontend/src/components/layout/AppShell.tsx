@@ -45,7 +45,7 @@ export function AppShell() {
           className="
             flex-1 overflow-auto
             p-4 md:p-6
-            pb-[calc(4.25rem+env(safe-area-inset-bottom))]
+            pb-[calc(5.75rem+env(safe-area-inset-bottom))]
             sm:pb-[max(1rem,env(safe-area-inset-bottom))]
             pl-[max(1rem,env(safe-area-inset-left))]
             pr-[max(1rem,env(safe-area-inset-right))]
@@ -58,13 +58,13 @@ export function AppShell() {
         </main>
         <nav
           className="
-            fixed inset-x-0 bottom-0 z-40 border-t bg-card/95 backdrop-blur sm:hidden
-            pb-[max(0.5rem,env(safe-area-inset-bottom))]
-            pl-[max(0.5rem,env(safe-area-inset-left))]
-            pr-[max(0.5rem,env(safe-area-inset-right))]
+            fixed inset-x-0 bottom-0 z-40 sm:hidden
+            pb-[max(0.75rem,env(safe-area-inset-bottom))]
+            pl-[max(0.75rem,env(safe-area-inset-left))]
+            pr-[max(0.75rem,env(safe-area-inset-right))]
           "
         >
-          <div className="grid h-14 grid-cols-3 gap-1 px-1">
+          <div className="liquid-glass liquid-bottom-nav mx-auto grid h-16 max-w-md grid-cols-5 gap-1 p-1.5">
             {MOBILE_PRIMARY_NAV.map((item) => (
               <NavLink
                 key={item.to}
@@ -72,14 +72,14 @@ export function AppShell() {
                 end={item.end}
                 className={({ isActive }) =>
                   cn(
-                    "flex flex-col items-center justify-center gap-1 rounded-md text-[11px] text-muted-foreground",
-                    "hover:bg-accent hover:text-accent-foreground",
-                    isActive && "bg-accent text-accent-foreground",
+                    "liquid-nav-item flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-[1.5rem] text-[10px] font-medium text-muted-foreground transition duration-200",
+                    "hover:text-accent-foreground",
+                    isActive && "liquid-nav-item-active",
                   )
                 }
               >
-                <item.icon className="h-4 w-4" />
-                <span>{item.label}</span>
+                <item.icon className="h-4 w-4 shrink-0" />
+                <span className="max-w-full truncate">{item.label}</span>
               </NavLink>
             ))}
           </div>

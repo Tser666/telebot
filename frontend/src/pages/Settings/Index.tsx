@@ -744,15 +744,17 @@ function GuideInlineCard({
 
   if (!expanded) {
     return (
-      <button
+      <Button
         type="button"
+        size="sm"
+        variant="outline"
         onClick={onToggle}
-        className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary shadow-sm shadow-primary/20 transition hover:bg-primary/15"
+        className="liquid-glass justify-start text-primary hover:text-primary"
         aria-label="打开新手指引"
       >
         <Sparkles className="h-4 w-4" />
         新手指引：当前第 2 步，点击展开详情
-      </button>
+      </Button>
     );
   }
 

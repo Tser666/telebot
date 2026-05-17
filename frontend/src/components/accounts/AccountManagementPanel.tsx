@@ -133,17 +133,16 @@ export function AccountManagementPanel({
           <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
           <p className="text-sm text-muted-foreground">{description}</p>
         </div>
-        <div className="relative flex flex-col items-stretch gap-2 sm:items-end">
+        <div className="relative flex w-full flex-col items-stretch gap-2 sm:w-auto sm:items-end">
           <div className="flex flex-wrap gap-2">
             <Button
               variant="outline"
-              size="sm"
               className={guideActive ? "siri-glow" : undefined}
               onClick={() => setGuideLauncherOpen((v) => !v)}
               aria-label="打开新手指引"
               title="新手指引"
             >
-              <Sparkles className="mr-1 h-4 w-4 text-primary" />
+              <Sparkles className="mr-2 h-4 w-4 text-primary" />
               新手指引
             </Button>
             <Button
@@ -269,7 +268,7 @@ function GuideLauncher({
   onClose: () => void;
 }) {
   return (
-    <div className="absolute right-0 top-full z-40 mt-2 w-[19rem] rounded-2xl border bg-card/95 p-4 text-left shadow-xl backdrop-blur">
+    <div className="liquid-glass mt-2 w-full rounded-2xl p-4 text-left sm:absolute sm:right-0 sm:top-full sm:z-40 sm:mt-2 sm:w-[19rem]">
       <div className="mb-1 text-sm font-semibold">开启新手指引模式？</div>
       <p className="text-xs leading-relaxed text-muted-foreground">
         开启后会在当前页面用小条提示下一步，并用七彩流光高亮你要点击的位置。
@@ -315,20 +314,22 @@ function GuideContextCard({
 
   if (!expanded) {
     return (
-      <button
+      <Button
         type="button"
+        size="sm"
+        variant="outline"
         onClick={onToggle}
-        className="absolute right-0 top-full z-30 mt-2 inline-flex items-center gap-2 rounded-full border border-primary/30 bg-card/95 px-3 py-1.5 text-xs font-medium text-primary shadow-lg backdrop-blur transition hover:bg-primary/10"
+        className="liquid-glass mt-2 max-w-full justify-start whitespace-normal text-left text-primary hover:text-primary sm:absolute sm:right-0 sm:top-full sm:z-30 sm:mt-2 sm:max-w-[19rem]"
         aria-label="展开当前步骤"
       >
         <Sparkles className="h-4 w-4" />
         新手指引：当前第 {currentStep + 1} 步，点击展开详情
-      </button>
+      </Button>
     );
   }
 
   return (
-    <div className="absolute right-0 top-full z-30 mt-2 w-[19rem] rounded-2xl border bg-card/95 p-4 text-left shadow-xl backdrop-blur">
+    <div className="liquid-glass mt-2 w-full rounded-2xl p-4 text-left sm:absolute sm:right-0 sm:top-full sm:z-30 sm:mt-2 sm:w-[19rem]">
       <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
         <span>新手指引</span>
         <button type="button" onClick={onToggle} className="hover:text-foreground">

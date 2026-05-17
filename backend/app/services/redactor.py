@@ -9,6 +9,7 @@ REDACTED = "***"
 
 SENSITIVE_KEYS = {
     "secret",
+    "secret_key",
     "api_key",
     "apikey",
     "token",

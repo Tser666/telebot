@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/misc";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CommandBadge } from "@/components/CommandBadge";
 import { Glossary } from "@/components/ai/Glossary";
@@ -334,26 +335,31 @@ function AIHeader() {
 }
 
 function Subnav({ activeTab }: { activeTab: AITab }) {
+  const navigate = useNavigate();
   return (
-    <div className="flex flex-wrap gap-2">
-      <Button asChild variant={activeTab === "overview" ? "default" : "outline"} size="sm">
-        <Link to="/ai">
-          <LayoutDashboard className="mr-1 h-4 w-4" />
-          总览
-        </Link>
-      </Button>
-      <Button asChild variant={activeTab === "providers" ? "default" : "outline"} size="sm">
-        <Link to="/ai?tab=providers">
-          <Package className="mr-1 h-4 w-4" />
-          模型提供商
-        </Link>
-      </Button>
-      <Button asChild variant={activeTab === "usage" ? "default" : "outline"} size="sm">
-        <Link to="/ai?tab=usage">
-          <History className="mr-1 h-4 w-4" />
-          最近调用
-        </Link>
-      </Button>
+    <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
+      <Tabs
+        className="w-full sm:w-auto"
+        value={activeTab}
+        onValueChange={(value) => {
+          navigate(value === "overview" ? "/ai" : `/ai?tab=${value}`);
+        }}
+      >
+        <TabsList>
+          <TabsTrigger value="overview" className="gap-1.5">
+            <LayoutDashboard className="h-4 w-4" />
+            总览
+          </TabsTrigger>
+          <TabsTrigger value="providers" className="gap-1.5">
+            <Package className="h-4 w-4" />
+            模型提供商
+          </TabsTrigger>
+          <TabsTrigger value="usage" className="gap-1.5">
+            <History className="h-4 w-4" />
+            最近调用
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
       <Button asChild variant="outline" size="sm">
         <Link to="/plugins/templates">
           <FileText className="mr-1 h-4 w-4" />

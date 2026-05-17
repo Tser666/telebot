@@ -33,7 +33,7 @@ const NAV: NavItem[] = [
 ];
 
 export const MOBILE_PRIMARY_NAV: NavItem[] = NAV.filter(
-  (item) => item.to === "/" || item.to === "/plugins" || item.to === "/logs",
+  (item) => item.to === "/" || item.to === "/plugins" || item.to === "/ai" || item.to === "/logs" || item.to === "/settings",
 );
 
 function NavList({ onNavigate }: { onNavigate?: () => void }) {

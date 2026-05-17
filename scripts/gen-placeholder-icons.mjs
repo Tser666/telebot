@@ -1,4 +1,4 @@
-// 生成 PWA 占位图标：Telegram 蓝色实心方块 + 中间一个白色 "U"。
+// 生成 PWA 图标：TelePilot 蓝色底 + 中间一个白色 "T"。
 // 不依赖任何第三方库，纯 Node 内建 zlib + Buffer 写 PNG。
 // 用法：node scripts/gen-placeholder-icons.mjs
 // 之后想换真图标：把 1024x1024 源图放到 frontend/public/，覆盖下面 4 个文件即可。
@@ -62,7 +62,7 @@ function encodePng(width, height, pixels /* Uint8Array, RGBA */) {
 }
 
 // ---------- 像素生成 ----------
-const BG = [0x26, 0xa6, 0xde, 0xff]; // Telegram 蓝
+const BG = [0x25, 0x63, 0xeb, 0xff]; // TelePilot 蓝
 const FG = [0xff, 0xff, 0xff, 0xff]; // 白色
 
 /**
@@ -81,14 +81,14 @@ function renderIcon(size, { safeZone = false, rounded = false } = {}) {
   const innerStart = (size - inner) / 2;
   const innerEnd = innerStart + inner;
 
-  // 字母 "U" 的简单几何描述：
-  //   两根竖线 + 底部半圆。基于 inner 区域定义。
-  const ux0 = innerStart + inner * 0.28;
-  const ux1 = innerStart + inner * 0.72;
-  const uTop = innerStart + inner * 0.28;
-  const uBottomY = innerStart + inner * 0.66; // 半圆中心
-  const uStroke = inner * 0.13;
-  const uArcR = (ux1 - ux0) / 2;
+  // 字母 "T" 的简单几何描述：顶部横线 + 中央竖线。基于 inner 区域定义。
+  const tStroke = inner * 0.13;
+  const tTop = innerStart + inner * 0.24;
+  const tBarLeft = innerStart + inner * 0.23;
+  const tBarRight = innerStart + inner * 0.77;
+  const tStemLeft = cx - tStroke / 2;
+  const tStemRight = cx + tStroke / 2;
+  const tBottom = innerStart + inner * 0.76;
 
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
@@ -110,20 +110,14 @@ function renderIcon(size, { safeZone = false, rounded = false } = {}) {
         // safeZone 外面用背景色填充（maskable 要求图标本身也铺满 safezone 之外）
         color = BG;
 
-        // 在 inner 区域内画 "U"
+        // 在 inner 区域内画 "T"
         if (x >= innerStart && x <= innerEnd && y >= innerStart && y <= innerEnd) {
-          // 左右竖线（从 uTop 到 uBottomY 的笔画矩形）
-          const inLeftBar =
-            x >= ux0 - uStroke / 2 && x <= ux0 + uStroke / 2 && y >= uTop && y <= uBottomY;
-          const inRightBar =
-            x >= ux1 - uStroke / 2 && x <= ux1 + uStroke / 2 && y >= uTop && y <= uBottomY;
-          // 底部半圆环：以 ((ux0+ux1)/2, uBottomY) 为圆心
-          const dx = x - (ux0 + ux1) / 2;
-          const dy = y - uBottomY;
-          const d = Math.hypot(dx, dy);
-          const inArc = dy >= 0 && d >= uArcR - uStroke / 2 && d <= uArcR + uStroke / 2;
+          const inTopBar =
+            x >= tBarLeft && x <= tBarRight && y >= tTop && y <= tTop + tStroke;
+          const inStem =
+            x >= tStemLeft && x <= tStemRight && y >= tTop && y <= tBottom;
 
-          if (inLeftBar || inRightBar || inArc) color = FG;
+          if (inTopBar || inStem) color = FG;
         }
       }
 
@@ -141,6 +135,8 @@ function renderIcon(size, { safeZone = false, rounded = false } = {}) {
 mkdirSync(PUBLIC_DIR, { recursive: true });
 
 const outputs = [
+  { name: "favicon-16x16.png", size: 16, opts: { safeZone: true } },
+  { name: "favicon-32x32.png", size: 32, opts: { safeZone: true } },
   { name: "pwa-192x192.png", size: 192, opts: {} },
   { name: "pwa-512x512.png", size: 512, opts: {} },
   // maskable：内容收缩到 80% 安全区，外圈仍然是品牌色，被裁圆/裁方都好看

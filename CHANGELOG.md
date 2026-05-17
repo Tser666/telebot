@@ -19,6 +19,32 @@
 
 ---
 
+## [0.17.0] — 2026-05-18 · feature · ChatGPT 图片助手插件
+
+### Added
+- 新增内置插件 `chatgpt_image`，按 chatgpt2api 的核心逻辑在 TelePilot 插件内完成 ChatGPT 图片生成、回复图片编辑、最近图片续改、模型检测、额度刷新、代理测试和插件状态查看。
+- 新增 ChatGPT 图片助手专属配置页，支持自定义文生图、编辑和管理命令，配置模型列表、默认模型、生成张数、画幅、输出方式、风格模板、轮询超时与参考图数量。
+- Token 池改为逐条管理：每条 token 可填写备注，已保存 token 按首尾各 10 字符脱敏显示，并支持粘贴 `chatgpt.com/api/auth/session` 完整 JSON 自动提取 `accessToken`。
+- 将 CPA、sub2api、健康检测与自动禁用失效 token 配置收进默认折叠的高级容器。
+
+### Changed
+- ChatGPT 图片助手不提供 OpenAI 兼容 `/v1/*` HTTP 服务，也不内置 Docker、号池或外部服务；它只作为 Telegram 侧原生插件调用 ChatGPT Web 图片链路。
+- ChatGPT 图片助手的网络出口改为直接跟随当前 Telegram 账号代理，不再提供插件内独立代理配置，避免启动阶段重复读取代理表。
+- 健康检测失败不再配置额外异常通知聊天 ID；用户触发的失败会直接用中文更新原聊天消息，详细错误写入插件日志。
+- 插件配置接口对 `chatgpt_image` token 池做专用脱敏与回填，编辑备注或保存其他配置时不会覆盖真实 token。
+- PWA 底栏升级为五栏浮动玻璃风格，补齐 AI 与系统入口，并统一移动端安全区留白。
+- 模块中心 AI 入口、AI 命令中心和账号详情页选项卡统一使用通用 TabList 视觉，移动端/PWA 下保持居中或安全横向滚动。
+- 新手指引入口按钮统一使用通用 Button 尺寸与圆角，账号页指引浮层在移动端改为内联布局以避免 PWA 下错位。
+- PWA 名称与图标统一为 TelePilot，替换旧的 Userbot 名称和旧占位图标。
+
+### Verification
+- `backend/.venv/bin/ruff check backend/app/worker/runtime.py backend/app/worker/plugins/base.py backend/app/worker/plugins/loader.py backend/app/worker/plugins/builtin/chatgpt_image backend/app/tests/test_chatgpt_image_plugin.py`
+- `backend/.venv/bin/python -m pytest backend/app/tests/test_chatgpt_image_plugin.py backend/app/tests/test_runtime_helpers.py backend/app/tests/test_plugin_loader.py -q`
+- `pnpm --dir frontend build`
+- `git diff --check`
+
+---
+
 ## [0.16.10] — 2026-05-18 · fixed · AI 模板占位符与 Codex 生图稳定性
 
 ### Added

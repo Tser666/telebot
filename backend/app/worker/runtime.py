@@ -70,6 +70,37 @@ log = logging.getLogger(__name__)
 _CONFIG_RECONCILE_SECONDS = max(30, int(app_settings.worker_reconcile_seconds or 180))
 
 
+def _httpx_proxy_url_from_proxy(proxy: Proxy | None) -> str | None:
+    """把账号 Telegram 代理转换成 httpx 可用的 HTTP/SOCKS 出口。
+
+    MTProxy 只能给 Telethon 使用，ChatGPT/CPA/sub2api 这类 HTTP 请求不能复用。
+    """
+
+    from ..util.proxy import parse_proxy_url
+
+    if proxy is None:
+        parsed_default = parse_proxy_url(app_settings.tg_default_proxy)
+        if parsed_default is None:
+            return None
+        ptype, host, port, _rdns, username, password = parsed_default
+        return _build_proxy_url(ptype, host, port, username, password or "")
+
+    password = decrypt_str(proxy.password_enc) if proxy.password_enc else ""
+    if "://" in proxy.host:
+        parsed = parse_proxy_url(proxy.host)
+        if parsed is None:
+            return None
+        ptype, host, port, _rdns, parsed_user, parsed_password = parsed
+        return _build_proxy_url(
+            ptype,
+            host,
+            port,
+            proxy.username or parsed_user,
+            password or parsed_password or "",
+        )
+    return _build_proxy_url(proxy.type, proxy.host, proxy.port, proxy.username, password)
+
+
 async def run_worker(account_id: int) -> None:
     """worker 主协程；返回即代表退出（supervisor 决定是否重启）。"""
     redis = get_redis()
@@ -89,6 +120,7 @@ async def run_worker(account_id: int) -> None:
             await _log(redis, account_id, "error", f"账号 {account_id} 不存在")
             return
         proxy = await db.get(Proxy, account.proxy_id) if account.proxy_id else None
+        account_proxy_url = _httpx_proxy_url_from_proxy(proxy)
         # 解析设备伪装：账号绑定 → 系统默认 → 硬编码兜底
         from ..services.device_profile import resolve_for_account
         device_profile = await resolve_for_account(db, account)
@@ -149,6 +181,7 @@ async def run_worker(account_id: int) -> None:
                 paused,
                 redis,
                 scheduler=platform_scheduler,
+                account_proxy_url=account_proxy_url,
             )
         except ImportError:
             await _log(redis, account_id, "warn", "插件系统尚未就绪（D Agent 待完成）")

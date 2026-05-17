@@ -273,29 +273,31 @@ export function AccountDetail() {
       </div>
 
       <Tabs defaultValue={defaultTab}>
-        <TabsList className="flex w-full justify-start gap-1 overflow-x-auto whitespace-nowrap sm:w-auto">
-          <TabsTrigger value="overview" className="shrink-0 gap-1.5">
-            <LayoutDashboard className="h-4 w-4" /> 概览
-          </TabsTrigger>
-          <TabsTrigger value="features" className="shrink-0 gap-1.5">
-            <Bot className="h-4 w-4" /> 插件启停
-          </TabsTrigger>
-          <TabsTrigger value="commands" className="shrink-0 gap-1.5">
-            <Terminal className="h-4 w-4" /> 自定义命令
-          </TabsTrigger>
-          <TabsTrigger value="bot" className="shrink-0 gap-1.5">
-            <MessageCircle className="h-4 w-4" /> Bot 联动
-          </TabsTrigger>
-          <TabsTrigger value="rate" className="shrink-0 gap-1.5">
-            <Gauge className="h-4 w-4" /> 风控基础
-          </TabsTrigger>
-          <TabsTrigger value="proxy" className="shrink-0 gap-1.5">
-            <Network className="h-4 w-4" /> 出口/伪装
-          </TabsTrigger>
-          <TabsTrigger value="ignored" className="shrink-0 gap-1.5">
-            <Ban className="h-4 w-4" /> 忽略的群组
-          </TabsTrigger>
-        </TabsList>
+        <div className="-mx-1 flex overflow-x-auto px-1 pb-1">
+          <TabsList className="w-max flex-nowrap whitespace-nowrap">
+            <TabsTrigger value="overview" className="shrink-0 gap-1.5">
+              <LayoutDashboard className="h-4 w-4" /> 概览
+            </TabsTrigger>
+            <TabsTrigger value="features" className="shrink-0 gap-1.5">
+              <Bot className="h-4 w-4" /> 插件启停
+            </TabsTrigger>
+            <TabsTrigger value="commands" className="shrink-0 gap-1.5">
+              <Terminal className="h-4 w-4" /> 自定义命令
+            </TabsTrigger>
+            <TabsTrigger value="bot" className="shrink-0 gap-1.5">
+              <MessageCircle className="h-4 w-4" /> Bot 联动
+            </TabsTrigger>
+            <TabsTrigger value="rate" className="shrink-0 gap-1.5">
+              <Gauge className="h-4 w-4" /> 风控基础
+            </TabsTrigger>
+            <TabsTrigger value="proxy" className="shrink-0 gap-1.5">
+              <Network className="h-4 w-4" /> 出口/伪装
+            </TabsTrigger>
+            <TabsTrigger value="ignored" className="shrink-0 gap-1.5">
+              <Ban className="h-4 w-4" /> 忽略的群组
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
         {/* 概览 */}
         <TabsContent value="overview">

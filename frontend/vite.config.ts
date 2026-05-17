@@ -26,7 +26,7 @@ export default defineConfig({
       includeAssets: [],
       manifest: {
         name: "TelePilot",
-        short_name: "Userbot",
+        short_name: "TelePilot",
         description: "TelePilot 管理控制台",
         lang: "zh-CN",
         start_url: "/",

@@ -12,6 +12,8 @@ Endpoint：
 
 from __future__ import annotations
 
+import hashlib
+
 from fastapi import APIRouter, HTTPException
 
 from ..db.models.account import Account
@@ -36,20 +38,121 @@ def _bad(code: str, message: str, status: int = 400) -> HTTPException:
     return HTTPException(status_code=status, detail={"code": code, "message": message})
 
 
-def _sanitize_config(config: dict[str, object]) -> dict[str, object]:
+def _chatgpt_token_id(token: str) -> str:
+    value = str(token or "").strip()
+    if not value:
+        return "token:empty"
+    return f"token:{hashlib.sha256(value.encode('utf-8')).hexdigest()[:10]}"
+
+
+def _chatgpt_mask_token(token: str) -> str:
+    value = str(token or "").strip()
+    if not value:
+        return ""
+    if len(value) <= 24:
+        return f"{value[:4]}···{value[-4:]}"
+    return f"{value[:10]}···{value[-10:]}"
+
+
+def _chatgpt_token_entries(config: dict[str, object]) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    def add(token: object, note: object = "") -> None:
+        value = str(token or "").strip()
+        if not value or value in seen:
+            return
+        seen.add(value)
+        entries.append({"token": value, "note": str(note or "").strip()})
+
+    raw_tokens = config.get("tokens")
+    if isinstance(raw_tokens, list):
+        for item in raw_tokens:
+            if isinstance(item, dict):
+                add(
+                    item.get("token") or item.get("accessToken") or item.get("access_token"),
+                    item.get("note") or item.get("remark") or item.get("source") or "",
+                )
+            else:
+                add(item)
+    legacy = str(config.get("token") or "")
+    for line in legacy.replace(",", "\n").splitlines():
+        add(line)
+    return entries
+
+
+def _sanitize_chatgpt_image_config(config: dict[str, object]) -> dict[str, object]:
+    entries = _chatgpt_token_entries(config)
+    rest = dict(config)
+    rest["token"] = ""
+    rest["tokens"] = []
+    sanitized = redact_value(rest)
+    sanitized["tokens"] = [
+        {
+            "token": _chatgpt_mask_token(entry["token"]),
+            "note": entry["note"],
+            "token_id": _chatgpt_token_id(entry["token"]),
+        }
+        for entry in entries
+    ]
+    return sanitized
+
+
+def _sanitize_config(config: dict[str, object], key: str | None = None) -> dict[str, object]:
+    if key == "chatgpt_image":
+        return _sanitize_chatgpt_image_config(config)
     return redact_value(config)
 
 
 def _preserve_existing_sensitive_values(
-    existing: dict[str, object] | None, incoming: dict[str, object]
+    existing: dict[str, object] | None,
+    incoming: dict[str, object],
+    key: str | None = None,
 ) -> dict[str, object]:
     merged = dict(incoming)
     existing_dict = dict(existing or {})
-    for key, value in existing_dict.items():
-        if not is_sensitive_key(str(key)):
+    if key == "chatgpt_image":
+        merged = _preserve_chatgpt_image_tokens(existing_dict, merged)
+    for item_key, value in existing_dict.items():
+        if key == "chatgpt_image" and item_key == "token" and "tokens" in merged:
             continue
-        if key not in merged or merged.get(key) in ("", None):
-            merged[key] = value
+        if not is_sensitive_key(str(item_key)):
+            continue
+        if item_key not in merged or merged.get(item_key) in ("", None, "***"):
+            merged[item_key] = value
+    return merged
+
+
+def _preserve_chatgpt_image_tokens(
+    existing: dict[str, object],
+    incoming: dict[str, object],
+) -> dict[str, object]:
+    if "tokens" not in incoming or not isinstance(incoming.get("tokens"), list):
+        return incoming
+    existing_entries = _chatgpt_token_entries(existing)
+    by_id = {_chatgpt_token_id(entry["token"]): entry["token"] for entry in existing_entries}
+    by_mask = {_chatgpt_mask_token(entry["token"]): entry["token"] for entry in existing_entries}
+    normalized: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for idx, item in enumerate(incoming["tokens"]):
+        if not isinstance(item, dict):
+            token_value = str(item or "").strip()
+            note = ""
+            token_ref = ""
+        else:
+            token_value = str(item.get("token") or "").strip()
+            note = str(item.get("note") or item.get("remark") or item.get("source") or "").strip()
+            token_ref = str(item.get("token_id") or "").strip()
+        token = by_id.get(token_ref) or by_mask.get(token_value) or token_value
+        if token in {"", "***"} and idx < len(existing_entries):
+            token = existing_entries[idx]["token"]
+        if not token or token in {"***"} or token in seen:
+            continue
+        seen.add(token)
+        normalized.append({"token": token, "note": note})
+    merged = dict(incoming)
+    merged["tokens"] = normalized
+    merged["token"] = ""
     return merged
 
 
@@ -90,7 +193,7 @@ async def list_account_features(
             enabled=r.enabled,
             state=r.state,
             last_error=r.last_error,
-            config=_sanitize_config(dict(r.config or {})),
+            config=_sanitize_config(dict(r.config or {}), r.feature_key),
         )
         for r in rows
     ]
@@ -129,6 +232,7 @@ async def patch_account_feature(
         payload.config = _preserve_existing_sensitive_values(
             dict(existing.config or {}) if existing is not None else None,
             dict(payload.config),
+            key,
         )
         payload.config = _normalize_feature_config(key, payload.config)
         config_schema = (feature.manifest or {}).get("config_schema")
@@ -158,7 +262,7 @@ async def patch_account_feature(
         enabled=af.enabled,
         state=af.state,
         last_error=af.last_error,
-        config=_sanitize_config(dict(af.config or {})),
+        config=_sanitize_config(dict(af.config or {}), key),
     )
 
 
@@ -192,6 +296,7 @@ async def update_account_feature_config(
     payload.config = _preserve_existing_sensitive_values(
         dict(existing.config or {}) if existing is not None else None,
         dict(payload.config),
+        key,
     )
     payload.config = _normalize_feature_config(key, payload.config)
     config_schema = (feature.manifest or {}).get("config_schema")
@@ -221,7 +326,7 @@ async def update_account_feature_config(
         enabled=af.enabled,
         state=af.state,
         last_error=af.last_error,
-        config=_sanitize_config(dict(af.config or {})),
+        config=_sanitize_config(dict(af.config or {}), key),
     )
 
 
@@ -246,8 +351,8 @@ async def get_plugin_global_config(
     global_config = await feature_service.get_plugin_global_config(db, key)
     return PluginGlobalConfigResponse(
         plugin_key=key,
-        config=_sanitize_config(global_config),
-        global_config=_sanitize_config(global_config),
+        config=_sanitize_config(global_config, key),
+        global_config=_sanitize_config(global_config, key),
     )
 
 
@@ -271,6 +376,7 @@ async def set_plugin_global_config(
     payload.config = _preserve_existing_sensitive_values(
         existing_global_config,
         dict(payload.config),
+        key,
     )
     try:
         global_config = await feature_service.set_plugin_global_config(
@@ -290,8 +396,8 @@ async def set_plugin_global_config(
 
     return PluginGlobalConfigResponse(
         plugin_key=key,
-        config=_sanitize_config(global_config),
-        global_config=_sanitize_config(global_config),
+        config=_sanitize_config(global_config, key),
+        global_config=_sanitize_config(global_config, key),
     )
 
 
@@ -320,7 +426,7 @@ async def get_effective_config(
         raise _bad("FEATURE_NOT_FOUND", f"未注册的 feature: {key}", 404)
 
     effective_config = await feature_service.get_effective_plugin_config(db, aid, key)
-    return _sanitize_config(effective_config)
+    return _sanitize_config(effective_config, key)
 
 
 # ─────────────────────────────────────────────────────

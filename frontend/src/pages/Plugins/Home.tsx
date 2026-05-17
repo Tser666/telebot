@@ -3,8 +3,12 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
+  BookOpen,
   FlaskConical,
+  History,
+  LayoutDashboard,
   Package2,
+  Package,
   SatelliteDish,
   Settings2,
   Sparkles,
@@ -32,6 +36,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { isPlatformFeature } from "@/lib/plugin-modes";
 
 import { featureConfigPath } from "./_shared/featureConfig";
@@ -276,20 +281,31 @@ export function PluginsHome() {
             <p className="mt-1 text-xs leading-5 text-muted-foreground">
               AI 能力属于模块配置：先在模型提供商里配置凭据，再按账号在模块里调用；调用记录与排障在 AI 用量查看。
             </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button size="sm" onClick={() => nav("/ai")}>
-                AI 总览
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => nav("/ai?tab=providers")}>
-                模型提供商
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => nav("/ai?tab=usage")}>
-                AI 用量
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => nav("/ai#how-it-works")}>
-                AI 帮助
-              </Button>
-            </div>
+            <Tabs
+              value="overview"
+              onValueChange={(value) => {
+                if (value === "overview") nav("/ai");
+                if (value === "providers") nav("/ai?tab=providers");
+                if (value === "usage") nav("/ai?tab=usage");
+                if (value === "help") nav("/ai#how-it-works");
+              }}
+              className="mt-3"
+            >
+              <TabsList>
+                <TabsTrigger value="overview" className="gap-1.5">
+                  <LayoutDashboard className="h-4 w-4" /> AI 总览
+                </TabsTrigger>
+                <TabsTrigger value="providers" className="gap-1.5">
+                  <Package className="h-4 w-4" /> 模型提供商
+                </TabsTrigger>
+                <TabsTrigger value="usage" className="gap-1.5">
+                  <History className="h-4 w-4" /> AI 用量
+                </TabsTrigger>
+                <TabsTrigger value="help" className="gap-1.5">
+                  <BookOpen className="h-4 w-4" /> AI 帮助
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
           </div>
           {codexImageFeature ? (
             <div
@@ -480,15 +496,17 @@ function GuideContextCard({
 
   if (!expanded) {
     return (
-      <button
+      <Button
         type="button"
+        size="sm"
+        variant="outline"
         onClick={onToggle}
-        className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary shadow-sm shadow-primary/20 transition hover:bg-primary/15"
+        className="liquid-glass justify-start text-primary hover:text-primary"
         aria-label="打开新手指引"
       >
         <Sparkles className="h-4 w-4" />
         新手指引：当前第 3 步，点击展开详情
-      </button>
+      </Button>
     );
   }
 

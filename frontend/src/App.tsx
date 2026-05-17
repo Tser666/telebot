@@ -20,6 +20,7 @@ const AccountDetail = lazy(() => import("@/pages/Accounts/Detail").then(m => ({ 
 const AutoReplyConfig = lazy(() => import("@/pages/Plugins/configs/AutoReply").then(m => ({ default: m.AutoReplyConfig })));
 const AutorepeatConfig = lazy(() => import("@/pages/Plugins/configs/Autorepeat").then(m => ({ default: m.AutorepeatConfig })));
 const CodexImageConfigPage = lazy(() => import("@/pages/Plugins/configs/CodexImageConfig").then(m => ({ default: m.CodexImageConfigPage })));
+const ChatGPTImageConfigPage = lazy(() => import("@/pages/Plugins/configs/ChatGPTImageConfig").then(m => ({ default: m.ChatGPTImageConfigPage })));
 const ForwardConfig = lazy(() => import("@/pages/Plugins/configs/Forward").then(m => ({ default: m.ForwardConfig })));
 const SchedulerConfig = lazy(() => import("@/pages/Plugins/configs/Scheduler").then(m => ({ default: m.SchedulerConfig })));
 const Game24ConfigPage = lazy(() => import("@/pages/Plugins/configs/Game24Config").then(m => ({ default: m.Game24ConfigPage })));
@@ -138,6 +139,14 @@ export default function App() {
               element={
                 <Suspense fallback={<PageFallback />}>
                   <CodexImageConfigPage />
+                </Suspense>
+              }
+            />
+            <Route
+              path=":aid/features/chatgpt_image"
+              element={
+                <Suspense fallback={<PageFallback />}>
+                  <ChatGPTImageConfigPage />
                 </Suspense>
               }
             />

@@ -1,6 +1,7 @@
 export const FEATURE_CONFIG_PAGE_KEYS = new Set([
   "auto_reply",
   "autorepeat",
+  "chatgpt_image",
   "codex_image",
   "forward",
   "scheduler",
