@@ -10,8 +10,9 @@
  * schema defaults < globalConfig < accountConfig
  */
 import { useState, useEffect, useCallback, type ReactNode } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
-import { TelegramHtmlPreview } from "@/components/TelegramHtmlPreview";
+import { TelegramHtmlPreview, TelegramHtmlPreviewThread } from "@/components/TelegramHtmlPreview";
 import { getErrMsg } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
@@ -138,30 +139,22 @@ export function ConfigDialog({
         </DialogHeader>
         <div className="space-y-4">
           {globalFields.length > 0 && (
-            <section className="space-y-3 rounded-md border bg-muted/30 p-3">
-              <div>
-                <div className="text-sm font-semibold">全局配置</div>
-                <p className="text-xs text-muted-foreground">所有账号共享</p>
-              </div>
-              <div className="space-y-4">
-                {globalFields.map(([key, field]) => (
-                  <FieldInput key={key} fk={key} field={field} value={globalVals[key]} onChange={(v) => setGlobalVals(p => ({...p, [key]: v}))} />
-                ))}
-              </div>
-            </section>
+            <ConfigScopeSection
+              title="全局配置"
+              description="所有账号共享"
+              fields={globalFields}
+              values={globalVals}
+              onChange={(key, value) => setGlobalVals((p) => ({ ...p, [key]: value }))}
+            />
           )}
           {accountFields.length > 0 && (
-            <section className="space-y-3 rounded-md border bg-muted/30 p-3">
-              <div>
-                <div className="text-sm font-semibold">账号配置</div>
-                <p className="text-xs text-muted-foreground">{accountName ? accountName + " 专属" : "按账号隔离"}</p>
-              </div>
-              <div className="space-y-4">
-                {accountFields.map(([key, field]) => (
-                  <FieldInput key={key} fk={key} field={field} value={accountVals[key]} onChange={(v) => setAccountVals(p => ({...p, [key]: v}))} />
-                ))}
-              </div>
-            </section>
+            <ConfigScopeSection
+              title="账号配置"
+              description={accountName ? accountName + " 专属" : "按账号隔离"}
+              fields={accountFields}
+              values={accountVals}
+              onChange={(key, value) => setAccountVals((p) => ({ ...p, [key]: value }))}
+            />
           )}
         </div>
         <DialogFooter>
@@ -175,14 +168,152 @@ export function ConfigDialog({
   );
 }
 
+type FieldEntry = [string, ConfigField];
+
+interface ConfigScopeSectionProps {
+  title: string;
+  description: string;
+  fields: FieldEntry[];
+  values: Record<string, unknown>;
+  onChange: (key: string, value: unknown) => void;
+}
+
+function ConfigScopeSection({
+  title,
+  description,
+  fields,
+  values,
+  onChange,
+}: ConfigScopeSectionProps) {
+  const [openTemplates, setOpenTemplates] = useState<Record<string, boolean>>({});
+  const groups = groupConfigFields(fields);
+
+  return (
+    <section className="space-y-4 rounded-md border bg-muted/30 p-3">
+      <div>
+        <div className="text-sm font-semibold">{title}</div>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </div>
+
+      {groups.basic.length > 0 && (
+        <div className="space-y-4">
+          {groups.basic.map(([key, field]) => (
+            <FieldInput
+              key={key}
+              fk={key}
+              field={field}
+              value={values[key]}
+              onChange={(value) => onChange(key, value)}
+            />
+          ))}
+        </div>
+      )}
+
+      {(groups.templates.length > 0 || groups.placeholders.length > 0) && (
+        <div className="space-y-3 rounded-md border bg-background p-3">
+          <div>
+            <div className="text-sm font-semibold">消息模板</div>
+            <p className="text-xs text-muted-foreground">点击展开后编辑对应消息。</p>
+          </div>
+          {groups.placeholders.map(([key, field]) => (
+            <FieldInput
+              key={key}
+              fk={key}
+              field={field}
+              value={values[key]}
+              onChange={(value) => onChange(key, value)}
+            />
+          ))}
+          <div className="space-y-2">
+            {groups.templates.map(([key, field]) => {
+              const label = field.title || key;
+              const open = Boolean(openTemplates[key]);
+              return (
+                <div key={key} className="rounded-md border bg-muted/20">
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm font-medium"
+                    onClick={() => setOpenTemplates((p) => ({ ...p, [key]: !p[key] }))}
+                  >
+                    <span>{label}</span>
+                    {open ? (
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    )}
+                  </button>
+                  {open && (
+                    <div className="border-t px-3 py-3">
+                      <FieldInput
+                        fk={key}
+                        field={field}
+                        value={values[key]}
+                        onChange={(value) => onChange(key, value)}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {groups.previews.length > 0 && (
+        <div className="space-y-3 rounded-md border bg-background p-3">
+          <div>
+            <div className="text-sm font-semibold">预览结果</div>
+            <p className="text-xs text-muted-foreground">按模板顺序展示一组 Telegram 消息气泡。</p>
+          </div>
+          <TelegramHtmlPreviewThread
+            messages={groups.previews.map(([key, field]) => ({
+              title: field.title || key,
+              value: renderPreviewValue(key, field, fields, values),
+              mode: "html",
+            }))}
+          />
+        </div>
+      )}
+    </section>
+  );
+}
+
+function groupConfigFields(fields: FieldEntry[]): {
+  basic: FieldEntry[];
+  placeholders: FieldEntry[];
+  templates: FieldEntry[];
+  previews: FieldEntry[];
+} {
+  const basic: FieldEntry[] = [];
+  const placeholders: FieldEntry[] = [];
+  const templates: FieldEntry[] = [];
+  const previews: FieldEntry[] = [];
+
+  for (const entry of fields) {
+    const [key] = entry;
+    if (isPreviewField(key)) {
+      previews.push(entry);
+    } else if (isPlaceholderField(key)) {
+      placeholders.push(entry);
+    } else if (isTemplateField(key)) {
+      templates.push(entry);
+    } else {
+      basic.push(entry);
+    }
+  }
+
+  return { basic, placeholders, templates, previews };
+}
+
 interface FieldInputProps {
   fk: string;
   field: ConfigField;
   value: unknown;
+  previewValue?: string;
   onChange: (v: unknown) => void;
 }
 
-function FieldInput({ fk, field, value, onChange }: FieldInputProps) {
+function FieldInput({ fk, field, value, previewValue, onChange }: FieldInputProps) {
   const label = field.title || fk;
   const description = field.description;
   const inputId = `plugin-config-${fk}`;
@@ -196,7 +327,7 @@ function FieldInput({ fk, field, value, onChange }: FieldInputProps) {
   if (isPreview) {
     return (
       <ReadOnlyField label={label} description={description}>
-        <TelegramHtmlPreview value={textValue || defaultValue} mode="html" />
+        <TelegramHtmlPreview value={previewValue ?? (textValue || defaultValue)} mode="html" title={label} />
       </ReadOnlyField>
     );
   }
@@ -355,6 +486,57 @@ function isPlaceholderField(key: string): boolean {
 
 function isReadOnlyField(key: string, field: ConfigField): boolean {
   return Boolean(field.readOnly) || isPreviewField(key) || isPlaceholderField(key);
+}
+
+function renderPreviewValue(
+  previewKey: string,
+  previewField: ConfigField,
+  fields: FieldEntry[],
+  values: Record<string, unknown>,
+): string {
+  const templateKey = findTemplateKeyForPreview(previewKey, fields);
+  const templateField = templateKey ? fields.find(([key]) => key === templateKey)?.[1] : undefined;
+  const templateValue = templateKey ? values[templateKey] : undefined;
+  const template = formatConfigValue(templateValue ?? templateField?.default ?? previewField.default);
+  return renderTemplateSample(template, values);
+}
+
+function findTemplateKeyForPreview(previewKey: string, fields: FieldEntry[]): string | null {
+  const keys = new Set(fields.map(([key]) => key));
+  if (previewKey === "template_preview") {
+    if (keys.has("round_message_template")) return "round_message_template";
+    if (keys.has("message_template")) return "message_template";
+  }
+
+  const base = previewKey.replace(/_preview$/i, "");
+  const candidates = [
+    `${base}_message_template`,
+    `${base}_template`,
+    base,
+  ];
+  return candidates.find((key) => keys.has(key)) ?? null;
+}
+
+function renderTemplateSample(template: string, values: Record<string, unknown>): string {
+  const sample: Record<string, string> = {
+    version: "1.0.0",
+    command: formatConfigValue(values.command) || "dicegrid",
+    force_stop_command: formatConfigValue(values.force_stop_command) || "stop",
+    target_sum: "17",
+    answer_index: "6",
+    prize: "100",
+    timeout: formatConfigValue(values.timeout) || "90",
+    guess_cooldown: formatConfigValue(values.guess_cooldown) || "2.0",
+    winner: "小明",
+    elapsed: "8.2",
+    example: "100",
+  };
+  sample.title = "九宫格竞猜";
+  sample.target_line = `目标点数：<b>${sample.target_sum}</b>（9 格里唯一）`;
+  sample.guide_line = "回复 <code>1-9</code> 选择你认为答案所在的格子。";
+  sample.reward_line = `首个答对者奖励：<b>+${sample.prize}</b> · 超时 ${sample.timeout} 秒`;
+
+  return template.replace(/\{([a-zA-Z0-9_]+)\}/g, (match, key: string) => sample[key] ?? match);
 }
 
 function formatConfigValue(value: unknown): string {
