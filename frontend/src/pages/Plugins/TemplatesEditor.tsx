@@ -54,7 +54,7 @@ import {
   listLLMProviders,
   patchCommandTemplate,
 } from "@/api/commands";
-import { getSystemSettings } from "@/api/system";
+import { getSystemSettings, patchSystemSettings } from "@/api/system";
 import type {
   CommandTemplateOut,
   CommandTemplateType,
@@ -577,10 +577,81 @@ export function CommandTemplates() {
     },
     onError: (err) => toast.error(getErrMsg(err)),
   });
+  const echoGuardLimit = settingsQ.data?.command_echo_guard_previous_messages ?? 8;
+  const echoGuardEnabled = echoGuardLimit > 0;
+  const [echoGuardInput, setEchoGuardInput] = useState("8");
+  useEffect(() => {
+    setEchoGuardInput(String(echoGuardLimit > 0 ? echoGuardLimit : 8));
+  }, [echoGuardLimit]);
+  const parsedEchoGuardLimit = Math.trunc(Number(echoGuardInput));
+  const nextEchoGuardLimit =
+    Number.isFinite(parsedEchoGuardLimit)
+      ? Math.max(1, Math.min(50, parsedEchoGuardLimit))
+      : 8;
+  const echoGuardMut = useMutation({
+    mutationFn: (limit: number) =>
+      patchSystemSettings({
+        command_echo_guard_previous_messages: limit,
+      }),
+    onSuccess: () => {
+      toast.success("命令防误触设置已保存，worker 将热加载");
+      qc.invalidateQueries({ queryKey: ["system", "settings"] });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
 
   return (
     <div className="space-y-6">
       <BuiltinCommandsPanel cmdPrefix={cmdPrefix} />
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="max-w-3xl">
+              <CardTitle className="text-base">命令防误触</CardTitle>
+              <CardDescription>
+                群聊里自己发送纯命令时，如果前 N 条消息内有人发过完全相同内容，会视为抽奖、接龙或复读场景并静默跳过，避免误触模板命令。设为 0 表示关闭。
+              </CardDescription>
+            </div>
+            <div className="flex flex-wrap items-center justify-end gap-3">
+              <div className="flex items-center gap-2">
+                <Label htmlFor="echo-guard-limit" className="whitespace-nowrap text-xs text-muted-foreground">
+                  检查前
+                </Label>
+                <Input
+                  id="echo-guard-limit"
+                  type="number"
+                  min={1}
+                  max={50}
+                  step={1}
+                  value={echoGuardInput}
+                  disabled={!echoGuardEnabled || settingsQ.isLoading || echoGuardMut.isPending}
+                  onChange={(e) => setEchoGuardInput(e.target.value)}
+                  onBlur={() => setEchoGuardInput(String(nextEchoGuardLimit))}
+                  className="h-8 w-20"
+                />
+                <span className="whitespace-nowrap text-xs text-muted-foreground">条</span>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={!echoGuardEnabled || settingsQ.isLoading || echoGuardMut.isPending}
+                onClick={() => echoGuardMut.mutate(nextEchoGuardLimit)}
+              >
+                保存条数
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                {echoGuardEnabled ? "已开启" : "已关闭"}
+              </span>
+              <Switch
+                checked={echoGuardEnabled}
+                disabled={settingsQ.isLoading || echoGuardMut.isPending}
+                onCheckedChange={(checked) => echoGuardMut.mutate(checked ? nextEchoGuardLimit : 0)}
+              />
+            </div>
+          </div>
+        </CardHeader>
+      </Card>
       <Card>
         <CardHeader>
           <div className="flex items-start justify-between gap-3">

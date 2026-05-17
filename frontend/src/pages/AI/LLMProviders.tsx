@@ -154,8 +154,11 @@ const COST_TIER_OPTIONS = [
   { value: 3, label: "3 · 旗舰（贵但答主力）" },
 ];
 
+const MASKED_SECRET_PLACEHOLDER = "••••••••••••••••";
+
 interface FormState {
   id?: number; // 编辑模式时存在
+  hasApiKey?: boolean;
   name: string;
   provider: LLMProviderKind;
   api_key: string; // 编辑时初始为空 = 不动；填非空 = 替换
@@ -319,6 +322,7 @@ export function LLMProviders({
   const onEdit = (p: LLMProviderOut) => {
     setEditing({
       id: p.id,
+      hasApiKey: p.has_api_key,
       name: p.name,
       provider: (p.provider as LLMProviderKind) || "openai",
       // 编辑模式下永远不预填明文 key
@@ -734,7 +738,7 @@ function ProviderEditDialog({
               maxLength={512}
               autoComplete="off"
               onChange={(e) => setField("api_key", e.target.value)}
-              placeholder={isEdit ? "留空 = 保持原 key 不变" : "sk-..."}
+              placeholder={isEdit && form.hasApiKey && !form.api_key ? MASKED_SECRET_PLACEHOLDER : isEdit ? "留空 = 保持原 key 不变" : "sk-..."}
               disabled={form.clearKey}
             />
             {isEdit && (

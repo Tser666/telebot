@@ -8,6 +8,7 @@ from plugins.installed.codex_image.manifest import MANIFEST
 from plugins.installed.codex_image.plugin import (
     CodexImagePlugin,
     _edit_html,
+    _effective_prompt,
     _extract_codex_artifacts,
     _humanize_codex_error,
     _humanize_codex_exception,
@@ -38,6 +39,17 @@ def test_codex_usage_limit_error_is_human_readable() -> None:
     assert "usage_limit_reached" not in msg
 
 
+def test_codex_safety_error_is_human_readable() -> None:
+    msg = _humanize_codex_error(
+        200,
+        "Your request was rejected by the safety system. "
+        "safety_violations=[violence]. request ID abc",
+    )
+    assert "安全审核拦截" in msg
+    assert "violence" in msg
+    assert "rejected by the safety system" not in msg
+
+
 def test_codex_error_redacts_sensitive_values_and_paths() -> None:
     msg = _safe_error_text(
         "Bearer abcdefghijklmn failed with access_token=abcdefghijklmnopqrstuvwxyz at /Users/me/.codex/auth.json"
@@ -53,6 +65,8 @@ def test_codex_stream_error_is_human_readable() -> None:
         RuntimeError("peer closed connection without sending complete message body (incomplete chunked read)")
     )
     assert "流式连接中断" in msg
+    assert "无法继续补全" in msg
+    assert "已尝试自动恢复" not in msg
     assert "incomplete chunked read" not in msg
 
 
@@ -70,6 +84,21 @@ def test_codex_html_error_is_human_readable() -> None:
 def test_codex_error_prefix_is_not_duplicated() -> None:
     assert _with_error_prefix("❌ 已失败") == "❌ 已失败"
     assert _with_error_prefix("已失败") == "❌ 已失败"
+
+
+def test_codex_effective_prompt_for_reference_requires_image_generation() -> None:
+    prompt = _effective_prompt(
+        "把这张图改成赛博朋克风格",
+        "16:9",
+        "1536x1024",
+        "png",
+        has_reference=True,
+    )
+    assert "参考图" in prompt
+    assert "不要回答图片里的问题" in prompt
+    assert "请直接生成图片" in prompt
+    assert "用户提示词：把这张图改成赛博朋克风格" in prompt
+    assert "16:9" in prompt
 
 
 def test_codex_completed_response_result_is_extracted() -> None:
@@ -90,6 +119,24 @@ def test_codex_completed_response_result_is_extracted() -> None:
     )
     assert image == png_b64
     assert revised == "cat"
+    assert error is None
+
+
+def test_codex_response_created_event_is_not_an_error() -> None:
+    image, revised, error = _extract_codex_artifacts(
+        {
+            "type": "response.created",
+            "response": {
+                "id": "resp_test",
+                "status": "in_progress",
+                "error": None,
+                "model": "gpt-5.5",
+                "output": [],
+            },
+        }
+    )
+    assert image is None
+    assert revised is None
     assert error is None
 
 

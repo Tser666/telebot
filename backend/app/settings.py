@@ -60,6 +60,9 @@ class Settings(BaseSettings):
 
     # ── userbot ────────────────────────────────────────────────────
     command_prefix: str = ","
+    # 群聊抽奖防误触：自己发出的"纯命令"若在前 N 条消息内出现过相同的他人消息，
+    # 视为参与抽奖/接龙等回声，不触发命令。0 表示关闭。
+    command_echo_guard_previous_messages: int = 8
     session_dir: str = "./sessions"
     # 头像本地缓存目录；主进程通过 IPC 让 worker 写盘 ``{aid}.jpg``
     # 24h TTL，worker 离线时返 404 → 前端首字母 fallback

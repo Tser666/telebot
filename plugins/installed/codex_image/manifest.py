@@ -4,7 +4,7 @@
 account_feature.config 字段：
   - access_token: str   Codex Access Token（通常在 .codex/auth.json 中获取）
   - command: str        触发命令名，默认 cximg，支持中文
-  - model: str          主模型名称（如 gpt-5.4）
+  - model: str          主模型名称（如 gpt-5.5）
   - image_model: str    底层图片模型（如 gpt-image-2），auto 表示自动选择
   - message_template: str 最终 caption / 生成中状态消息模板
   - image_size / aspect_ratio / image_format: 图片尺寸、比例和输出格式
@@ -40,7 +40,7 @@ MANIFEST = Manifest(
             "model": {
                 "type": "string",
                 "title": "主模型",
-                "default": "gpt-5.4",
+                "default": "gpt-5.5",
                 "enum": ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "o3", "gpt-5", "gpt-5-nano", "gpt-5.2", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.5"],
                 "description": "处理请求的主模型，支持 image_generation 工具",
             },

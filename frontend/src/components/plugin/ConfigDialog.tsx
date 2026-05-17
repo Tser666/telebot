@@ -32,10 +32,14 @@ import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
+const MASKED_SECRET_PLACEHOLDER = "••••••••••••••••";
+
 export interface ConfigField {
   key: string;
   title?: string;
   type: string;
+  format?: string;
+  "x-ui-widget"?: string;
   enum?: Array<string | number | boolean>;
   items?: { type?: string };
   default?: unknown;
@@ -106,10 +110,11 @@ export function ConfigDialog({
       for (const [k, f] of Object.entries(s.properties)) {
         // 合并顺序：schema defaults < globalConfig < accountConfig
         const effectiveVal = accountConfig[k] ?? globalConfig[k] ?? f.default;
+        const displayVal = isSensitiveConfigKey(k) && isRedactedSecretValue(effectiveVal) ? "" : effectiveVal;
         if (f.level === "global") {
-          gv[k] = effectiveVal;
+          gv[k] = displayVal;
         } else {
-          av[k] = effectiveVal;
+          av[k] = displayVal;
         }
       }
       setGlobalVals(gv);
@@ -335,6 +340,7 @@ function FieldInput({ fk, field, value, previewValue, onChange }: FieldInputProp
   const isPlaceholders = isPlaceholderField(fk);
   const isTemplate = isTemplateField(fk);
   const isReadOnly = isReadOnlyField(fk, field);
+  const isSensitive = isSensitiveConfigKey(fk);
 
   if (isPreview) {
     return (
@@ -451,7 +457,13 @@ function FieldInput({ fk, field, value, previewValue, onChange }: FieldInputProp
   }
 
   // 默认：string 类型
-  const multiline = isTemplate || textValue.includes("\n") || defaultValue.includes("\n") || /message|text|prompt|content/i.test(fk);
+  const multiline =
+    field.format === "textarea" ||
+    field["x-ui-widget"] === "textarea" ||
+    isTemplate ||
+    textValue.includes("\n") ||
+    defaultValue.includes("\n") ||
+    /message|text|prompt|content/i.test(fk);
 
   if (multiline) {
     return (
@@ -475,10 +487,10 @@ function FieldInput({ fk, field, value, previewValue, onChange }: FieldInputProp
       {description && <p className="text-xs text-muted-foreground">{description}</p>}
       <Input
         id={inputId}
-        type="text"
+        type={isSensitive ? "password" : "text"}
         value={textValue}
         onChange={(e) => onChange(e.target.value)}
-        placeholder={defaultValue}
+        placeholder={isSensitive && !textValue ? MASKED_SECRET_PLACEHOLDER : defaultValue}
       />
     </div>
   );
@@ -574,9 +586,21 @@ function withoutReadOnlyValues(
   for (const [key, value] of Object.entries(values)) {
     const field = properties[key];
     if (field && isReadOnlyField(key, field)) continue;
+    if (isSensitiveConfigKey(key) && isRedactedSecretValue(value)) {
+      out[key] = "";
+      continue;
+    }
     out[key] = value;
   }
   return out;
+}
+
+function isSensitiveConfigKey(key: string): boolean {
+  return /(^|_)(api_key|access_token|auth_token|bot_token|token|tokens|secret|password|passwd|pwd)$/i.test(key);
+}
+
+function isRedactedSecretValue(value: unknown): boolean {
+  return typeof value === "string" && /^(\*{3,}|•{3,})$/.test(value.trim());
 }
 
 function ReadOnlyField({

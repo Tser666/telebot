@@ -74,6 +74,13 @@ _LAST_RUNTIME_LOG_CLEANUP_AT = 0.0
 _RUNTIME_LOG_CLEANUP_INTERVAL = 3600.0
 
 
+def invalidate_log_retention_cache() -> None:
+    """让新的运行日志保留/等级设置立即对后续日志落库生效。"""
+
+    global _LOG_RETENTION_CACHE
+    _LOG_RETENTION_CACHE = (0.0, {})
+
+
 async def _get_log_retention_config() -> dict[str, int]:
     """读取运行日志保留设置；短缓存避免每条日志都查 system_setting。"""
 

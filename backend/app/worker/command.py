@@ -81,6 +81,13 @@ _BUILTIN_ALIAS_TO_PRIMARY: dict[str, str] = {}
 _PLUGIN_COMMANDS: dict[str, PluginCmd] = {}
 
 
+def normalize_command_echo_guard_limit(value: Any) -> int:
+    try:
+        return max(0, min(50, int(value)))
+    except (TypeError, ValueError):
+        return 8
+
+
 # ── 模板命令派发上下文 ──────────────────────────────────────────
 # 由 runtime.py 在 worker 启动 / IPC reload 时填充；handler 直接读
 @dataclass
@@ -104,6 +111,7 @@ class CommandContext:
     sudo_prefix: str = "."
     sudo_enabled: bool = False
     self_tg_user_id: int | None = None
+    command_echo_guard_previous_messages: int = 8
     scheduler_command_whitelist: list[str] = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
@@ -117,6 +125,9 @@ class CommandContext:
             self.scheduler_command_whitelist = normalize_command_whitelist(
                 self.scheduler_command_whitelist
             )
+        self.command_echo_guard_previous_messages = normalize_command_echo_guard_limit(
+            self.command_echo_guard_previous_messages
+        )
 
 
 # 全局 ctx 由 runtime.py 在 worker 进程启动时初始化并通过闭包传给 handler；
@@ -184,6 +195,74 @@ def parse_command_key_from_text(text: str, prefix: str) -> str | None:
     if not _looks_like_command_name(token, prefix=prefix):
         return None
     return token
+
+
+def _event_message_id(event: Any) -> int | None:
+    msg_id = getattr(event, "id", None)
+    if msg_id is None:
+        msg_id = getattr(getattr(event, "message", None), "id", None)
+    try:
+        return int(msg_id) if msg_id is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _message_text(msg: Any) -> str:
+    for attr in ("raw_text", "message", "text"):
+        value = getattr(msg, attr, None)
+        if isinstance(value, str):
+            return value
+    return ""
+
+
+def _is_own_message(msg: Any, self_tg_user_id: int | None) -> bool:
+    if bool(getattr(msg, "out", False)) or bool(getattr(msg, "outgoing", False)):
+        return True
+    sender_id = getattr(msg, "sender_id", None)
+    try:
+        return self_tg_user_id is not None and sender_id is not None and int(sender_id) == int(self_tg_user_id)
+    except (TypeError, ValueError):
+        return False
+
+
+def _command_echo_guard_limit() -> int:
+    if _ctx is not None:
+        return normalize_command_echo_guard_limit(_ctx.command_echo_guard_previous_messages)
+    return normalize_command_echo_guard_limit(settings.command_echo_guard_previous_messages)
+
+
+async def should_skip_outgoing_command_echo(
+    client: TelegramClient,
+    event: Any,
+    text: str,
+    args_raw: str,
+) -> bool:
+    """群聊抽奖/接龙防误触：近期他人发过同样纯命令时，不执行自己的回声消息。"""
+
+    limit = _command_echo_guard_limit()
+    if limit <= 0 or args_raw.strip():
+        return False
+    if bool(getattr(event, "is_private", False)):
+        return False
+    needle = str(text or "").strip()
+    if not needle:
+        return False
+    chat_id = getattr(event, "chat_id", None)
+    msg_id = _event_message_id(event)
+    if chat_id is None or msg_id is None:
+        return False
+
+    self_tg_user_id = _ctx.self_tg_user_id if _ctx is not None else None
+    try:
+        async for msg in client.iter_messages(chat_id, limit=limit, max_id=msg_id):
+            if _message_text(msg).strip() != needle:
+                continue
+            if _is_own_message(msg, self_tg_user_id):
+                continue
+            return True
+    except Exception:  # noqa: BLE001
+        log.debug("命令回声防误触检查失败，继续正常派发", exc_info=True)
+    return False
 
 
 def should_allow_auto_command_text(text: str, *, prefix: str | None = None) -> tuple[bool, str | None]:
@@ -1357,13 +1436,22 @@ def make_command_handler(client: TelegramClient, account_id: int, prefix: str | 
         if not m:
             return
         cmd = m.group(1)
+        args_raw = (m.group(2) or "").strip()
         if not _looks_like_command_name(cmd, prefix=p):
+            return
+        if await should_skip_outgoing_command_echo(client, event, text, args_raw):
+            log.info(
+                "跳过疑似抽奖/接龙回声命令 account=%s chat_id=%s command=%s",
+                account_id,
+                getattr(event, "chat_id", None),
+                cmd,
+            )
             return
         await _dispatch_command(
             client,
             event,
             cmd,
-            (m.group(2) or "").strip(),
+            args_raw,
             account_id=account_id,
             help_prefix=p,
         )

@@ -26,7 +26,7 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/misc";
-import { listAuditLogs, listRuntimeLogs } from "@/api/system";
+import { getSystemSettings, listAuditLogs, listRuntimeLogs } from "@/api/system";
 import { listAccounts } from "@/api/accounts";
 import { formatDateTime } from "@/lib/utils";
 import type { AuditLogItem, RuntimeLogItem } from "@/api/types";
@@ -72,6 +72,11 @@ export function Logs() {
     queryKey: ["accounts"],
     queryFn: listAccounts,
   });
+  const settingsQ = useQuery({
+    queryKey: ["system", "settings"],
+    queryFn: getSystemSettings,
+  });
+  const timezone = settingsQ.data?.timezone || "";
 
   return (
     <div className="space-y-6">
@@ -175,6 +180,7 @@ export function Logs() {
                 pluginKey=""
                 search={runtimeSearch}
                 autoRefresh={runtimeAutoRefresh && mainTab === "runtime" && runtimeTab === "event"}
+                timezone={timezone}
                 description="收到消息、命令分发等入口事件。"
               />
             </TabsContent>
@@ -187,6 +193,7 @@ export function Logs() {
                 pluginKey={runtimePluginKey}
                 search={runtimeSearch}
                 autoRefresh={runtimeAutoRefresh && mainTab === "runtime" && runtimeTab === "plugin"}
+                timezone={timezone}
                 description="插件运行记录和异常。"
               />
             </TabsContent>
@@ -199,6 +206,7 @@ export function Logs() {
                 pluginKey=""
                 search={runtimeSearch}
                 autoRefresh={runtimeAutoRefresh && mainTab === "runtime" && runtimeTab === "system"}
+                timezone={timezone}
                 description="worker 启停、IPC reload、平台级异常。"
               />
             </TabsContent>
@@ -223,7 +231,7 @@ export function Logs() {
             </CardContent>
           </Card>
 
-          <AuditLogTable userId={auditUserId} action={auditAction} search={auditSearch} />
+          <AuditLogTable userId={auditUserId} action={auditAction} search={auditSearch} timezone={timezone} />
         </TabsContent>
       </Tabs>
     </div>
@@ -237,6 +245,7 @@ function RuntimeLogTable({
   pluginKey,
   search,
   autoRefresh,
+  timezone,
   description,
 }: {
   source: RuntimeSourceTab;
@@ -245,6 +254,7 @@ function RuntimeLogTable({
   pluginKey: string;
   search: string;
   autoRefresh: boolean;
+  timezone?: string;
   description: string;
 }) {
   const filters = {
@@ -307,7 +317,7 @@ function RuntimeLogTable({
             <TableBody>
               {filtered.map((l: RuntimeLogItem) => (
                 <TableRow key={l.id}>
-                  <TableCell className="font-mono text-xs">{formatDateTime(l.created_at)}</TableCell>
+                  <TableCell className="font-mono text-xs">{formatDateTime(l.created_at, timezone)}</TableCell>
                   <TableCell>
                     <Badge variant={LEVEL_VARIANT[l.level.toLowerCase()] ?? "secondary"}>
                       {l.level.toUpperCase()}
@@ -404,10 +414,12 @@ function AuditLogTable({
   userId,
   action,
   search,
+  timezone,
 }: {
   userId: string;
   action: string;
   search: string;
+  timezone?: string;
 }) {
   const uid = Number(userId);
   const qUserId = Number.isInteger(uid) && uid > 0 ? uid : undefined;
@@ -465,7 +477,7 @@ function AuditLogTable({
             <TableBody>
               {filtered.map((l: AuditLogItem) => (
                 <TableRow key={l.id}>
-                  <TableCell className="font-mono text-xs">{formatDateTime(l.ts)}</TableCell>
+                  <TableCell className="font-mono text-xs">{formatDateTime(l.ts, timezone)}</TableCell>
                   <TableCell className="font-mono text-xs text-muted-foreground">
                     {l.user_id ?? "—"}
                   </TableCell>

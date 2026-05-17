@@ -125,6 +125,33 @@ def test_ai_runtime_model_display_name_prettifies_id() -> None:
     assert ai_runtime._model_display_name("gpt-4o", {"models": []}) == "GPT-4o"  # noqa: SLF001
 
 
+def test_ai_runtime_api_format_context_tracks_effective_protocol() -> None:
+    provider = {
+        "id": 1,
+        "name": "OpenAI",
+        "provider": "openai",
+        "default_model": "gpt-5.5",
+        "api_format": "chat_completions",
+        "web_search_api_format": "auto",
+    }
+
+    normal = ai_runtime._api_format_render_context(provider, web_search=False)  # noqa: SLF001
+    assert normal["api_format"] == "chat_completions"
+    assert normal["api_protocol"] == "chat_completions"
+    assert normal["configured_api_format"] == "chat_completions"
+    assert normal["web_search_api_format"] == "auto"
+    assert normal["endpoint"] == "/chat/completions"
+    assert normal["web_search"] == ""
+
+    search = ai_runtime._api_format_render_context(provider, web_search=True)  # noqa: SLF001
+    assert search["api_format"] == "responses"
+    assert search["api_protocol"] == "responses"
+    assert search["configured_api_format"] == "chat_completions"
+    assert search["web_search_api_format"] == "auto"
+    assert search["endpoint"] == "/responses"
+    assert search["web_search"] == "true"
+
+
 @pytest.mark.asyncio
 async def test_ai_runtime_rejects_non_vision_provider_before_download(monkeypatch) -> None:
     from app.worker import runtime as worker_runtime

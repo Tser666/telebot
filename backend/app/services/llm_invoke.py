@@ -114,3 +114,16 @@ def _api_format_for_call(provider: LLMProviderDTO, *, web_search: bool) -> str |
     if provider.provider.lower() == LLM_PROVIDER_OPENAI and current == LLM_API_FORMAT_CHAT_COMPLETIONS:
         return LLM_API_FORMAT_RESPONSES
     return None
+
+
+def resolved_api_format_for_call(provider: LLMProviderDTO, *, web_search: bool) -> str:
+    """Return the effective API format after per-call overrides are applied."""
+    override = _api_format_for_call(provider, web_search=web_search)
+    if override:
+        return override
+    configured = (provider.api_format or "").strip().lower()
+    if configured:
+        return configured
+    from ..db.models.command import default_api_format_for
+
+    return default_api_format_for(provider.provider)

@@ -23,7 +23,7 @@
       "model": {
         "type": "string",
         "title": "主模型",
-        "default": "gpt-5.4"
+        "default": "gpt-5.5"
       },
       "image_model": {
         "type": "string",

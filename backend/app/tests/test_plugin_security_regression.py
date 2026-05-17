@@ -168,8 +168,8 @@ class TestRemotePluginSecurity:
 
         async def _test():
             with pytest.raises(svc.GitOperationFailed) as ex:
-                # 使用一个肯定会超时的命令
-                await svc._run_git("clone", "--depth", "1", "https://github.com/git/git.git", "/tmp", timeout=0.001)
+                # 使用 git alias 执行一个短暂等待命令，避免依赖网络或目标目录状态。
+                await svc._run_git("-c", "alias.slow=!sleep 1", "slow", timeout=0.001)
             # 超时错误码应该是 GIT_TIMEOUT
             assert "TIMEOUT" in ex.value.code or "超时" in ex.value.message
 

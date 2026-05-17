@@ -85,6 +85,13 @@ def _validate_policy(policy: str | None) -> None:
         raise _bad("invalid_policy", f"未知 policy：{policy}")
 
 
+def _normalize_command_echo_guard_limit(value: Any) -> int:
+    try:
+        return max(0, min(50, int(value)))
+    except (TypeError, ValueError):
+        return 8
+
+
 def _parse_time(s: str | None) -> dtime | None:
     """``'HH:MM'`` 或 ``'HH:MM:SS'`` → ``datetime.time``。"""
     if not s:
@@ -607,6 +614,15 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
     llm_val = await _get_setting(db, "llm_limits", {})
     log_val = await _get_setting(db, "log_retention", {})
     sudo_val = await _get_setting(db, "sudo_enabled", {"enabled": False})
+    echo_guard_val = await _get_setting(db, "command_echo_guard_previous_messages", None)
+    if echo_guard_val is None:
+        from ..settings import settings as app_settings
+
+        echo_guard_source: Any = app_settings.command_echo_guard_previous_messages
+    elif isinstance(echo_guard_val, dict):
+        echo_guard_source = echo_guard_val.get("value", 8)
+    else:
+        echo_guard_source = echo_guard_val
     tz = str(tz_val.get("value", "")) if isinstance(tz_val, dict) else str(tz_val)
     llm_limits = llm_val if isinstance(llm_val, dict) else {}
     log_retention = log_val if isinstance(log_val, dict) else {}
@@ -616,6 +632,7 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
         "api_qps_total": int(qps_val.get("api_qps_total", 0)) if isinstance(qps_val, dict) else int(qps_val),
         "timezone": tz or "",
         "sudo_enabled": bool(sudo_val.get("enabled", False)) if isinstance(sudo_val, dict) else bool(sudo_val),
+        "command_echo_guard_previous_messages": _normalize_command_echo_guard_limit(echo_guard_source),
         "llm_limits": {
             "per_minute": max(0, int(llm_limits.get("per_minute", 0) or 0)),
             "daily_requests": max(0, int(llm_limits.get("daily_requests", 0) or 0)),
@@ -662,6 +679,7 @@ class _SettingsPatch(BaseModel):
     command_prefix: str | None = None
     timezone: str | None = None
     sudo_enabled: bool | None = None
+    command_echo_guard_previous_messages: int | None = None
     llm_limits: _LLMLimitsPatch | None = None
     log_retention: _LogRetentionPatch | None = None
 
@@ -690,6 +708,19 @@ async def patch_system_settings(
         enabled = bool(payload.sudo_enabled)
         await _set_setting(db, "sudo_enabled", {"enabled": enabled})
         await _audit(db, user.id, "set_sudo_enabled", target="system", detail={"enabled": enabled})
+        await _broadcast_reload()
+    if payload.command_echo_guard_previous_messages is not None:
+        limit = int(payload.command_echo_guard_previous_messages)
+        if limit < 0 or limit > 50:
+            raise _bad("invalid_command_echo_guard", "命令回声防误触检查条数必须在 0~50 之间")
+        await _set_setting(db, "command_echo_guard_previous_messages", {"value": limit})
+        await _audit(
+            db,
+            user.id,
+            "set_command_echo_guard",
+            target="system",
+            detail={"previous_messages": limit},
+        )
         await _broadcast_reload()
     if payload.llm_limits is not None:
         current = await _get_setting(db, "llm_limits", {})
@@ -756,6 +787,12 @@ async def patch_system_settings(
             next_retention[key] = ivalue
         await _set_setting(db, "log_retention", next_retention)
         await _audit(db, user.id, "set_log_retention", target="system", detail=next_retention)
+        try:
+            from ..worker.supervisor import invalidate_log_retention_cache
+
+            invalidate_log_retention_cache()
+        except Exception:  # noqa: BLE001
+            pass
     return await get_system_settings(db, user)
 
 

@@ -53,6 +53,13 @@ def _preserve_existing_sensitive_values(
     return merged
 
 
+def _normalize_feature_config(key: str, config: dict[str, object]) -> dict[str, object]:
+    normalized = dict(config)
+    if key == "codex_image" and normalized.get("model") == "gpt-5.4":
+        normalized["model"] = "gpt-5.5"
+    return normalized
+
+
 # ─────────────────────────────────────────────────────
 # 矩阵
 # ─────────────────────────────────────────────────────
@@ -123,6 +130,7 @@ async def patch_account_feature(
             dict(existing.config or {}) if existing is not None else None,
             dict(payload.config),
         )
+        payload.config = _normalize_feature_config(key, payload.config)
         config_schema = (feature.manifest or {}).get("config_schema")
         if config_schema:
             validation = feature_service.validate_config_against_schema(
@@ -185,6 +193,7 @@ async def update_account_feature_config(
         dict(existing.config or {}) if existing is not None else None,
         dict(payload.config),
     )
+    payload.config = _normalize_feature_config(key, payload.config)
     config_schema = (feature.manifest or {}).get("config_schema")
     if config_schema:
         validation = feature_service.validate_config_against_schema(
@@ -258,6 +267,11 @@ async def set_plugin_global_config(
     - 仅更新标记为 level="global" 的字段。
     - 通知所有使用该插件的账号的 worker reload。
     """
+    existing_global_config = await feature_service.get_plugin_global_config(db, key)
+    payload.config = _preserve_existing_sensitive_values(
+        existing_global_config,
+        dict(payload.config),
+    )
     try:
         global_config = await feature_service.set_plugin_global_config(
             db, key, payload.config

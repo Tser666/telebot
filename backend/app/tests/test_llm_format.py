@@ -135,6 +135,22 @@ def test_render_conditional_block_falsy() -> None:
     assert out == "xy"
 
 
+def test_render_protocol_placeholders_and_web_search_block() -> None:
+    out = render_output(
+        "{api_protocol} {api_format} {configured_api_format} {endpoint}"
+        "{?web_search} search={web_search}{/?}",
+        {
+            "api_protocol": "responses",
+            "api_format": "responses",
+            "configured_api_format": "chat_completions",
+            "endpoint": "/responses",
+            "web_search": "true",
+        },
+        escape_format=None,
+    )
+    assert out == "responses responses chat_completions /responses search=true"
+
+
 def test_render_conditional_zero_int_is_falsy() -> None:
     out = render_output("a{?n}!{/?}b", {"n": 0}, escape_format=None)
     assert out == "ab"

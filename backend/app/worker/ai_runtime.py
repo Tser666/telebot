@@ -4,6 +4,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from ..services.llm_invoke import resolved_api_format_for_call
+
 log = logging.getLogger(__name__)
 
 _LONG_MESSAGE_THRESHOLD = 3900
@@ -30,6 +32,29 @@ def _format_llm_sources(sources: Any) -> str:
         if len(lines) >= 8:
             break
     return "\n".join(lines)
+
+
+def _api_format_render_context(provider: dict[str, Any], *, web_search: bool) -> dict[str, Any]:
+    """Expose configured/effective API protocol fields for output templates."""
+    from ..services.llm_dto import LLMProviderDTO
+
+    dto = LLMProviderDTO.from_dict(provider)
+    configured = (dto.api_format or "").strip() or "chat_completions"
+    web_search_format = (dto.web_search_api_format or "").strip() or "auto"
+    effective = resolved_api_format_for_call(dto, web_search=web_search)
+    endpoint_map = {
+        "chat_completions": "/chat/completions",
+        "responses": "/responses",
+        "anthropic_messages": "/messages",
+    }
+    return {
+        "api_format": effective,
+        "configured_api_format": configured,
+        "web_search_api_format": web_search_format,
+        "api_protocol": effective,
+        "endpoint": endpoint_map.get(effective, effective),
+        "web_search": "true" if web_search else "",
+    }
 
 
 def _model_display_name(model_id: str, provider: dict[str, Any]) -> str:
@@ -673,6 +698,7 @@ async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> N
             output_format = "html" if raw_format == "markdownv2" else raw_format
             escape_values = bool(cfg.get("escape_values", True))
             model_id = result.model or ""
+            api_format_info = _api_format_render_context(provider_dict, web_search=web_search)
             render_ctx = {
                 "answer": result.text or "",
                 "question": user_q,
@@ -681,11 +707,14 @@ async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> N
                 "model_id": model_id,
                 "provider": provider_dict.get("name", ""),
                 "provider_kind": provider_dict.get("provider", ""),
+                "command": tpl.get("name", ""),
+                "mode": cfg.get("mode", "chat"),
                 "in_tokens": result.input_tokens,
                 "out_tokens": result.output_tokens,
                 "total_tokens": result.input_tokens + result.output_tokens,
                 "routing_note": (routing_note or "").replace("auto · ", ""),
                 "sources": _format_llm_sources(result.sources),
+                **api_format_info,
             }
             if escape_values and output_format == "html":
                 escape_format: str | None = "html"
@@ -795,6 +824,7 @@ async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> N
 
     model_id = result.model or ""
     model_display = _model_display_name(model_id, provider_dict)
+    api_format_info = _api_format_render_context(provider_dict, web_search=bool(cfg.get("web_search", False)))
     render_ctx = {
         "answer": result.text or "",
         "question": user_q,
@@ -803,11 +833,14 @@ async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> N
         "model_id": model_id,
         "provider": provider_dict.get("name", ""),
         "provider_kind": provider_dict.get("provider", ""),
+        "command": tpl.get("name", ""),
+        "mode": cfg.get("mode", "chat"),
         "in_tokens": result.input_tokens,
         "out_tokens": result.output_tokens,
         "total_tokens": result.input_tokens + result.output_tokens,
         "routing_note": (routing_note or "").replace("auto · ", ""),  # 去掉前缀让模板自己加
         "sources": _format_llm_sources(result.sources),
+        **api_format_info,
     }
 
     # 转义模式：html 走 HTML 转义；plain / markdown_v1 不转义；老 mdv2 也不进这里（已映射到 html）

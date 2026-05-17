@@ -248,7 +248,7 @@ export function SettingsIndex() {
       },
     }),
     onSuccess: () => {
-      toast.success("日志保留策略已保存");
+      toast.success("运行日志设置已保存，新日志立即按该等级落库");
       qc.invalidateQueries({ queryKey: ["system", "settings"] });
     },
     onError: (err) => toast.error(getErrMsg(err)),
@@ -580,9 +580,9 @@ export function SettingsIndex() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">日志保留策略</CardTitle>
+              <CardTitle className="text-base">运行日志设置</CardTitle>
               <CardDescription>
-                控制运行日志保存多久，以及单条日志内容最多保存多少字符。0 天表示不自动删除。
+                控制运行日志等级、保留时间和单条日志长度。日志等级保存后立即影响新日志落库，0 天表示不自动删除。
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -630,7 +630,7 @@ export function SettingsIndex() {
                   <p className="text-xs text-muted-foreground">默认 8000；0 = 不保存 detail</p>
                 </div>
                 <div className="space-y-1.5">
-                  <Label>最小日志级别</Label>
+                  <Label>运行日志等级（即时生效）</Label>
                   <Select
                     value={logRetention.runtime_log_min_level}
                     onChange={(e) =>
@@ -646,7 +646,7 @@ export function SettingsIndex() {
                     <option value="error">error（只看错误）</option>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    在主进程落库前过滤低级别日志，修改后对新日志生效。
+                    debug 会记录插件排障细节；info 适合日常；warn/error 只保留异常。
                   </p>
                 </div>
               </div>

@@ -51,6 +51,8 @@ import type {
   AccountBotUserCreate,
 } from "@/api/types";
 import { getErrMsg } from "@/lib/api";
+
+const MASKED_SECRET_PLACEHOLDER = "••••••••••••••••";
 import { formatDateTime } from "@/lib/utils";
 
 const ROLE_META: Record<AccountBotRole, { label: string; desc: string }> = {
@@ -271,7 +273,7 @@ export function BotTab({ aid }: { aid: number }) {
                   id="account-bot-token"
                   type="password"
                   autoComplete="off"
-                  placeholder={bot?.has_token ? "已保存；留空表示不修改" : "123456:ABC-DEF..."}
+                  placeholder={bot?.has_token ? MASKED_SECRET_PLACEHOLDER : "123456:ABC-DEF..."}
                   value={token}
                   onChange={(e) => setToken(e.target.value)}
                 />

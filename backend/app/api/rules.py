@@ -504,7 +504,7 @@ async def dry_run_rule(
         )
         logs = [
             {"step": "auth", "msg": f"Token：{'已配置' if cfg.get('access_token') else '未配置'}"},
-            {"step": "config", "msg": f"模型：{cfg.get('model', 'gpt-5.4')}"},
+            {"step": "config", "msg": f"模型：{cfg.get('model', 'gpt-5.5')}"},
             {"step": "config", "msg": f"最大等待：{cfg.get('max_wait_seconds', 600)}s"},
             {"step": "sample", "msg": f"提示词长度：{len(payload.sample_message)}"},
         ]

@@ -24,6 +24,8 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { getErrMsg } from "@/lib/api";
 
+const MASKED_SECRET_PLACEHOLDER = "••••••••••••••••";
+
 interface CodexImageConfig {
   command: string;
   access_token: string;
@@ -56,7 +58,7 @@ function parseClampedInt(
 const DEFAULT_CONFIG: CodexImageConfig = {
   command: "cximg",
   access_token: "",
-  model: "gpt-5.4",
+  model: "gpt-5.5",
   image_model: "auto",
   max_wait_seconds: 600,
   status_interval_seconds: 20,
@@ -86,6 +88,13 @@ const MAIN_MODEL_OPTIONS = [
   { value: "gpt-4o-mini", label: "gpt-4o-mini" },
   { value: "o3", label: "o3" },
 ];
+const MAIN_MODEL_VALUES = new Set(MAIN_MODEL_OPTIONS.map((item) => item.value));
+
+function normalizeMainModel(value: unknown): string {
+  const modelId = String(value || "").trim();
+  if (modelId === "gpt-5.4") return DEFAULT_CONFIG.model;
+  return MAIN_MODEL_VALUES.has(modelId) ? modelId : DEFAULT_CONFIG.model;
+}
 
 // 支持的底层图片模型
 const IMAGE_MODEL_OPTIONS = [
@@ -168,15 +177,9 @@ export function CodexImageConfigPage() {
     setCommand(currentConfig.command ?? DEFAULT_CONFIG.command);
     setAccessToken("");
     setHasToken(Boolean(currentConfig.access_token));
-    if (currentConfig.model !== undefined) {
-      setModel(currentConfig.model);
-    }
-    if (currentConfig.image_model !== undefined) {
-      setImageModel(currentConfig.image_model);
-    }
-    if (currentConfig.max_wait_seconds !== undefined) {
-      setMaxWaitInput(String(currentConfig.max_wait_seconds));
-    }
+    setModel(normalizeMainModel(currentConfig.model));
+    setImageModel(currentConfig.image_model ?? DEFAULT_CONFIG.image_model);
+    setMaxWaitInput(String(currentConfig.max_wait_seconds ?? DEFAULT_CONFIG.max_wait_seconds));
     setStatusIntervalInput(
       String(
         currentConfig.status_interval_seconds ??
@@ -376,7 +379,7 @@ export function CodexImageConfigPage() {
                 id="access-token"
                 className="font-mono flex-1"
                 type={showToken ? "text" : "password"}
-                placeholder={hasToken ? "留空表示保留现有 Token；输入新值可覆盖" : "eyJhbGciOi..."}
+                placeholder={hasToken ? MASKED_SECRET_PLACEHOLDER : "eyJhbGciOi..."}
                 value={accessToken}
                 onChange={(e) => {
                   setAccessToken(e.target.value);
@@ -398,7 +401,7 @@ export function CodexImageConfigPage() {
             </div>
             {hasToken && !accessToken && (
               <p className="text-xs text-muted-foreground">
-                当前：已配置
+                当前：已配置；留空保存会保留现有 Token，输入新值才会覆盖。
               </p>
             )}
             {accessToken && (
@@ -675,15 +678,9 @@ export function CodexImageConfigPage() {
                   setAccessToken("");
                   setHasToken(Boolean(currentConfig.access_token));
                   setShowToken(false);
-                  if (currentConfig.model !== undefined) {
-                    setModel(currentConfig.model);
-                  }
-                  if (currentConfig.image_model !== undefined) {
-                    setImageModel(currentConfig.image_model);
-                  }
-                  if (currentConfig.max_wait_seconds !== undefined) {
-                    setMaxWaitInput(String(currentConfig.max_wait_seconds));
-                  }
+                  setModel(normalizeMainModel(currentConfig.model));
+                  setImageModel(currentConfig.image_model ?? DEFAULT_CONFIG.image_model);
+                  setMaxWaitInput(String(currentConfig.max_wait_seconds ?? DEFAULT_CONFIG.max_wait_seconds));
                   setStatusIntervalInput(
                     String(
                       currentConfig.status_interval_seconds ??

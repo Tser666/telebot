@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import html
 import io
 import json
 import re
@@ -37,7 +38,8 @@ from app.worker.plugins.base import Plugin, PluginContext, register
 # ─── 常量 ───────────────────────────────────────────────
 
 CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
-DEFAULT_MODEL = "gpt-5.4"
+DEFAULT_MODEL = "gpt-5.5"
+CODEX_TOOL_FALLBACK_MODEL = "gpt-5.4"
 DEFAULT_IMAGE_MODEL = "auto"  # 底层图片模型，auto 表示由 OpenAI 自动选择
 DEFAULT_MAX_WAIT = 600  # 10 分钟
 DEFAULT_COMMAND = "cximg"
@@ -73,6 +75,9 @@ SUPPORTED_IMAGE_MODELS = ["auto", "gpt-image-2", "gpt-image-1.5", "gpt-image-1",
 SUPPORTED_IMAGE_SIZES = {"auto", "1024x1024", "1536x1024", "1024x1536", "from_reference"}
 SUPPORTED_ASPECT_RATIOS = {"auto", "1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "from_reference"}
 SUPPORTED_IMAGE_FORMATS = {"png", "jpeg", "webp"}
+LEGACY_MODEL_ALIASES = {
+    "gpt-5.4": DEFAULT_MODEL,
+}
 _STREAM_RECOVERABLE_ERRORS = (
     httpx.RemoteProtocolError,
     httpx.ReadError,
@@ -219,6 +224,33 @@ def _extract_codex_artifacts(value: Any) -> tuple[str | None, str | None, str | 
     return image_base64, revised_prompt, error_info
 
 
+def _summarize_codex_sse_event(obj: dict[str, Any]) -> dict[str, Any]:
+    event_type = str(obj.get("type") or "")
+    response = obj.get("response") if isinstance(obj.get("response"), dict) else {}
+    item = obj.get("item") if isinstance(obj.get("item"), dict) else {}
+    output = response.get("output") if isinstance(response, dict) else None
+    output_types: list[str] = []
+    if isinstance(output, list):
+        output_types = [
+            str(part.get("type") or "")
+            for part in output
+            if isinstance(part, dict) and part.get("type")
+        ]
+    image_base64, revised_prompt, error_info = _extract_codex_artifacts(obj)
+    return {
+        "event_type": event_type,
+        "response_id": response.get("id") or obj.get("response_id") or obj.get("id"),
+        "response_status": response.get("status") or obj.get("status"),
+        "response_model": response.get("model"),
+        "item_type": item.get("type"),
+        "item_status": item.get("status"),
+        "output_types": output_types[:10],
+        "has_image": bool(image_base64),
+        "has_revised_prompt": bool(revised_prompt),
+        "has_error": bool(error_info),
+    }
+
+
 def _format_seconds(seconds: Any) -> str | None:
     try:
         total = max(0, int(seconds))
@@ -257,6 +289,24 @@ def _humanize_codex_error(status_code: int, detail: str, *, content_type: str = 
     err = payload.get("error") if isinstance(payload, dict) else None
     err_type = str(err.get("type") or "") if isinstance(err, dict) else ""
     message = _safe_error_text(str(err.get("message") or "")) if isinstance(err, dict) else ""
+    lowered_detail = safe_detail.lower()
+
+    if (
+        "safety" in lowered_detail
+        or "content_policy" in lowered_detail
+        or "unsafe" in lowered_detail
+        or "safety_violations" in lowered_detail
+        or "rejected by the safety system" in lowered_detail
+    ):
+        violations = ""
+        match = re.search(r"safety_violations=\[([^\]]+)\]", safe_detail)
+        if match:
+            violations = f"（命中类别：{_safe_error_text(match.group(1))}）"
+        return (
+            f"❌ 图片被 Codex 安全审核拦截了{violations}。\n"
+            "💡 提示词或参考图可能触发了内容安全策略。可以换一种非暴力、非伤害的描述，"
+            "或更换参考图后再试。"
+        )
 
     if err_type == "usage_limit_reached":
         plan = _safe_error_text(str(err.get("plan_type") or "unknown")) if isinstance(err, dict) else "unknown"
@@ -341,7 +391,8 @@ def _humanize_codex_exception(exc: BaseException) -> str:
     if isinstance(exc, _STREAM_RECOVERABLE_ERRORS) or "incomplete chunked read" in lowered:
         return (
             "❌ Codex 流式连接中断了，没完整收到响应。\n"
-            "💡 已尝试自动恢复。如果还是失败，可能是网络不稳定，稍后再试或换个网络。"
+            "💡 这次任务已经无法继续补全，因为 Codex 图片结果只在流式响应里返回。"
+            "请稍后重试；如果经常出现，通常是网络、代理或上游连接不稳定。"
         )
     if "timeout" in lowered or isinstance(exc, TimeoutError):
         return (
@@ -379,6 +430,12 @@ def _get_config_value(ctx: PluginContext, key: str, default: Any = None) -> Any:
     """从 ctx.config 获取配置值。"""
     cfg = ctx.config or {}
     return cfg.get(key, default)
+
+
+def _normalize_main_model(value: Any) -> str:
+    model = str(value or "").strip()
+    model = LEGACY_MODEL_ALIASES.get(model, model)
+    return model if model in SUPPORTED_MAIN_MODELS else DEFAULT_MODEL
 
 
 def _command_name(ctx: PluginContext) -> str:
@@ -505,10 +562,65 @@ def _parse_generation_args(
     return " ".join(prompt_parts).strip(), opts
 
 
-def _effective_prompt(prompt: str, aspect_ratio: str) -> str:
-    if not aspect_ratio or aspect_ratio == "auto":
-        return prompt
-    return f"{prompt}\n\n画面比例要求：{aspect_ratio}。"
+def _effective_prompt(
+    prompt: str,
+    aspect_ratio: str,
+    image_size: str,
+    image_format: str,
+    *,
+    has_reference: bool = False,
+) -> str:
+    task_hint = (
+        "任务：基于随请求附带的参考图生成或编辑一张新图片。"
+        "参考图只用于视觉参考；不要回答图片里的问题，不要解释图片内容，不要输出文字分析。"
+        "请直接生成图片。"
+        if has_reference
+        else "任务：根据用户提示词生成一张新图片。不要只输出绘图提示词、故事或文字分析，请直接生成图片。"
+    )
+    hints: list[str] = []
+    if aspect_ratio and aspect_ratio != "auto":
+        hints.append(f"画面比例要求：{aspect_ratio}。")
+    if image_size and image_size not in {"auto", "from_reference"}:
+        hints.append(f"图片尺寸要求：{image_size}。")
+    if image_format and image_format != "png":
+        hints.append(f"输出格式偏好：{image_format}。")
+    parts = [task_hint, f"用户提示词：{prompt}"]
+    if hints:
+        parts.append("\n".join(hints))
+    return "\n\n".join(parts)
+
+
+def _extract_pseudo_image_prompt(text: Any) -> str | None:
+    raw = str(text or "")
+    if "image_generation" not in raw:
+        return None
+    match = re.search(r"<image_generation\b[^>]*\bprompt=(['\"])(.*?)\1", raw, re.S)
+    if not match:
+        return None
+    prompt = html.unescape(match.group(2)).strip()
+    return prompt or None
+
+
+def _extract_text_fallback_prompt(text: Any) -> str | None:
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    pseudo = _extract_pseudo_image_prompt(raw)
+    if pseudo:
+        return pseudo
+    candidates = [
+        r"(?:英文版\s*prompt|English\s*prompt)\s*[:：]\s*(.+)$",
+        r"(?:提示词|prompt)\s*[:：]\s*(.+?)(?:\n\s*\n|$)",
+    ]
+    for pattern in candidates:
+        match = re.search(pattern, raw, re.I | re.S)
+        if not match:
+            continue
+        prompt = re.sub(r"[*_`>]+", "", match.group(1)).strip()
+        prompt = re.split(r"\n\s*(?:\*\*?[^:\n]+[:：]|\w+[:：])", prompt, maxsplit=1)[0].strip()
+        if prompt:
+            return prompt[:1000]
+    return None
 
 
 def _render_message(template: str, values: dict[str, Any], *, limit: int = 4000) -> str:
@@ -539,8 +651,8 @@ async def _update_account_config(ctx: PluginContext, key: str, value: Any) -> No
     """更新 account_feature.config 中的某个字段并持久化。"""
     from sqlalchemy import select
 
-    from ....db.base import AsyncSessionLocal
-    from ....db.models.feature import AccountFeature
+    from app.db.base import AsyncSessionLocal
+    from app.db.models.feature import AccountFeature
 
     async with AsyncSessionLocal() as db:
         result = await db.execute(
@@ -571,13 +683,14 @@ async def _call_codex_image(
     image_size: str = DEFAULT_IMAGE_SIZE,
     image_format: str = DEFAULT_IMAGE_FORMAT,
     poll_interval: int = DEFAULT_STATUS_INTERVAL,
+    debug_log: Any | None = None,
 ) -> dict[str, str | None]:
     """调用 Codex 图片生成 API。
 
     Args:
         prompt: 生成提示词
         token: Bearer token
-        model: 主模型名（如 gpt-5.4）
+        model: 主模型名（如 gpt-5.5）
         image_model: 底层图片模型（如 gpt-image-2），auto 表示自动选择
         reference_image: 参考图 {base64, mime_type, width, height}，可选
         update_status: 异步状态回调 async (text) -> None
@@ -600,19 +713,15 @@ async def _call_codex_image(
             },
         ]
 
+    # ChatGPT/Codex 内部端点只接受最小工具声明；model/size/output_format
+    # 这类 Responses 公网 API 扩展字段会让工具失效，进而退化成纯文本输出。
     image_tool: dict[str, Any] = {"type": "image_generation"}
-    # 指定底层图片模型
-    if image_model and image_model != "auto":
-        image_tool["model"] = image_model
-    if image_size and image_size != "auto":
-        image_tool["size"] = image_size
-    if image_format and image_format != "png":
-        image_tool["output_format"] = image_format
 
     payload = {
         "model": model,
         "instructions": instructions or DEFAULT_INSTRUCTIONS,
         "input": [{"role": "user", "content": content}],
+        # ChatGPT/Codex OAuth 端点要求 store=false；图片结果必须从 SSE 流里取。
         "store": False,
         "tools": [image_tool],
         "reasoning": {"effort": reasoning_effort or DEFAULT_REASONING_EFFORT},
@@ -635,84 +744,129 @@ async def _call_codex_image(
         "revised_prompt": None,
         "status": None,
         "response_id": None,
+        "debug_output_types": None,
+        "debug_last_event_type": None,
+        "debug_text_sample": None,
     }
     stream_error: BaseException | None = None
 
     # ── 流式读取 SSE ──────────────────────────────────
-    remaining_timeout = max(1.0, deadline - time.monotonic())
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(remaining_timeout)) as client:
-            async with client.stream("POST", CODEX_URL, json=payload, headers=headers) as resp:
-                if resp.status_code != 200:
-                    body = await resp.aread()
-                    raise CodexApiError(
-                        resp.status_code,
-                        body.decode("utf-8", errors="replace")[:500],
-                        content_type=resp.headers.get("content-type", ""),
-                    )
+    for stream_attempt in range(2):
+        remaining_timeout = max(1.0, deadline - time.monotonic())
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(remaining_timeout)) as client:
+                async with client.stream("POST", CODEX_URL, json=payload, headers=headers) as resp:
+                    if resp.status_code != 200:
+                        body = await resp.aread()
+                        raise CodexApiError(
+                            resp.status_code,
+                            body.decode("utf-8", errors="replace")[:500],
+                            content_type=resp.headers.get("content-type", ""),
+                        )
 
-                content_type = resp.headers.get("content-type", "")
-                if "text/event-stream" not in content_type.lower() and "json" not in content_type.lower():
-                    body = await resp.aread()
-                    raise CodexApiError(
-                        resp.status_code,
-                        body.decode("utf-8", errors="replace")[:500],
-                        content_type=content_type,
-                    )
+                    content_type = resp.headers.get("content-type", "")
+                    if "html" in content_type.lower():
+                        body = await resp.aread()
+                        raise CodexApiError(
+                            resp.status_code,
+                            body.decode("utf-8", errors="replace")[:500],
+                            content_type=content_type,
+                        )
 
-                buffer = ""
-                async for raw_chunk in resp.aiter_text():
-                    buffer += raw_chunk
+                    buffer = ""
+                    async for raw_chunk in resp.aiter_text():
+                        buffer += raw_chunk
 
-                    while "\n\n" in buffer:
-                        raw_event, buffer = buffer.split("\n\n", 1)
-                        data_lines = [
-                            line[6:].strip()
-                            for line in raw_event.splitlines()
-                            if line.startswith("data: ") and line[6:].strip()
-                        ]
+                        while "\n\n" in buffer:
+                            raw_event, buffer = buffer.split("\n\n", 1)
+                            data_lines = [
+                                line[6:].strip()
+                                for line in raw_event.splitlines()
+                                if line.startswith("data: ") and line[6:].strip()
+                            ]
 
-                        for data_line in data_lines:
-                            if data_line == "[DONE]":
-                                continue
-                            try:
-                                obj = json.loads(data_line)
-                            except (json.JSONDecodeError, ValueError):
-                                continue
+                            for data_line in data_lines:
+                                if data_line == "[DONE]":
+                                    continue
+                                try:
+                                    obj = json.loads(data_line)
+                                except (json.JSONDecodeError, ValueError):
+                                    continue
 
-                            event_type = obj.get("type", "")
-                            image_b64, revised, error_info = _extract_codex_artifacts(obj)
-                            result["image_base64"] = image_b64 or result["image_base64"]
-                            result["revised_prompt"] = revised or result["revised_prompt"]
-                            if error_info:
-                                raise CodexApiError(200, error_info)
-                            if event_type == "response.created":
-                                result["response_id"] = (obj.get("response") or {}).get("id") or result["response_id"]
-                                result["status"] = (obj.get("response") or {}).get("status") or result["status"]
-                            elif event_type == "response.image_generation_call.partial_image":
-                                result["image_base64"] = obj.get("partial_image_b64") or result["image_base64"]
-                                result["revised_prompt"] = obj.get("revised_prompt") or result["revised_prompt"]
-                                result["status"] = obj.get("status") or result["status"]
-                            elif event_type == "response.completed":
-                                resp_obj = obj.get("response", {})
-                                result["status"] = resp_obj.get("status") or result["status"]
-                                result["response_id"] = resp_obj.get("id") or result["response_id"]
-    except _STREAM_RECOVERABLE_ERRORS as exc:
-        stream_error = exc
+                                event_type = obj.get("type", "")
+                                result["debug_last_event_type"] = event_type
+                                if event_type == "response.output_text.delta":
+                                    delta = str(obj.get("delta") or "")
+                                    if delta:
+                                        result["debug_text_sample"] = (
+                                            str(result.get("debug_text_sample") or "") + delta
+                                        )[:500]
+                                if debug_log:
+                                    await debug_log(
+                                        "debug",
+                                        "[codex_image] sse event",
+                                        **_summarize_codex_sse_event(obj),
+                                    )
+                                if event_type == "response.created":
+                                    result["response_id"] = (obj.get("response") or {}).get("id") or result["response_id"]
+                                    result["status"] = (obj.get("response") or {}).get("status") or result["status"]
+                                elif event_type == "response.image_generation_call.partial_image":
+                                    result["image_base64"] = obj.get("partial_image_b64") or result["image_base64"]
+                                    result["revised_prompt"] = obj.get("revised_prompt") or result["revised_prompt"]
+                                    result["status"] = obj.get("status") or result["status"]
+                                elif (
+                                    "image_generation" in event_type
+                                    or event_type in {"response.output_item.done", "response.output_item.added"}
+                                ):
+                                    image_b64, revised, _ = _extract_codex_artifacts(obj)
+                                    result["image_base64"] = image_b64 or result["image_base64"]
+                                    result["revised_prompt"] = revised or result["revised_prompt"]
+                                    result["status"] = obj.get("status") or result["status"]
+                                elif event_type == "response.completed":
+                                    resp_obj = obj.get("response", {})
+                                    output = resp_obj.get("output") if isinstance(resp_obj, dict) else None
+                                    if isinstance(output, list):
+                                        result["debug_output_types"] = ",".join(
+                                            str(part.get("type") or "")
+                                            for part in output
+                                            if isinstance(part, dict) and part.get("type")
+                                        )[:300]
+                                    image_b64, revised, error_info = _extract_codex_artifacts(resp_obj)
+                                    result["image_base64"] = image_b64 or result["image_base64"]
+                                    result["revised_prompt"] = revised or result["revised_prompt"]
+                                    if error_info:
+                                        raise CodexApiError(200, error_info)
+                                    result["status"] = resp_obj.get("status") or result["status"]
+                                    result["response_id"] = resp_obj.get("id") or result["response_id"]
+                                elif "error" in event_type:
+                                    _, _, error_info = _extract_codex_artifacts(obj)
+                                    if error_info:
+                                        raise CodexApiError(200, error_info)
+            stream_error = None
+            break
+        except _STREAM_RECOVERABLE_ERRORS as exc:
+            stream_error = exc
+            if stream_attempt == 0 and not result["response_id"] and time.monotonic() < deadline:
+                if update_status:
+                    await update_status("Codex 流式连接刚开始中断，正在自动重试...")
+                continue
+            break
 
     # 如果流式结束后已经有图片，直接返回
     if result["image_base64"]:
         return result
 
-    # 如果流式连接中断但已经拿到 response_id，可继续轮询补全。
+    # store=false 时 Codex 不允许后续 GET 轮询，所有可用图片结果都应来自 SSE 流。
     if stream_error is not None and result["response_id"] and update_status:
-        await update_status("Codex 流式连接中断，正在轮询补全结果...")
+        await update_status("Codex 流式连接中断；当前端点无法轮询补全，准备返回错误...")
 
-    # 如果连 response_id 都没拿到，无法恢复这次任务。
+    if stream_error is not None:
+        raise RuntimeError(_humanize_codex_exception(stream_error)) from stream_error
     if not result["response_id"]:
-        if stream_error is not None:
-            raise RuntimeError(_humanize_codex_exception(stream_error)) from stream_error
         return result
+
+    # store=false 时 Codex 不允许后续 GET 轮询，所有可用结果都应来自 SSE 流。
+    return result
 
     # ── 轮询补全 ──────────────────────────────────────
     attempt = 0
@@ -1012,7 +1166,6 @@ class CodexImagePlugin(Plugin):
         *,
         reply_to_id: int | None = None,
     ) -> None:
-        # 获取 token
         token = _get_config_value(ctx, "access_token", "")
         cmd = _command_name(ctx)
         usage_cmd = f"{_html_escape(current_command_prefix())}{_html_escape(cmd)}"
@@ -1023,7 +1176,7 @@ class CodexImagePlugin(Plugin):
             )
             return
 
-        model = _get_config_value(ctx, "model", DEFAULT_MODEL)
+        model = _normalize_main_model(_get_config_value(ctx, "model", DEFAULT_MODEL))
         image_model = _get_config_value(ctx, "image_model", DEFAULT_IMAGE_MODEL)
         max_wait = int(_get_config_value(ctx, "max_wait_seconds", DEFAULT_MAX_WAIT))
         status_interval = int(_get_config_value(ctx, "status_interval_seconds", DEFAULT_STATUS_INTERVAL))
@@ -1120,7 +1273,13 @@ class CodexImagePlugin(Plugin):
                     max_wait=max_wait,
                 )
             result = await _call_codex_image(
-                prompt=_effective_prompt(prompt, aspect_ratio),
+                prompt=_effective_prompt(
+                    prompt,
+                    aspect_ratio,
+                    image_size,
+                    image_format,
+                    has_reference=bool(reference_image),
+                ),
                 token=token,
                 model=model,
                 image_model=image_model,
@@ -1132,6 +1291,7 @@ class CodexImagePlugin(Plugin):
                 image_size=image_size,
                 image_format=image_format,
                 poll_interval=status_interval,
+                debug_log=ctx.log,
             )
         except CodexApiError as exc:
             heartbeat_stop = True
@@ -1161,11 +1321,13 @@ class CodexImagePlugin(Plugin):
             heartbeat_stop = True
             hb_task.cancel()
             elapsed = _format_duration((time.monotonic() - started_at) * 1000)
+            safe_error = _safe_error_text(str(exc), max_len=300)
             if ctx.log:
                 await ctx.log(
                     "warn",
                     "[codex_image] generation failed",
                     error=type(exc).__name__,
+                    detail=safe_error,
                     elapsed=elapsed,
                 )
             await _edit_html(event, f"{_html_escape(_with_error_prefix(_humanize_codex_exception(exc)))}\n⏱️ 耗时：{elapsed}")
@@ -1174,6 +1336,56 @@ class CodexImagePlugin(Plugin):
         heartbeat_stop = True
         hb_task.cancel()
         elapsed = _format_duration((time.monotonic() - started_at) * 1000)
+
+        returned_prompt = _extract_text_fallback_prompt(result.get("debug_text_sample"))
+        fallback_prompt = returned_prompt or prompt
+        if (
+            not result.get("image_base64")
+            and result.get("debug_text_sample")
+            and model != CODEX_TOOL_FALLBACK_MODEL
+        ):
+            if ctx.log:
+                await ctx.log(
+                    "warn",
+                    "[codex_image] text prompt returned, retrying fallback model",
+                    original_model=str(model),
+                    fallback_model=CODEX_TOOL_FALLBACK_MODEL,
+                    text_sample=str(result.get("debug_text_sample") or ""),
+                    extracted_prompt=returned_prompt or "",
+                    fallback_prompt=fallback_prompt,
+                )
+            await _edit_html(event, render_status("Codex 返回了文本提示词，正在用兼容模型重试...", elapsed))
+            try:
+                result = await _call_codex_image(
+                    prompt=_effective_prompt(
+                        fallback_prompt,
+                        aspect_ratio,
+                        image_size,
+                        image_format,
+                        has_reference=bool(reference_image),
+                    ),
+                    token=token,
+                    model=CODEX_TOOL_FALLBACK_MODEL,
+                    image_model="auto",
+                    reference_image=reference_image,
+                    update_status=update_status,
+                    max_wait=max(60, int(max_wait - (time.monotonic() - started_at))),
+                    instructions=DEFAULT_INSTRUCTIONS,
+                    reasoning_effort=DEFAULT_REASONING_EFFORT,
+                    image_size=image_size,
+                    image_format=image_format,
+                    poll_interval=status_interval,
+                    debug_log=ctx.log,
+                )
+                elapsed = _format_duration((time.monotonic() - started_at) * 1000)
+            except Exception as exc:
+                if ctx.log:
+                    await ctx.log(
+                        "warn",
+                        "[codex_image] fallback generation failed",
+                        error=type(exc).__name__,
+                        detail=_safe_error_text(str(exc), max_len=300),
+                    )
 
         if not result.get("image_base64"):
             status_info = result.get("status", "")
@@ -1184,6 +1396,9 @@ class CodexImagePlugin(Plugin):
                     "[codex_image] no image returned",
                     status=str(status_info or ""),
                     response_id=str(result.get("response_id") or ""),
+                    last_event_type=str(result.get("debug_last_event_type") or ""),
+                    output_types=str(result.get("debug_output_types") or ""),
+                    text_sample=str(result.get("debug_text_sample") or ""),
                     elapsed=elapsed,
                 )
             await _edit_html(event, f"❌ 未收到生成图片{status_text}\n⏱️ 耗时：{elapsed}")
@@ -1272,7 +1487,7 @@ class CodexImagePlugin(Plugin):
         self, ctx: PluginContext, reply_msg: Any
     ) -> dict[str, str | int | None]:
         """从回复消息中下载参考图，返回 {base64, mime_type, width, height}。"""
-        from ....media import _download_with_retry
+        from app.worker.media import _download_with_retry
 
         client = ctx.client
         if not client:

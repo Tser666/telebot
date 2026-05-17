@@ -22,12 +22,14 @@ export interface OutputTemplatePlaceholder {
   insert: string;
   label: string;
   desc: string;
+  group: string;
 }
 
 export interface OutputTemplateConditionalBlock {
   snippet: string;
   label: string;
   desc: string;
+  group: string;
 }
 
 // 消息格式预设（与后端 services/llm_format.py 的 PRESETS 同源）
@@ -69,51 +71,70 @@ export const OUTPUT_TEMPLATE_PRESETS: OutputTemplatePreset[] = [
 
 // 占位符按钮元数据；与后端 PLACEHOLDER_META 同源
 export const OUTPUT_TEMPLATE_PLACEHOLDERS: OutputTemplatePlaceholder[] = [
-  { insert: "{answer}", label: "[回答]", desc: "AI 的回答正文" },
-  { insert: "{answer_first_2}", label: "[回答-前2行]", desc: "回答的前 2 行（折叠用）" },
-  { insert: "{answer_rest}", label: "[回答-剩余]", desc: "回答从第 3 行起（配 <blockquote expandable> 折叠）" },
-  { insert: "{display_input}", label: "[输入]", desc: "用户的输入：被回复消息正文（优先）/ 没有则用问题" },
-  { insert: "{display_input_first_2}", label: "[输入-前2行]", desc: "输入的前 2 行（折叠用）" },
-  { insert: "{display_input_rest}", label: "[输入-剩余]", desc: "输入从第 3 行起（配 <blockquote expandable> 折叠）" },
-  { insert: "{question}", label: "[问题]", desc: "用户在命令后跟的问题" },
-  { insert: "{quoted}", label: "[被引用]", desc: "被回复消息的正文（无被回复时为空）" },
-  { insert: "{model}", label: "[模型]", desc: "模型展示名（优先使用 Provider 模型标签）" },
-  { insert: "{model_id}", label: "[模型ID]", desc: "API 实际返回的原始模型 ID" },
-  { insert: "{provider}", label: "[提供商]", desc: "提供商名称（如 Any GPT）" },
-  { insert: "{provider_kind}", label: "[厂商]", desc: "openai / anthropic / ollama" },
-  { insert: "{in_tokens}", label: "[输入tokens]", desc: "输入 token 数" },
-  { insert: "{out_tokens}", label: "[输出tokens]", desc: "输出 token 数" },
-  { insert: "{total_tokens}", label: "[总tokens]", desc: "输入 + 输出" },
-  { insert: "{routing_note}", label: "[路由说明]", desc: "auto 模式的决策原因（fixed 模式空）" },
-  { insert: "{sources}", label: "[来源]", desc: "联网搜索返回的来源列表（无来源时为空）" },
-  { insert: "{time}", label: "[时间]", desc: "当前时间 HH:MM" },
+  { insert: "{answer}", label: "回答", desc: "AI 的回答正文", group: "内容" },
+  { insert: "{answer_first_2}", label: "回答前2行", desc: "回答的前 2 行（折叠用）", group: "内容" },
+  { insert: "{answer_rest}", label: "回答剩余", desc: "回答从第 3 行起（配 <blockquote expandable> 折叠）", group: "内容" },
+  { insert: "{display_input}", label: "输入", desc: "用户的输入：被回复消息正文（优先）/ 没有则用问题", group: "上下文" },
+  { insert: "{display_input_first_2}", label: "输入前2行", desc: "输入的前 2 行（折叠用）", group: "上下文" },
+  { insert: "{display_input_rest}", label: "输入剩余", desc: "输入从第 3 行起（配 <blockquote expandable> 折叠）", group: "上下文" },
+  { insert: "{question}", label: "问题", desc: "用户在命令后跟的问题", group: "上下文" },
+  { insert: "{quoted}", label: "被引用", desc: "被回复消息的正文（无被回复时为空）", group: "上下文" },
+  { insert: "{model}", label: "模型", desc: "模型展示名（优先使用 Provider 模型标签）", group: "模型" },
+  { insert: "{model_id}", label: "模型ID", desc: "API 实际返回的原始模型 ID", group: "模型" },
+  { insert: "{provider}", label: "提供商", desc: "提供商名称（如 Any GPT）", group: "模型" },
+  { insert: "{provider_kind}", label: "厂商", desc: "openai / anthropic / ollama", group: "模型" },
+  { insert: "{command}", label: "命令", desc: "当前命令模板名称，如 ai / search / image", group: "运行" },
+  { insert: "{mode}", label: "AI模式", desc: "当前命令模式：chat / search / image / video 等", group: "运行" },
+  { insert: "{api_format}", label: "实际协议", desc: "本次实际调用协议：chat_completions / responses / anthropic_messages", group: "协议" },
+  { insert: "{api_protocol}", label: "API协议", desc: "实际协议的别名，等同于 {api_format}", group: "协议" },
+  { insert: "{configured_api_format}", label: "配置协议", desc: "Provider 默认 API 协议", group: "协议" },
+  { insert: "{web_search_api_format}", label: "联网协议", desc: "联网搜索时的协议覆盖配置；auto 表示按需切换", group: "协议" },
+  { insert: "{endpoint}", label: "接口路径", desc: "本次实际接口路径，如 /chat/completions 或 /responses", group: "协议" },
+  { insert: "{web_search}", label: "联网搜索", desc: "本次是否启用联网搜索；未启用时为空", group: "协议" },
+  { insert: "{in_tokens}", label: "输入tokens", desc: "输入 token 数", group: "统计" },
+  { insert: "{out_tokens}", label: "输出tokens", desc: "输出 token 数", group: "统计" },
+  { insert: "{total_tokens}", label: "总tokens", desc: "输入 + 输出", group: "统计" },
+  { insert: "{routing_note}", label: "路由说明", desc: "auto 模式的决策原因（fixed 模式空）", group: "运行" },
+  { insert: "{sources}", label: "来源", desc: "联网搜索返回的来源列表（无来源时为空）", group: "运行" },
+  { insert: "{time}", label: "时间", desc: "当前时间 HH:MM", group: "运行" },
 ];
 
 export const OUTPUT_TEMPLATE_CONDITIONAL_BLOCKS: OutputTemplateConditionalBlock[] = [
   {
     snippet: "{?quoted}\n\n{/?}",
-    label: "[条件:被引用]",
+    label: "被引用",
     desc: "仅当被回复消息非空才渲染括号内",
+    group: "上下文",
   },
   {
     snippet: "{?routing_note}\n\n{/?}",
-    label: "[条件:路由]",
+    label: "路由",
     desc: "仅 auto 模式才渲染括号内",
+    group: "运行",
   },
   {
     snippet: "{?sources}\n\n<b>来源</b>\n{sources}{/?}",
-    label: "[条件:来源]",
+    label: "来源",
     desc: "仅联网搜索返回来源时渲染",
+    group: "运行",
+  },
+  {
+    snippet: "{?web_search}\n\n{/?}",
+    label: "联网",
+    desc: "仅本次启用联网搜索时渲染",
+    group: "协议",
   },
   {
     snippet: "{?answer_rest}\n<blockquote expandable>{answer_rest}</blockquote>{/?}",
-    label: "[条件:回答有剩余]",
+    label: "回答有剩余",
     desc: "仅当回答超过 2 行才渲染（配折叠块用）",
+    group: "内容",
   },
   {
     snippet: "{?display_input_rest}\n<blockquote expandable>{display_input_rest}</blockquote>{/?}",
-    label: "[条件:输入有剩余]",
+    label: "输入有剩余",
     desc: "仅当输入超过 2 行才渲染（配折叠块用）",
+    group: "上下文",
   },
 ];
 
@@ -124,6 +145,15 @@ export function renderOutputTemplatePreview(template: string, values: Record<str
   );
   out = out.replace(/\{([a-zA-Z0-9_]+)\}/g, (_, key: string) => values[key] ?? "");
   return out;
+}
+
+function groupBy<T>(items: T[], getKey: (item: T) => string): Array<[string, T[]]> {
+  const grouped = new Map<string, T[]>();
+  for (const item of items) {
+    const key = getKey(item);
+    grouped.set(key, [...(grouped.get(key) ?? []), item]);
+  }
+  return [...grouped.entries()];
 }
 
 export interface OutputTemplateEditorProps {
@@ -162,6 +192,14 @@ export function OutputTemplateEditor({
     model_id: "gpt-5.4",
     provider: "OpenAI",
     provider_kind: "openai",
+    command: "ai",
+    mode: "search",
+    api_format: "responses",
+    configured_api_format: "chat_completions",
+    web_search_api_format: "auto",
+    api_protocol: "responses",
+    endpoint: "/responses",
+    web_search: "true",
     in_tokens: "128",
     out_tokens: "64",
     total_tokens: "192",
@@ -194,6 +232,8 @@ export function OutputTemplateEditor({
     onTemplateChange(tpl);
     queueMicrotask(() => textareaRef.current?.focus());
   };
+  const placeholderGroups = groupBy(OUTPUT_TEMPLATE_PLACEHOLDERS, (item) => item.group);
+  const conditionalGroups = groupBy(OUTPUT_TEMPLATE_CONDITIONAL_BLOCKS, (item) => item.group);
 
   return (
     <div className="rounded-md border bg-muted/30 p-3 space-y-3">
@@ -269,31 +309,45 @@ export function OutputTemplateEditor({
       {/* 占位符按钮 */}
       <div className="space-y-1.5">
         <Label className="text-xs">占位符（点击插入光标位置）</Label>
-        <div className="flex flex-wrap gap-1">
-          {OUTPUT_TEMPLATE_PLACEHOLDERS.map((b) => (
-            <button
-              key={b.insert}
-              type="button"
-              onClick={() => insertAtCursor(b.insert)}
-              title={b.desc}
-              className="rounded border px-1.5 py-0.5 text-[11px] font-mono hover:bg-muted"
-            >
-              {b.label}
-            </button>
+        <div className="space-y-2">
+          {placeholderGroups.map(([group, items]) => (
+            <div key={group} className="space-y-1">
+              <div className="text-[11px] font-medium text-muted-foreground">{group}</div>
+              <div className="flex flex-wrap gap-1">
+                {items.map((b) => (
+                  <button
+                    key={b.insert}
+                    type="button"
+                    onClick={() => insertAtCursor(b.insert)}
+                    title={`${b.insert} · ${b.desc}`}
+                    className="rounded border px-1.5 py-0.5 text-[11px] font-mono hover:bg-muted"
+                  >
+                    {b.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           ))}
         </div>
         <Label className="text-xs">条件块（仅在条件为真时渲染括号内）</Label>
-        <div className="flex flex-wrap gap-1">
-          {OUTPUT_TEMPLATE_CONDITIONAL_BLOCKS.map((b) => (
-            <button
-              key={b.label}
-              type="button"
-              onClick={() => insertAtCursor(b.snippet)}
-              title={b.desc}
-              className="rounded border px-1.5 py-0.5 text-[11px] font-mono hover:bg-muted"
-            >
-              {b.label}
-            </button>
+        <div className="space-y-2">
+          {conditionalGroups.map(([group, items]) => (
+            <div key={group} className="space-y-1">
+              <div className="text-[11px] font-medium text-muted-foreground">{group}</div>
+              <div className="flex flex-wrap gap-1">
+                {items.map((b) => (
+                  <button
+                    key={`${group}-${b.label}`}
+                    type="button"
+                    onClick={() => insertAtCursor(b.snippet)}
+                    title={b.desc}
+                    className="rounded border px-1.5 py-0.5 text-[11px] font-mono hover:bg-muted"
+                  >
+                    {b.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       </div>

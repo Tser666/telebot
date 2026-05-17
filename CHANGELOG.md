@@ -19,6 +19,33 @@
 
 ---
 
+## [0.16.10] — 2026-05-18 · fixed · AI 模板占位符与 Codex 生图稳定性
+
+### Added
+- AI 自定义命令模板新增协议占位符：`{api_format}` / `{api_protocol}` 展示本次实际调用协议，`{configured_api_format}`、`{web_search_api_format}`、`{endpoint}` 和 `{web_search}` 展示配置协议、联网协议、接口路径与联网状态。
+- AI 自定义命令模板新增 `{command}`、`{mode}`、`{sources}` 等常用占位符，并在编辑器中按内容、上下文、模型、协议、统计和运行分组展示。
+- 新增命令防误触配置 `COMMAND_ECHO_GUARD_PREVIOUS_MESSAGES`，默认检查前 8 条群聊消息，设为 0 可关闭；前端模板配置页支持开关和 1~50 条可调窗口。
+
+### Changed
+- 已配置的 API Key、Access Token、Bot Token 和代理密码等敏感输入框改用黑点占位展示，留空保存仍表示保留现有密钥。
+- Codex 图片生成插件的默认主模型从 `gpt-5.4` 对齐为 `gpt-5.5`。
+- 通用插件配置弹窗支持 `x-ui-widget: textarea`，方便插件声明多行配置项。
+- 系统设置中的运行日志等级保存后会即时影响新日志落库，日志页面按系统时区显示时间。
+
+### Fixed
+- Codex 图片生成在流式连接刚开始中断且尚未拿到 `response_id` 时，会自动重试一次；如果后续无法恢复，会返回更准确的中文错误说明。
+- Codex 图片生成的安全审核拦截、参考图下载、`response.created` 流式事件和旧模型配置兼容处理更稳定。
+- 修复后端 CI 中 `_run_git` timeout 测试依赖 `/tmp` 目录状态导致在 GitHub Runner 上误判失败的问题。
+- 群聊中自己发送纯命令时，如果最近 N 条消息内已有他人发送完全相同的文本，会静默跳过，降低参与抽奖或接龙时误触命令的风险。
+
+### Verification
+- `backend/.venv/bin/ruff check backend/app/services/llm_format.py backend/app/services/llm_invoke.py backend/app/worker/ai_runtime.py backend/app/tests/test_ai_runtime.py backend/app/tests/test_llm_format.py` 通过。
+- `backend/.venv/bin/pytest backend/app/tests/test_ai_runtime.py backend/app/tests/test_llm_format.py` 通过。
+- `pnpm --dir frontend build` 通过。
+- `git diff --check` 通过。
+
+---
+
 ## [0.16.9] — 2026-05-17 · changed · 插件模板配置分组
 
 ### Added

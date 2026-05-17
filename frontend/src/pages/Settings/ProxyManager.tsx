@@ -46,6 +46,8 @@ import type {
 } from "@/api/types";
 import { getErrMsg } from "@/lib/api";
 
+const MASKED_SECRET_PLACEHOLDER = "••••••••••••••••";
+
 const TYPE_OPTIONS: { value: ProxyType; label: string }[] = [
   { value: "socks5", label: "SOCKS5" },
   { value: "http", label: "HTTP" },
@@ -364,7 +366,7 @@ export function ProxyManager() {
                           <Label className="text-xs">新密码</Label>
                           <Input
                             type="password"
-                            placeholder={p.has_password ? "留空保持原密码" : "可选"}
+                            placeholder={p.has_password ? MASKED_SECRET_PLACEHOLDER : "可选"}
                             value={editDraft.password}
                             disabled={editDraft.clear_password}
                             onChange={(e) =>

@@ -31,6 +31,7 @@ from ..settings import settings as app_settings
 from .command import (
     CommandContext,
     make_command_handler,
+    normalize_command_echo_guard_limit,
     normalize_command_whitelist,
     set_command_context,
 )
@@ -502,7 +503,7 @@ async def _listen_global(redis, account_id: int, paused: asyncio.Event) -> None:
                             await _log(redis, account_id, "info", "全局 kill switch 已解除")
                     elif cmd.type == GCMD_RELOAD_GLOBAL:
                         # 命令前缀 / 风控模板等全局设置变更后，主进程广播这条让所有 worker 重拉
-                        # 当前主要刷的是 system_setting.command_prefix（写到 ctx.command_prefix）
+                        # 当前会刷新写入 worker-local CommandContext 的系统设置。
                         # 风控相关 reload 由 ratelimit 模块自己监听，不在这里处理
                         try:
                             await _refresh_command_context(account_id)
@@ -591,6 +592,9 @@ async def _refresh_command_context(account_id: int) -> None:
     prefix: str = app_settings.command_prefix or ","
     sudo_prefix: str = "."
     sudo_enabled = False
+    command_echo_guard_previous_messages = normalize_command_echo_guard_limit(
+        app_settings.command_echo_guard_previous_messages
+    )
     self_tg_user_id: int | None = None
     scheduler_command_whitelist: list[str] = []
     async with AsyncSessionLocal() as db:
@@ -633,6 +637,19 @@ async def _refresh_command_context(account_id: int) -> None:
                 sudo_enabled = bool(raw_enabled)
         except Exception:  # noqa: BLE001
             sudo_enabled = False
+
+        # 0.7) 命令回声防误触窗口（默认取环境变量，可被 system_setting 热更新覆盖）
+        try:
+            row_echo_guard = await db.get(SystemSetting, "command_echo_guard_previous_messages")
+            raw_echo_guard = row_echo_guard.value if row_echo_guard is not None else None
+            if isinstance(raw_echo_guard, dict):
+                raw_echo_guard = raw_echo_guard.get("value")
+            if raw_echo_guard is not None:
+                command_echo_guard_previous_messages = normalize_command_echo_guard_limit(raw_echo_guard)
+        except Exception:  # noqa: BLE001
+            command_echo_guard_previous_messages = normalize_command_echo_guard_limit(
+                app_settings.command_echo_guard_previous_messages
+            )
 
         # 1) 该账号启用中的命令模板
         rows = (
@@ -769,6 +786,7 @@ async def _refresh_command_context(account_id: int) -> None:
             sudo_prefix=sudo_prefix,
             sudo_enabled=sudo_enabled,
             self_tg_user_id=self_tg_user_id,
+            command_echo_guard_previous_messages=command_echo_guard_previous_messages,
             scheduler_command_whitelist=scheduler_command_whitelist,
         )
     )

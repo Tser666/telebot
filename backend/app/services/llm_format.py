@@ -282,10 +282,19 @@ PLACEHOLDER_META: list[dict[str, str]] = [
     {"key": "model_id", "label": "[模型ID]", "desc": "API 实际返回的原始模型 ID"},
     {"key": "provider", "label": "[提供商]", "desc": "提供商名称（如 Any GPT）"},
     {"key": "provider_kind", "label": "[厂商]", "desc": "openai / anthropic / ollama"},
+    {"key": "command", "label": "[命令]", "desc": "当前命令模板名称，如 ai / search / image"},
+    {"key": "mode", "label": "[AI模式]", "desc": "当前命令模式：chat / search / image / video 等"},
+    {"key": "api_format", "label": "[实际协议]", "desc": "本次实际调用协议：chat_completions / responses / anthropic_messages"},
+    {"key": "api_protocol", "label": "[API协议]", "desc": "实际协议的别名，等同于 api_format"},
+    {"key": "configured_api_format", "label": "[配置协议]", "desc": "Provider 配置里的默认 API 协议"},
+    {"key": "web_search_api_format", "label": "[联网协议]", "desc": "联网搜索时的协议覆盖配置；auto 表示由系统按需切换"},
+    {"key": "endpoint", "label": "[接口路径]", "desc": "本次实际接口路径，如 /chat/completions 或 /responses"},
+    {"key": "web_search", "label": "[联网搜索]", "desc": "本次是否启用了联网搜索；未启用时为空"},
     {"key": "in_tokens", "label": "[输入tokens]", "desc": "输入 token 数"},
     {"key": "out_tokens", "label": "[输出tokens]", "desc": "输出 token 数"},
     {"key": "total_tokens", "label": "[总tokens]", "desc": "输入 + 输出"},
     {"key": "routing_note", "label": "[路由说明]", "desc": "auto 模式的决策原因（fixed 模式空）"},
+    {"key": "sources", "label": "[来源]", "desc": "联网搜索返回的来源列表；无来源时为空"},
     {"key": "time", "label": "[时间]", "desc": "当前时间 HH:MM"},
 ]
 
@@ -308,6 +317,12 @@ CONDITIONAL_META: list[dict[str, str]] = [
         "label": "[条件:路由]",
         "desc": "仅 auto 模式才渲染括号内",
         "snippet": "{?routing_note}\n\n{/?}",
+    },
+    {
+        "key": "web_search",
+        "label": "[条件:联网]",
+        "desc": "仅本次启用联网搜索时渲染",
+        "snippet": "{?web_search}\n\n{/?}",
     },
     {
         "key": "answer_rest",

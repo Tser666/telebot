@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import re
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -15,6 +16,7 @@ from app.worker.command import (
     parse_command_key_from_text,
     set_command_context,
     should_allow_auto_command_text,
+    should_skip_outgoing_command_echo,
 )
 
 
@@ -187,6 +189,71 @@ async def test_repeated_global_prefix_is_silent():
     event2.raw_text = "。ping"
     await handler(event2)
     event2.edit.assert_called_with("pong")
+
+
+@pytest.mark.asyncio
+async def test_outgoing_pure_command_echo_is_skipped_in_group(monkeypatch):
+    """群里前几条有人发过同样纯命令时，自己的回声消息应视为抽奖/接龙，不触发。"""
+    from app.worker.command import make_command_handler
+
+    captured = {}
+
+    def fake_on(_event_type):
+        def deco(fn):
+            captured["fn"] = fn
+            return fn
+
+        return deco
+
+    class Client:
+        on = staticmethod(fake_on)
+
+        async def iter_messages(self, chat_id, *, limit, max_id):
+            assert chat_id == -100123
+            assert limit == 8
+            assert max_id == 50
+            yield SimpleNamespace(raw_text="。ai", sender_id=10001, out=False)
+
+    set_command_context(
+        CommandContext(
+            account_id=1,
+            templates={"ai": {"name": "ai", "type": "reply_text", "config": {"text": "ok"}}},
+            providers={},
+            command_prefix="。",
+            self_tg_user_id=42,
+        )
+    )
+    make_command_handler(Client(), account_id=1, prefix="。")
+    handler = captured["fn"]
+
+    event = AsyncMock()
+    event.raw_text = "。ai"
+    event.chat_id = -100123
+    event.id = 50
+    event.is_private = False
+
+    await handler(event)
+
+    event.edit.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_outgoing_command_with_args_bypasses_echo_guard():
+    class Client:
+        def __init__(self) -> None:
+            self.checked = False
+
+        async def iter_messages(self, *_args, **_kwargs):
+            self.checked = True
+            yield SimpleNamespace(raw_text="。ai", sender_id=10001, out=False)
+
+    event = SimpleNamespace(raw_text="。ai 帮我总结", chat_id=-100123, id=51, is_private=False)
+    client = Client()
+
+    skipped = await should_skip_outgoing_command_echo(client, event, "。ai 帮我总结", "帮我总结")
+
+    assert skipped is False
+    assert client.checked is False
 
 
 def test_command_context_has_command_prefix_field():
