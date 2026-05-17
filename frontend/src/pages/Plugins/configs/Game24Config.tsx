@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { listAccountFeatures } from "@/api/accounts";
 import { getSystemSettings } from "@/api/system";
+import { CommandBadge } from "@/components/CommandBadge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -148,7 +149,7 @@ export function Game24ConfigPage() {
           <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
             <div className="font-medium text-foreground">使用说明</div>
             <ul className="mt-1.5 list-inside list-disc space-y-0.5">
-              <li>在群内发送 <code>{cmdPrefix}{command} 奖金金额</code> 开始游戏（例：{cmdPrefix}{command} 2000）</li>
+              <li>在群内发送 <CommandBadge>{cmdPrefix}{command} 奖金金额</CommandBadge> 开始游戏（例：<CommandBadge>{cmdPrefix}{command} 2000</CommandBadge>）</li>
               <li>系统生成 4 个数字，第一个用算式答对的人获得奖金</li>
               <li>可用运算符：+ - * / ( )，也支持 x / ÷ / × 别名</li>
               <li>指令前缀跟随系统设置，可在系统配置中修改</li>
@@ -160,8 +161,8 @@ export function Game24ConfigPage() {
             <Label htmlFor="command">触发指令名</Label>
             <p className="text-xs text-muted-foreground">
               在系统命令前缀后输入此指令名触发游戏。默认
-              <code className="mx-1">24d</code>
-              ，即发送 <code>{cmdPrefix}{command} 奖金金额</code> 开始游戏。
+              <CommandBadge className="mx-1">24d</CommandBadge>
+              ，即发送 <CommandBadge>{cmdPrefix}{command} 奖金金额</CommandBadge> 开始游戏。
             </p>
             <Input
               id="command"

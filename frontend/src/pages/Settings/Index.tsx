@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -15,6 +15,7 @@ import {
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { CommandBadge } from "@/components/CommandBadge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
@@ -58,7 +59,12 @@ interface KillSwitchState {
 
 type RuntimeLogLevel = "debug" | "info" | "warn" | "error";
 
-const GUIDE_STEPS = [
+const GUIDE_STEPS: Array<{
+  title: string;
+  desc: ReactNode;
+  actionLabel: string;
+  actionTo: string;
+}> = [
   {
     title: "1. 添加并启用账号",
     desc: "先新增 Telegram 账号并启用它，系统会为该账号启动独立 worker。",
@@ -67,7 +73,7 @@ const GUIDE_STEPS = [
   },
   {
     title: "2. 设置命令前缀",
-    desc: "在系统设置里确定命令开头字符，比如 ,ai。",
+    desc: "在系统设置里确定 Telegram 命令开头字符。",
     actionLabel: "去设置前缀",
     actionTo: "/settings?tab=platform",
   },
@@ -292,7 +298,7 @@ export function SettingsIndex() {
         </CardHeader>
         <CardContent className="flex flex-col gap-3 lg:flex-row lg:items-center">
           <Button asChild variant="outline" size="sm">
-            <Link to="/ai/providers">添加模型</Link>
+            <Link to="/ai?tab=providers">添加模型</Link>
           </Button>
           <Button asChild variant="outline" size="sm">
             <Link to="/plugins/templates">添加命令</Link>
@@ -731,7 +737,7 @@ function GuideInlineCard({
     ...GUIDE_STEPS[currentStep],
     desc:
       currentStep === 1
-        ? `在系统设置里确定命令开头字符，比如 ${cmdPrefix}ai。`
+        ? <>在系统设置里确定命令开头字符，比如 <CommandBadge>{cmdPrefix}ai</CommandBadge>。</>
         : GUIDE_STEPS[currentStep].desc,
   };
   const percent = ((currentStep + 1) / GUIDE_STEPS.length) * 100;

@@ -2,10 +2,13 @@
 import { api } from "@/lib/api";
 import type {
   AccountCommandItem,
+  AICommandEnablementSummary,
   BuiltinCommandItem,
   CommandTemplateCreate,
   CommandTemplateOut,
   CommandTemplateUpdate,
+  DetectProviderProtocolsRequest,
+  DetectProviderProtocolsResponse,
   FetchModelsPreviewRequest,
   FetchModelsPreviewResponse,
   FetchModelsResponse,
@@ -111,6 +114,16 @@ export async function fetchProviderModelsPreview(
   return data;
 }
 
+export async function detectProviderProtocols(
+  payload: DetectProviderProtocolsRequest,
+): Promise<DetectProviderProtocolsResponse> {
+  const { data } = await api.post<DetectProviderProtocolsResponse>(
+    "/api/commands/llm-providers/detect-protocols",
+    payload,
+  );
+  return data;
+}
+
 /** 用 max_tokens=4 的最小调用测某个 model 通不通；返延时和返回片段。 */
 export async function testProviderModel(
   id: number,
@@ -145,4 +158,11 @@ export async function disableAccountCommand(
   templateId: number,
 ): Promise<void> {
   await api.delete(`/api/accounts/${aid}/commands/${templateId}`);
+}
+
+export async function getAICommandEnablementSummary(): Promise<AICommandEnablementSummary> {
+  const { data } = await api.get<AICommandEnablementSummary>(
+    "/api/commands/ai/enablement-summary",
+  );
+  return data;
 }

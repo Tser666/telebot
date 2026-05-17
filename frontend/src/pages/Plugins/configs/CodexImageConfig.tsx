@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { listAccountFeatures } from "@/api/accounts";
 import { getSystemSettings } from "@/api/system";
+import { CommandBadge } from "@/components/CommandBadge";
 import { Button } from "@/components/ui/button";
 import { TelegramHtmlPreview } from "@/components/TelegramHtmlPreview";
 import {
@@ -320,25 +321,25 @@ export function CodexImageConfigPage() {
             <div className="font-medium text-foreground">使用说明</div>
             <ul className="mt-1.5 list-inside list-disc space-y-0.5">
               <li>
-                发送 <code>{cmdPrefix}{effectiveCommand} 提示词</code> 纯文本生成图片
+                发送 <CommandBadge>{cmdPrefix}{effectiveCommand} 提示词</CommandBadge> 纯文本生成图片
               </li>
               <li>
                 回复图片后发送{" "}
-                <code>{cmdPrefix}{effectiveCommand} 提示词</code> 进行参考图生成
+                <CommandBadge>{cmdPrefix}{effectiveCommand} 提示词</CommandBadge> 进行参考图生成
               </li>
               <li>
                 临时指定比例/尺寸/格式：{" "}
-                <code>{cmdPrefix}{effectiveCommand} --比例 4:3 --size 1536x1024 --format jpeg 云海里的城市</code>
+                <CommandBadge>{cmdPrefix}{effectiveCommand} --比例 4:3 --size 1536x1024 --format jpeg 云海里的城市</CommandBadge>
               </li>
               <li>
                 也可通过命令{" "}
-                <code>
+                <CommandBadge>
                   {cmdPrefix}{effectiveCommand} token 你的access_token
-                </code>{" "}
+                </CommandBadge>{" "}
                 直接设置 Token
               </li>
               <li>
-                触发指令名支持中文，例如设置为 <code>画图</code> 后发送 <code>{cmdPrefix}画图 云海里的城市</code>
+                触发指令名支持中文，例如设置为 <CommandBadge>画图</CommandBadge> 后发送 <CommandBadge>{cmdPrefix}画图 云海里的城市</CommandBadge>
               </li>
             </ul>
           </div>
@@ -348,8 +349,8 @@ export function CodexImageConfigPage() {
             <Label htmlFor="command">触发指令名</Label>
             <p className="text-xs text-muted-foreground">
               在系统命令前缀后输入此指令触发图片生成。默认
-              <code className="mx-1">cximg</code>
-              ，支持中文，如 <code>画图</code>。
+              <CommandBadge className="mx-1">cximg</CommandBadge>
+              ，支持中文，如 <CommandBadge>画图</CommandBadge>。
             </p>
             <Input
               id="command"

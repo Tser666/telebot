@@ -332,6 +332,7 @@ def _dto_to_fake_row(dto) -> Any:
         base_url=dto.base_url,
         default_model=dto.default_model,
         api_format=dto.api_format,
+        web_search_api_format=dto.web_search_api_format,
     )
 
 

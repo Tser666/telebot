@@ -68,6 +68,15 @@ cd frontend && pnpm run build
 
 ---
 
+## 版本与 CHANGELOG
+
+- 不要为每个微小提交单独迭代版本号。开发过程中先把变更记录到 `CHANGELOG.md` 的 `Unreleased`。
+- 准备发布、推送稳定检查点、创建 release/PR，或维护者明确要求“推一版/发一版”时，再按本批改动的最高影响级别统一 bump 一次版本号。
+- `MAJOR` 用于破坏兼容；`MINOR` 用于用户可感知的新能力、主要入口/信息架构重组、重要工作流变化；`PATCH` 用于 bug 修复、文案、小 UI、错误提示、测试补充和兼容性补丁。
+- 发布时同步更新 `backend/app/__init__.py`、`backend/pyproject.toml`、`frontend/package.json`、`frontend/src/lib/version.ts`，并把 `Unreleased` 内容移动到新的中文版本段落。
+
+---
+
 ## 提 PR 流程
 
 ```bash

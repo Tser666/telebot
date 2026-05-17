@@ -1,5 +1,5 @@
 import React, { Suspense, lazy } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import { AppShell } from "@/components/layout/AppShell";
 import { RequireAuth } from "@/components/layout/RequireAuth";
@@ -32,15 +32,6 @@ const PluginsSchedulerPage = lazy(() => import("@/pages/Plugins").then(m => ({ d
 const PluginsAutoCommandWhitelistPage = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsAutoCommandWhitelistPage })));
 const PluginsManagePage = lazy(() => import("@/pages/Extensions").then(m => ({ default: m.Extensions })));
 const AIIndex = lazy(() => import("@/pages/AI/Index").then(m => ({ default: m.AIIndex })));
-const AIProviders = lazy(() => import("@/pages/AI/Providers").then(m => ({ default: m.AIProviders })));
-const AIHelp = lazy(() => import("@/pages/AI/Help").then(m => ({ default: m.AIHelp })));
-const AIUsage = lazy(() => import("@/pages/AI/Usage").then(m => ({ default: m.AIUsage })));
-const AIChat = lazy(() => import("@/pages/AI/Chat").then(m => ({ default: m.AIChat })));
-const AIRouting = lazy(() => import("@/pages/AI/Routing").then(m => ({ default: m.AIRouting })));
-const AISearch = lazy(() => import("@/pages/AI/Search").then(m => ({ default: m.AISearch })));
-const AIVision = lazy(() => import("@/pages/AI/Vision").then(m => ({ default: m.AIVision })));
-const AIImages = lazy(() => import("@/pages/AI/Images").then(m => ({ default: m.AIImages })));
-const AIOutput = lazy(() => import("@/pages/AI/Output").then(m => ({ default: m.AIOutput })));
 
 type AppErrorBoundaryState = { hasError: boolean };
 
@@ -50,6 +41,17 @@ function PageFallback() {
       <Spinner className="text-primary" />
     </div>
   );
+}
+
+function AIProvidersRedirect() {
+  const location = useLocation();
+  const targetParams = new URLSearchParams(location.search);
+  targetParams.set("tab", "providers");
+  if (targetParams.get("new") === "1") {
+    targetParams.set("newProvider", "1");
+  }
+  targetParams.delete("new");
+  return <Navigate to={`/ai?${targetParams.toString()}`} replace />;
 }
 
 export class AppErrorBoundary extends React.Component<
@@ -238,76 +240,41 @@ export default function App() {
           />
           <Route
             path="ai/providers"
-            element={
-              <Suspense fallback={<PageFallback />}>
-                <AIProviders />
-              </Suspense>
-            }
+            element={<AIProvidersRedirect />}
           />
           <Route
             path="ai/chat"
-            element={
-              <Suspense fallback={<PageFallback />}>
-                <AIChat />
-              </Suspense>
-            }
+            element={<Navigate to="/plugins/templates?type=ai" replace />}
           />
           <Route
             path="ai/routing"
-            element={
-              <Suspense fallback={<PageFallback />}>
-                <AIRouting />
-              </Suspense>
-            }
+            element={<Navigate to="/plugins/templates?aiCapability=routing" replace />}
           />
           <Route
             path="ai/search"
-            element={
-              <Suspense fallback={<PageFallback />}>
-                <AISearch />
-              </Suspense>
-            }
+            element={<Navigate to="/plugins/templates?aiCapability=search" replace />}
           />
           <Route
             path="ai/vision"
-            element={
-              <Suspense fallback={<PageFallback />}>
-                <AIVision />
-              </Suspense>
-            }
+            element={<Navigate to="/ai?tab=providers&filter=modality:vision" replace />}
           />
           <Route
             path="ai/images"
-            element={
-              <Suspense fallback={<PageFallback />}>
-                <AIImages />
-              </Suspense>
-            }
+            element={<Navigate to="/plugins?highlight=codex_image" replace />}
           />
           <Route
             path="ai/output"
-            element={
-              <Suspense fallback={<PageFallback />}>
-                <AIOutput />
-              </Suspense>
-            }
+            element={<Navigate to="/plugins/templates?aiCapability=output" replace />}
           />
           <Route
             path="ai/help"
-            element={
-              <Suspense fallback={<PageFallback />}>
-                <AIHelp />
-              </Suspense>
-            }
+            element={<Navigate to="/ai#how-it-works" replace />}
           />
           <Route
             path="ai/usage"
-            element={
-              <Suspense fallback={<PageFallback />}>
-                <AIUsage />
-              </Suspense>
-            }
+            element={<Navigate to="/ai?tab=usage" replace />}
           />
+          <Route path="ai/*" element={<Navigate to="/ai" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Route>

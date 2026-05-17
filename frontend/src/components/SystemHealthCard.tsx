@@ -11,6 +11,7 @@ import { ChevronDown, ChevronRight, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { CommandBadge } from "@/components/CommandBadge";
 import { Spinner } from "@/components/ui/misc";
 import {
   getHealthOverview,
@@ -286,11 +287,11 @@ function HealthGrid({ data }: { data: HealthOverview }) {
       {/* LLM Providers —— "AI 模型" */}
       <HealthBlock
         title={
-          <Link to="/ai/providers" className="hover:underline">
+          <Link to="/ai?tab=providers" className="hover:underline">
             AI 模型
           </Link>
         }
-        subtitle={`供 ${cmdPrefix}ai 命令调用的大语言模型供应商`}
+        subtitle={<>供 <CommandBadge>{cmdPrefix}ai</CommandBadge> 命令调用的大语言模型供应商</>}
         tone={
           data.providers.total === 0
             ? "warn"
@@ -309,8 +310,8 @@ function HealthGrid({ data }: { data: HealthOverview }) {
           <>
             <ToneText tone="warn" text="⚠ 还没配 AI 模型" />
             <div className="mt-1 text-xs text-muted-foreground">
-              想用 <code>{cmdPrefix}ai</code> 命令？去{" "}
-              <Link to="/ai/providers" className="underline">
+              想用 <CommandBadge>{cmdPrefix}ai</CommandBadge> 命令？去{" "}
+              <Link to="/ai?tab=providers" className="underline">
                 模型提供商
               </Link>{" "}
               添加至少一个。
@@ -564,7 +565,7 @@ function HealthBlock({
 }: {
   title: React.ReactNode;
   /** 一句话解释这块到底是干什么用的（给非技术用户的提示） */
-  subtitle?: string;
+  subtitle?: React.ReactNode;
   tone: Tone;
   right?: React.ReactNode;
   /** 技术名（PostgreSQL / Redis 等）；hover 标题时显示，对懂的人保留入口 */

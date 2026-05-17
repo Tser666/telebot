@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -20,6 +20,7 @@ import { getSystemSettings } from "@/api/system";
 import { listAccountFeatures } from "@/api/accounts";
 import type { FeatureInfo } from "@/api/types";
 import { ConfigDialog, type ConfigSchema } from "@/components/plugin/ConfigDialog";
+import { CommandBadge } from "@/components/CommandBadge";
 import { Spinner } from "@/components/ui/misc";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -42,7 +43,9 @@ export function PluginsHome() {
   const nav = useNavigate();
   const qc = useQueryClient();
   const [searchParams] = useSearchParams();
+  const codexImageCardRef = useRef<HTMLDivElement | null>(null);
   const [selectedAid, setSelectedAid] = useState<number | null>(null);
+  const [codexImageHighlighted, setCodexImageHighlighted] = useState(false);
   const [guideExpanded, setGuideExpanded] = useState(false);
   const [configDialog, setConfigDialog] = useState<{
     key: string;
@@ -52,6 +55,7 @@ export function PluginsHome() {
     accountConfig: Record<string, unknown>;
   } | null>(null);
   const guideActive = searchParams.get("guide") === "1";
+  const highlightCodexImage = searchParams.get("highlight") === "codex_image";
   const [bannerVisible, setBannerVisible] = useState(() => {
     if (typeof window === "undefined") return false;
     return localStorage.getItem(DANGEROUS_CMD_BANNER_KEY) !== "1";
@@ -121,6 +125,17 @@ export function PluginsHome() {
     return zones;
   }, [features]);
 
+  useEffect(() => {
+    if (!highlightCodexImage || !codexImageFeature) return;
+    const node = codexImageCardRef.current;
+    if (!node) return;
+
+    node.scrollIntoView({ behavior: "smooth", block: "center" });
+    setCodexImageHighlighted(true);
+    const timer = window.setTimeout(() => setCodexImageHighlighted(false), 2000);
+    return () => window.clearTimeout(timer);
+  }, [highlightCodexImage, codexImageFeature]);
+
   async function openGenericConfig(feature: FeatureInfo) {
     if (!selectedAccount) return;
     const accountFeatureData =
@@ -156,7 +171,7 @@ export function PluginsHome() {
           <CardHeader className="pb-2">
             <CardTitle className="text-base">0.13 安全变更提醒</CardTitle>
             <CardDescription className="text-amber-900/90">
-              Telegram 内高危命令（如 <code>{cmdPrefix}reboot</code>、<code>{cmdPrefix}plugin install</code>）已移除，请改为在 Web 控制台或账号 Bot 内执行。
+              Telegram 内高危命令（如 <CommandBadge>{cmdPrefix}reboot</CommandBadge>、<CommandBadge>{cmdPrefix}plugin install</CommandBadge>）已移除，请改为在 Web 控制台或账号 Bot 内执行。
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-wrap items-center gap-2">
@@ -265,17 +280,51 @@ export function PluginsHome() {
               <Button size="sm" onClick={() => nav("/ai")}>
                 AI 总览
               </Button>
-              <Button size="sm" variant="outline" onClick={() => nav("/ai/providers")}>
+              <Button size="sm" variant="outline" onClick={() => nav("/ai?tab=providers")}>
                 模型提供商
               </Button>
-              <Button size="sm" variant="outline" onClick={() => nav("/ai/usage")}>
+              <Button size="sm" variant="outline" onClick={() => nav("/ai?tab=usage")}>
                 AI 用量
               </Button>
-              <Button size="sm" variant="outline" onClick={() => nav("/ai/help")}>
+              <Button size="sm" variant="outline" onClick={() => nav("/ai#how-it-works")}>
                 AI 帮助
               </Button>
             </div>
           </div>
+          {codexImageFeature ? (
+            <div
+              ref={codexImageCardRef}
+              className={`rounded-lg border px-4 py-3 transition ${
+                codexImageHighlighted ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""
+              }`}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <Sparkles className="h-4 w-4 text-primary" />
+                    图片生成 (codex_image)
+                    <Badge variant={codexImageState === "active" ? "default" : "outline"}>
+                      {codexImageState === "active" ? "已启用" : "未启用"}
+                    </Badge>
+                  </div>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    图片生成归属插件中心：选择一个账号后进入 codex_image 配置，设置生图能力与发送方式。
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!selectedAid}
+                  onClick={() => {
+                    if (!selectedAid) return;
+                    nav(`/accounts/${selectedAid}/features/codex_image`);
+                  }}
+                >
+                  配置
+                </Button>
+              </div>
+            </div>
+          ) : null}
           {guideActive ? (
           <GuideContextCard
             expanded={guideExpanded}

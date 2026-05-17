@@ -260,6 +260,8 @@ def _humanize_llm_error(e: BaseException, max_len: int = 360) -> str:
         return "模型鉴权失败：API Key 无效、过期，或当前账号没有权限。请检查 provider 配置。"
     if "404" in raw or "model not found" in lowered:
         return "模型或接口不存在。请检查 provider endpoint、api_format 和模型名称。"
+    if "联网搜索需要使用 openai responses api" in lowered or "api_format=responses" in lowered:
+        return "联网搜索需要使用 OpenAI Responses API provider（api_format=responses）。请把该 AI 命令绑定到支持 Responses 的 OpenAI provider，或关闭联网搜索。"
     if "timeout" in lowered:
         return "模型响应超时。请稍后重试，或调低 max_tokens / 换更快的 provider。"
     if "connect" in lowered or "network" in lowered or "proxy" in lowered or "ssl" in lowered:
@@ -302,6 +304,7 @@ def _dto_to_fake_row(dto) -> Any:
         base_url=dto.base_url,
         default_model=dto.default_model,
         api_format=dto.api_format,
+        web_search_api_format=dto.web_search_api_format,
     )
 
 
@@ -1114,14 +1117,14 @@ async def _run_template(client, event, args, tpl: dict[str, Any], account_id: in
     if t == "run_plugin":
         plugin_key = str(cfg.get("plugin_key") or "").strip()
         method = str(cfg.get("method") or cfg.get("command") or plugin_key).strip()
-        if not plugin_key or not method:
+        if not plugin_key:
             await event.edit("✗ run_plugin 需要配置 plugin_key 和 method/command")
             return
-        pcmd = _PLUGIN_COMMANDS.get(method)
-        if pcmd is None or pcmd.owner_plugin_key != plugin_key:
-            await event.edit(f"✗ 插件命令不可用：{plugin_key}.{method}")
-            return
-        await pcmd.handler(client, event, args, account_id)
+        dispatched = await dispatch_plugin_command(
+            client, event, args, account_id, plugin_key=plugin_key, method=method or None
+        )
+        if not dispatched:
+            await event.edit(f"✗ 插件命令不可用：{plugin_key}.{method or plugin_key}")
         return
 
     await event.edit(f"✗ 未知模板类型：{t}")
@@ -1129,6 +1132,37 @@ async def _run_template(client, event, args, tpl: dict[str, Any], account_id: in
 
 async def _run_ai(client, event, args, tpl: dict[str, Any], account_id: int) -> None:
     await ai_runtime.invoke(client, event, args, tpl, account_id)
+
+
+async def dispatch_plugin_command(
+    client,
+    event,
+    args: list[str],
+    account_id: int,
+    *,
+    plugin_key: str,
+    method: str | None = None,
+) -> bool:
+    """按 plugin_key 调用已注册插件命令。
+
+    ``method`` 为空时会寻找该插件当前注册的第一条命令，适合命令名可配置的插件
+    （例如 codex_image 的 command 字段）。
+    """
+    plugin_key = str(plugin_key or "").strip()
+    method = str(method or "").strip()
+    if not plugin_key:
+        return False
+    if method:
+        pcmd = _PLUGIN_COMMANDS.get(method)
+        if pcmd is None or pcmd.owner_plugin_key != plugin_key:
+            return False
+        await pcmd.handler(client, event, args, account_id)
+        return True
+    for pcmd in _PLUGIN_COMMANDS.values():
+        if pcmd.owner_plugin_key == plugin_key:
+            await pcmd.handler(client, event, args, account_id)
+            return True
+    return False
 
 
 async def _dispatch_command(

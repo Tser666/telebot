@@ -32,25 +32,103 @@ def _format_llm_sources(sources: Any) -> str:
     return "\n".join(lines)
 
 
+def _model_display_name(model_id: str, provider: dict[str, Any]) -> str:
+    """优先使用 provider.models[].label；没有 label 时把常见小写 ID 转成更适合展示的名称。"""
+    model_id = str(model_id or "").strip()
+    if not model_id:
+        return ""
+    for item in provider.get("models") or []:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("id") or "").strip() != model_id:
+            continue
+        label = str(item.get("label") or "").strip()
+        if label:
+            return label
+        break
+    return _prettify_model_id(model_id)
+
+
+def _prettify_model_id(model_id: str) -> str:
+    words = model_id.replace("_", "-").split("-")
+    pretty: list[str] = []
+    idx = 0
+    while idx < len(words):
+        word = words[idx]
+        lower = word.lower()
+        if lower in {"gpt", "chatgpt"}:
+            if idx + 1 < len(words):
+                pretty.append(f"{lower.upper()}-{words[idx + 1]}")
+                idx += 2
+                continue
+            pretty.append(lower.upper())
+        elif lower in {"o1", "o3", "o4", "o4mini"}:
+            pretty.append(lower.upper())
+        elif lower == "deepseek":
+            pretty.append("DeepSeek")
+        elif lower in {"api", "tts", "stt"}:
+            pretty.append(lower.upper())
+        elif lower in {"v1", "v2", "v3", "v4", "v5"}:
+            pretty.append(lower)
+        elif lower.isdigit() and pretty and idx + 1 < len(words) and words[idx + 1].isdigit():
+            pretty[-1] = f"{pretty[-1]} {lower}.{words[idx + 1]}"
+            idx += 2
+            continue
+        elif lower:
+            pretty.append(lower[:1].upper() + lower[1:])
+        idx += 1
+    return " ".join(pretty) or model_id
+
+
 async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> None:
     from .command import (
         _humanize_llm_error,
         _replied_media_placeholder,
         _safe_log_text,
         _send_long_message,
+        dispatch_plugin_command,
         get_command_context,
     )
 
     ctx = get_command_context()
     cfg: dict[str, Any] = tpl.get("config") or {}
+    if ctx is None:
+        await event.edit("✗ worker 命令上下文尚未初始化")
+        return
+
+    command_mode = str(cfg.get("mode") or "chat").strip().lower()
+    if command_mode not in {"chat", "search", "image", "video"}:
+        command_mode = "chat"
+    if (tpl.get("name") or "") == "ai" and args:
+        sub = str(args[0] or "").strip().lower()
+        if sub in {"chat", "search", "image", "video"}:
+            command_mode = sub
+            args = args[1:]
+
+    if command_mode == "video":
+        await event.edit("✗ AI video 模式尚未接入。当前可先使用 chat/search/image；video 会作为下一阶段接入。")
+        return
+
+    if command_mode == "image" and str(cfg.get("image_backend") or "codex_image") == "codex_image":
+        dispatched = await dispatch_plugin_command(
+            client,
+            event,
+            args,
+            account_id,
+            plugin_key=str(cfg.get("image_plugin_key") or "codex_image"),
+            method=str(cfg.get("image_plugin_method") or "") or None,
+        )
+        if not dispatched:
+            await event.edit("✗ codex_image 插件命令不可用：请先在账号插件中启用并配置 codex_image")
+        return
+
     provider_id = cfg.get("provider_id")
     if provider_id is None:
         await event.edit("✗ AI 命令未配置 provider_id（系统设置 → LLM Provider 里建一个，填回此处）")
         return
 
-    if ctx is None:
-        await event.edit("✗ worker 命令上下文尚未初始化")
-        return
+    if command_mode == "search":
+        cfg = {**cfg, "web_search": True}
 
     # 每次 AI 调用前从 DB 刷新 provider 缓存，保证新建/修改/删除的 provider 立即可用。
     # Redis Pub/Sub 是 fire-and-forget，IPC 通知可能丢失导致 ctx.providers 永远过期。
@@ -343,8 +421,8 @@ async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> N
         pass
 
     # build_client 在内部解密 api_key；导入时点放函数内，避免循环依赖。
-    # 标准 LLM 调用统一走 services.ai_runtime.invoke()，STT 仍直接使用选中的 provider。
-    from ..services.ai_runtime import invoke as invoke_ai_runtime
+    # 标准 LLM 调用统一走 services.llm_invoke.invoke()，STT 仍直接使用选中的 provider。
+    from ..services.llm_invoke import invoke as invoke_ai_runtime
     from ..services.llm_client import (
         LLMCallFailed,
         LLMError,
@@ -559,11 +637,13 @@ async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> N
             raw_format = (cfg.get("output_format") or "html").lower()
             output_format = "html" if raw_format == "markdownv2" else raw_format
             escape_values = bool(cfg.get("escape_values", True))
+            model_id = result.model or ""
             render_ctx = {
                 "answer": result.text or "",
                 "question": user_q,
                 "quoted": replied_text or "",
-                "model": result.model or "",
+                "model": _model_display_name(model_id, provider_dict),
+                "model_id": model_id,
                 "provider": provider_dict.get("name", ""),
                 "provider_kind": provider_dict.get("provider", ""),
                 "in_tokens": result.input_tokens,
@@ -678,11 +758,14 @@ async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> N
         )
         send_mode = "edit"
 
+    model_id = result.model or ""
+    model_display = _model_display_name(model_id, provider_dict)
     render_ctx = {
         "answer": result.text or "",
         "question": user_q,
         "quoted": replied_text or "",
-        "model": result.model or "",
+        "model": model_display,
+        "model_id": model_id,
         "provider": provider_dict.get("name", ""),
         "provider_kind": provider_dict.get("provider", ""),
         "in_tokens": result.input_tokens,
@@ -741,7 +824,7 @@ async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> N
             except Exception:
                 try:
                     await event.edit(
-                        f"{result.text}\n\n— {result.model} · in {result.input_tokens} / out {result.output_tokens}\n\n"
+                        f"{result.text}\n\n— {model_display} · in {result.input_tokens} / out {result.output_tokens}\n\n"
                         f"⚠ 发送异常：{type(e).__name__}"
                     )
                 except Exception:
@@ -765,7 +848,7 @@ async def invoke(client, event, args, tpl: dict[str, Any], account_id: int) -> N
             # 实在不行就最简化版，至少把答案露出来
             try:
                 await event.edit(
-                    f"{result.text}\n\n— {result.model} · in {result.input_tokens} / out {result.output_tokens}\n\n"
+                    f"{result.text}\n\n— {model_display} · in {result.input_tokens} / out {result.output_tokens}\n\n"
                     f"⚠ 模板渲染异常：{type(e).__name__}",
                 )
             except Exception:

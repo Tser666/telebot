@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
-import { Search } from "lucide-react";
+import { Activity, MessageSquareText, Puzzle, Search, ServerCog, ShieldCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -84,8 +84,12 @@ export function Logs() {
 
       <Tabs value={mainTab} onValueChange={(v) => setMainTab(v as MainTab)}>
         <TabsList>
-          <TabsTrigger value="runtime">运行日志</TabsTrigger>
-          <TabsTrigger value="audit">审计日志</TabsTrigger>
+          <TabsTrigger value="runtime" className="gap-1.5">
+            <Activity className="h-4 w-4" /> 运行日志
+          </TabsTrigger>
+          <TabsTrigger value="audit" className="gap-1.5">
+            <ShieldCheck className="h-4 w-4" /> 审计日志
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="runtime" className="space-y-4">
@@ -152,9 +156,15 @@ export function Logs() {
             onValueChange={(v) => setRuntimeTab(v as RuntimeSourceTab)}
           >
             <TabsList>
-              <TabsTrigger value="event">消息日志</TabsTrigger>
-              <TabsTrigger value="plugin">插件日志</TabsTrigger>
-              <TabsTrigger value="system">系统日志</TabsTrigger>
+              <TabsTrigger value="event" className="gap-1.5">
+                <MessageSquareText className="h-4 w-4" /> 消息日志
+              </TabsTrigger>
+              <TabsTrigger value="plugin" className="gap-1.5">
+                <Puzzle className="h-4 w-4" /> 插件日志
+              </TabsTrigger>
+              <TabsTrigger value="system" className="gap-1.5">
+                <ServerCog className="h-4 w-4" /> 系统日志
+              </TabsTrigger>
             </TabsList>
 
             <TabsContent value="event">

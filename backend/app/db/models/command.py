@@ -65,11 +65,17 @@ ALL_LLM_PROVIDERS = {
 LLM_API_FORMAT_CHAT_COMPLETIONS = "chat_completions"
 LLM_API_FORMAT_RESPONSES = "responses"
 LLM_API_FORMAT_ANTHROPIC_MESSAGES = "anthropic_messages"
+LLM_WEB_SEARCH_API_FORMAT_AUTO = "auto"
 
 ALL_LLM_API_FORMATS = {
     LLM_API_FORMAT_CHAT_COMPLETIONS,
     LLM_API_FORMAT_RESPONSES,
     LLM_API_FORMAT_ANTHROPIC_MESSAGES,
+}
+
+ALL_LLM_WEB_SEARCH_API_FORMATS = {
+    LLM_WEB_SEARCH_API_FORMAT_AUTO,
+    *ALL_LLM_API_FORMATS,
 }
 
 
@@ -209,6 +215,15 @@ class LLMProvider(Base):
         String(32),
         nullable=False,
         server_default=LLM_API_FORMAT_CHAT_COMPLETIONS,
+    )
+    # 联网搜索调用时的协议覆盖：
+    # - auto：OpenAI/chat_completions 日常走 chat，web_search 时临时走 responses
+    # - responses：显式用 Responses
+    # - chat_completions / anthropic_messages：保留给兼容服务或后续扩展；不支持工具时会明确报错
+    web_search_api_format: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        server_default=LLM_WEB_SEARCH_API_FORMAT_AUTO,
     )
     # 该 provider 下"已启用 + 自定义"的模型清单。
     # JSON 数组；每条形如：

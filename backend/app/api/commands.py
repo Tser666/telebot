@@ -20,15 +20,19 @@ from fastapi import APIRouter, HTTPException
 from ..deps import CurrentUser, DBSession
 from ..schemas.command import (
     AccountCommandItem,
+    AICommandEnablementSummary,
     BuiltinCommandItem,
     CommandTemplateCreate,
     CommandTemplateOut,
     CommandTemplateUpdate,
+    DetectProviderProtocolsRequest,
+    DetectProviderProtocolsResponse,
     FetchModelsPreviewRequest,
     FetchModelsPreviewResponse,
     FetchModelsResponse,
     LLMProviderCreate,
     LLMProviderOut,
+    ProtocolProbeResult,
     LLMProviderUpdate,
     TestModelRequest,
     TestModelResponse,
@@ -274,6 +278,19 @@ async def list_account_commands(
     return await command_service.list_for_account(db, aid)
 
 
+@router.get(
+    "/api/commands/ai/enablement-summary",
+    response_model=AICommandEnablementSummary,
+)
+async def ai_command_enablement_summary(
+    db: DBSession, _user: CurrentUser
+) -> AICommandEnablementSummary:
+    """统计已有多少账号启用了至少一条 AI 命令模板。"""
+    return AICommandEnablementSummary(
+        **await command_service.ai_command_enablement_summary(db)
+    )
+
+
 @router.post(
     "/api/accounts/{aid}/commands/{tpl_id}",
     response_model=dict,
@@ -474,6 +491,191 @@ async def fetch_models_preview(
     )
     await db.commit()
     return FetchModelsPreviewResponse(fetched=len(new_ids), ids=new_ids)
+
+
+@router.post(
+    "/api/commands/llm-providers/detect-protocols",
+    response_model=DetectProviderProtocolsResponse,
+)
+async def detect_provider_protocols(
+    payload: DetectProviderProtocolsRequest, db: DBSession, user: CurrentUser
+) -> DetectProviderProtocolsResponse:
+    """用编辑表单当前值轻量探测 provider 支持的 API 协议。
+
+    探测结果不落库；用于新建/编辑 provider 时帮用户选择 api_format。
+    """
+    from ..crypto import decrypt_str
+
+    api_key = (payload.api_key or "").strip()
+    if not api_key and payload.pid is not None:
+        try:
+            row = await command_service.get_provider_row(db, payload.pid)
+            if row.api_key_enc:
+                api_key = decrypt_str(row.api_key_enc) or ""
+        except Exception:  # noqa: BLE001
+            api_key = ""
+
+    provider = payload.provider
+    if provider == "anthropic":
+        base_url = (payload.base_url or "https://api.anthropic.com/v1").rstrip("/")
+        model = (payload.model or "claude-haiku-4-5").strip()
+    elif provider == "ollama":
+        base_url = (payload.base_url or "http://localhost:11434/v1").rstrip("/")
+        model = (payload.model or "llama3:8b").strip()
+    else:
+        base_url = (payload.base_url or "https://api.openai.com/v1").rstrip("/")
+        model = (payload.model or "gpt-4o-mini").strip()
+    proxy_url = await _resolve_proxy_url(db, payload.proxy_id)
+
+    client_kwargs: dict[str, object] = {"timeout": httpx.Timeout(12.0, connect=6.0)}
+    if proxy_url:
+        client_kwargs["proxy"] = proxy_url
+    else:
+        client_kwargs["trust_env"] = False
+
+    async def probe_models(cli: httpx.AsyncClient) -> ProtocolProbeResult:
+        headers = {"Accept": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        started = _time.monotonic()
+        try:
+            resp = await cli.get(f"{base_url}/models", headers=headers)
+            latency_ms = int((_time.monotonic() - started) * 1000)
+            return _probe_result(resp, latency_ms, api_key=api_key)
+        except httpx.HTTPError as exc:
+            return _probe_error(exc, started)
+
+    async def probe_chat(cli: httpx.AsyncClient) -> ProtocolProbeResult:
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        body = {
+            "model": model,
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 1,
+        }
+        started = _time.monotonic()
+        try:
+            resp = await cli.post(f"{base_url}/chat/completions", headers=headers, json=body)
+            latency_ms = int((_time.monotonic() - started) * 1000)
+            return _probe_result(resp, latency_ms, api_key=api_key)
+        except httpx.HTTPError as exc:
+            return _probe_error(exc, started)
+
+    async def probe_responses(cli: httpx.AsyncClient) -> ProtocolProbeResult:
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        body = {
+            "model": model,
+            "input": [{"role": "user", "content": "ping"}],
+            "max_output_tokens": 1,
+        }
+        started = _time.monotonic()
+        try:
+            resp = await cli.post(f"{base_url}/responses", headers=headers, json=body)
+            latency_ms = int((_time.monotonic() - started) * 1000)
+            return _probe_result(resp, latency_ms, api_key=api_key)
+        except httpx.HTTPError as exc:
+            return _probe_error(exc, started)
+
+    async def probe_anthropic(cli: httpx.AsyncClient) -> ProtocolProbeResult:
+        headers = {
+            "Content-Type": "application/json",
+            "anthropic-version": "2023-06-01",
+        }
+        if api_key:
+            headers["x-api-key"] = api_key
+        body = {
+            "model": model,
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 1,
+        }
+        started = _time.monotonic()
+        try:
+            resp = await cli.post(f"{base_url}/messages", headers=headers, json=body)
+            latency_ms = int((_time.monotonic() - started) * 1000)
+            return _probe_result(resp, latency_ms, api_key=api_key)
+        except httpx.HTTPError as exc:
+            return _probe_error(exc, started)
+
+    async with httpx.AsyncClient(**client_kwargs) as cli:
+        models = await probe_models(cli)
+        chat = await probe_chat(cli)
+        responses = await probe_responses(cli)
+        anthropic = await probe_anthropic(cli)
+
+    recommended_api_format: str | None = None
+    recommended_web_search_api_format = "auto"
+    note: str | None = None
+    if provider == "anthropic":
+        if anthropic.ok:
+            recommended_api_format = "anthropic_messages"
+        else:
+            note = "Anthropic provider 需要 /messages 可用。"
+    else:
+        if chat.ok:
+            recommended_api_format = "chat_completions"
+            recommended_web_search_api_format = "auto" if responses.ok else "chat_completions"
+        elif responses.ok:
+            recommended_api_format = "responses"
+            recommended_web_search_api_format = "responses"
+        if chat.ok and responses.ok:
+            note = "该 API 同时支持 chat/completions 与 responses；建议日常 chat，联网搜索自动切 responses。"
+        elif responses.ok:
+            note = "该 API 支持 responses；可直接作为默认协议，也可用于联网搜索。"
+        elif chat.ok:
+            note = "该 API 支持 chat/completions，但未探测到 responses；联网搜索可能不可用。"
+        else:
+            note = "未探测到可用聊天协议；请检查 Base URL、API Key、模型 ID 或代理。"
+
+    await audit.write(
+        db,
+        user.id,
+        "llm_provider.detect_protocols",
+        target=f"llm_provider:{payload.pid or 'new'}",
+        detail={
+            "provider": provider,
+            "chat": chat.ok,
+            "responses": responses.ok,
+            "anthropic": anthropic.ok,
+            "models": models.ok,
+        },
+    )
+    await db.commit()
+
+    return DetectProviderProtocolsResponse(
+        chat_completions=chat,
+        responses=responses,
+        anthropic_messages=anthropic,
+        models=models,
+        recommended_api_format=recommended_api_format,
+        recommended_web_search_api_format=recommended_web_search_api_format,
+        note=note,
+    )
+
+
+def _probe_result(resp: httpx.Response, latency_ms: int, *, api_key: str) -> ProtocolProbeResult:
+    if resp.status_code < 400:
+        return ProtocolProbeResult(ok=True, status_code=resp.status_code, latency_ms=latency_ms)
+    body = resp.text[:220]
+    if api_key:
+        body = body.replace(api_key, "<redacted>")
+    return ProtocolProbeResult(
+        ok=False,
+        status_code=resp.status_code,
+        latency_ms=latency_ms,
+        error=f"HTTP {resp.status_code}: {body}",
+    )
+
+
+def _probe_error(exc: httpx.HTTPError, started: float) -> ProtocolProbeResult:
+    return ProtocolProbeResult(
+        ok=False,
+        status_code=None,
+        latency_ms=int((_time.monotonic() - started) * 1000),
+        error=f"{type(exc).__name__}: {str(exc) or '(无详情；常见 SSL/DNS/代理问题)'}",
+    )
 
 
 @router.post(

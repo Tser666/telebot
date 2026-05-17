@@ -4,12 +4,14 @@
 //
 // 路由元数据（modality / tags / cost_tier / notes）：决定"自动路由"模式下
 // 一条 ,ai 命令该把请求送给哪个 provider；详见 backend/services/llm_router.py
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { Plus, Trash2, KeyRound, Edit3, Download, Loader2, CheckCircle2, XCircle, Star, ChevronDown, ChevronRight } from "lucide-react";
+import { Plus, Trash2, KeyRound, Edit3, Download, Loader2, CheckCircle2, XCircle, Star, ChevronDown, ChevronRight, Filter, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { CommandBadge } from "@/components/CommandBadge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
@@ -44,6 +46,7 @@ import {
 import {
   createLLMProvider,
   deleteLLMProvider,
+  detectProviderProtocols,
   fetchProviderModelsPreview,
   listLLMProviders,
   patchLLMProvider,
@@ -51,7 +54,7 @@ import {
 } from "@/api/commands";
 import { listProxies } from "@/api/proxies";
 import { getSystemSettings } from "@/api/system";
-import type { LLMApiFormat, LLMModality, LLMProviderKind, LLMProviderOut, LLMTag, ProviderModel, ProxyOut } from "@/api/types";
+import type { DetectProviderProtocolsResponse, LLMApiFormat, LLMModality, LLMProviderKind, LLMProviderOut, LLMTag, LLMWebSearchApiFormat, ProviderModel, ProtocolProbeResult, ProxyOut } from "@/api/types";
 import { getErrMsg } from "@/lib/api";
 
 // 各 provider 的默认 base_url 提示，仅作 placeholder
@@ -84,6 +87,29 @@ const API_FORMAT_OPTIONS: { value: LLMApiFormat; label: string; hint: string }[]
     value: "anthropic_messages",
     label: "Anthropic Messages ( /v1/messages )",
     hint: "Anthropic 协议；走官方 https://api.anthropic.com 或兼容反代时选",
+  },
+];
+
+const WEB_SEARCH_API_FORMAT_OPTIONS: { value: LLMWebSearchApiFormat; label: string; hint: string }[] = [
+  {
+    value: "auto",
+    label: "自动（推荐）",
+    hint: "日常按上方 API Format 调用；联网搜索时，OpenAI/chat_completions 会临时切到 Responses。",
+  },
+  {
+    value: "responses",
+    label: "Responses ( /responses )",
+    hint: "联网搜索显式使用 Responses。适合官方 OpenAI 或同时支持两种协议的兼容站。",
+  },
+  {
+    value: "chat_completions",
+    label: "Chat Completions ( /chat/completions )",
+    hint: "仅当你的兼容服务在 chat/completions 自行实现了搜索工具时使用；官方 OpenAI 搜索不走这里。",
+  },
+  {
+    value: "anthropic_messages",
+    label: "Anthropic Messages ( /v1/messages )",
+    hint: "预留给未来 Anthropic 搜索能力；当前通常不建议用于 search 模式。",
   },
 ];
 
@@ -137,6 +163,7 @@ interface FormState {
   default_model: string;
   // API Format（chat_completions / responses / anthropic_messages）
   api_format: LLMApiFormat;
+  web_search_api_format: LLMWebSearchApiFormat;
   // 编辑模式下，是否要"清空已有 key"（按钮触发）
   clearKey: boolean;
   // ── 路由元数据 ──
@@ -159,6 +186,7 @@ const EMPTY_FORM: FormState = {
   base_url: "",
   default_model: SUGGESTED_MODELS.openai,
   api_format: "chat_completions",
+  web_search_api_format: "auto",
   clearKey: false,
   modality: "text",
   tags: ["chat"],
@@ -168,8 +196,16 @@ const EMPTY_FORM: FormState = {
   models: [],
 };
 
-export function LLMProviders() {
+export function LLMProviders({
+  openCreateOnMount = false,
+}: {
+  openCreateOnMount?: boolean;
+}) {
   const qc = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const didHandleCreateOnMount = useRef(false);
+  const providerFilter = searchParams.get("filter");
+  const isVisionFilter = providerFilter === "modality:vision";
 
   const listQ = useQuery({
     queryKey: ["llm-providers"],
@@ -187,6 +223,33 @@ export function LLMProviders() {
 
   const [editing, setEditing] = useState<FormState | null>(null);
 
+  const visibleProviders = (listQ.data || []).filter((p) => {
+    if (!isVisionFilter) return true;
+    return p.modality === "vision" || p.modality === "multimodal";
+  });
+
+  const clearProviderFilter = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("filter");
+    setSearchParams(next, { replace: true });
+  };
+
+  useEffect(() => {
+    const shouldOpenFromQuery = searchParams.get("newProvider") === "1";
+    const shouldOpen = openCreateOnMount || shouldOpenFromQuery;
+
+    if (shouldOpenFromQuery) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("newProvider");
+      setSearchParams(next, { replace: true });
+    }
+
+    if (!shouldOpen || didHandleCreateOnMount.current) return;
+
+    didHandleCreateOnMount.current = true;
+    setEditing({ ...EMPTY_FORM });
+  }, [openCreateOnMount, searchParams, setSearchParams]);
+
   const createMut = useMutation({
     mutationFn: (form: FormState) =>
       createLLMProvider({
@@ -196,6 +259,7 @@ export function LLMProviders() {
         base_url: form.base_url || null,
         default_model: form.default_model.trim(),
         api_format: form.api_format,
+        web_search_api_format: form.web_search_api_format,
         modality: form.modality,
         tags: form.tags,
         cost_tier: form.cost_tier,
@@ -226,6 +290,7 @@ export function LLMProviders() {
         base_url: form.base_url || null,
         default_model: form.default_model.trim(),
         api_format: form.api_format,
+        web_search_api_format: form.web_search_api_format,
         modality: form.modality,
         tags: form.tags,
         cost_tier: form.cost_tier,
@@ -261,6 +326,7 @@ export function LLMProviders() {
       base_url: p.base_url || "",
       default_model: p.default_model,
       api_format: ((p.api_format as LLMApiFormat) || "chat_completions"),
+      web_search_api_format: ((p.web_search_api_format as LLMWebSearchApiFormat) || "auto"),
       clearKey: false,
       modality: ((p.modality as LLMModality) || "text"),
       tags: ((p.tags as LLMTag[]) || []).filter((t) =>
@@ -290,7 +356,7 @@ export function LLMProviders() {
                 <strong>「Fetch 模型列表」</strong>就能自动拉取并可手动选择要启用的模型。<br />
                 <span className="text-muted-foreground/80">
                   modality（模态）+ tags（标签）+ cost_tier（成本档）这三项决定「自动路由」模式下
-                  该模型提供商所配置的模型是否被选中——详见 AI 模块顶部的推荐配置。
+                  该模型提供商所配置的模型是否被选中——详见 AI 模块顶部的配置示例。
                 </span>
               </CardDescription>
             </div>
@@ -300,17 +366,30 @@ export function LLMProviders() {
           </div>
         </CardHeader>
         <CardContent>
+          {isVisionFilter ? (
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5">
+                <Filter className="h-3.5 w-3.5" />
+                当前仅显示 modality=vision 或 multimodal 的模型提供商。
+              </span>
+              <Button type="button" variant="ghost" size="sm" onClick={clearProviderFilter}>
+                <X className="mr-1 h-3.5 w-3.5" />
+                清除筛选
+              </Button>
+            </div>
+          ) : null}
           {listQ.isLoading ? (
             <div className="flex h-20 items-center justify-center">
               <Spinner className="text-primary" />
             </div>
-          ) : listQ.data && listQ.data.length > 0 ? (
+          ) : visibleProviders.length > 0 ? (
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>名称</TableHead>
                   <TableHead>提供商协议</TableHead>
                   <TableHead>API 协议</TableHead>
+                  <TableHead>联网搜索协议</TableHead>
                   <TableHead>默认模型 ID</TableHead>
                   <TableHead>已启用模型</TableHead>
                   <TableHead>模态 / 推理成本档</TableHead>
@@ -321,7 +400,7 @@ export function LLMProviders() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {listQ.data.map((p) => {
+                {visibleProviders.map((p) => {
                   const enabledModels = (p.models || []).filter((m) => m.enabled);
                   return (
                     <TableRow key={p.id}>
@@ -330,6 +409,11 @@ export function LLMProviders() {
                       <TableCell className="text-xs">
                         <Badge variant="outline" className="font-mono">
                           {p.api_format || "chat_completions"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        <Badge variant={(p.web_search_api_format || "auto") === "auto" ? "secondary" : "outline"} className="font-mono">
+                          {p.web_search_api_format || "auto"}
                         </Badge>
                       </TableCell>
                       <TableCell className="font-mono text-xs">{p.default_model}</TableCell>
@@ -410,7 +494,9 @@ export function LLMProviders() {
             </Table>
           ) : (
             <p className="rounded-md border border-dashed py-8 text-center text-xs text-muted-foreground">
-              尚未配置任何模型提供商。新建一个后，就能在「自定义命令」里创建 AI 类型命令
+              {isVisionFilter
+                ? "当前没有视觉或多模态模型提供商。可新建一个，或编辑已有 provider 的 modality。"
+                : "尚未配置任何模型提供商。新建一个后，就能在「自定义命令」里创建 AI 类型命令"}
             </p>
           )}
         </CardContent>
@@ -474,11 +560,38 @@ function ProviderEditDialog({
     queryFn: getSystemSettings,
   });
   const cmdPrefix = settingsQ.data?.command_prefix || ",";
+  const [protocolDetection, setProtocolDetection] = useState<DetectProviderProtocolsResponse | null>(null);
 
   const toggleTag = (tag: LLMTag) => {
     const has = form.tags.includes(tag);
     setField("tags", has ? form.tags.filter((t) => t !== tag) : [...form.tags, tag]);
   };
+
+  const detectProtocolsMut = useMutation({
+    mutationFn: () =>
+      detectProviderProtocols({
+        provider: form.provider,
+        base_url: form.base_url ? form.base_url.trim() : null,
+        api_key: form.api_key ? form.api_key : null,
+        proxy_id: form.proxy_id ? Number(form.proxy_id) : null,
+        pid: form.id ?? null,
+        model: form.default_model.trim() || null,
+      }),
+    onSuccess: (resp) => {
+      setProtocolDetection(resp);
+      if (resp.recommended_api_format) {
+        onChange({
+          ...form,
+          api_format: resp.recommended_api_format as LLMApiFormat,
+          web_search_api_format: (resp.recommended_web_search_api_format || "auto") as LLMWebSearchApiFormat,
+        });
+        toast.success("已检测并填入推荐协议");
+      } else {
+        toast.warning("没有检测到推荐协议，请查看探测详情");
+      }
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
 
   return (
     <Dialog open onOpenChange={(o) => !o && onCancel()}>
@@ -555,7 +668,23 @@ function ProviderEditDialog({
           </div>
 
           <div className="space-y-1.5">
-            <Label>API Format（API 协议）*</Label>
+            <div className="flex items-center justify-between gap-2">
+              <Label>API Format（API 协议）*</Label>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={detectProtocolsMut.isPending || (!isEdit && !form.api_key.trim() && form.provider !== "ollama")}
+                onClick={() => detectProtocolsMut.mutate()}
+              >
+                {detectProtocolsMut.isPending ? (
+                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="mr-1 h-4 w-4" />
+                )}
+                检测协议
+              </Button>
+            </div>
             <Select
               value={form.api_format}
               onChange={(e) => setField("api_format", e.target.value as LLMApiFormat)}
@@ -569,7 +698,33 @@ function ProviderEditDialog({
             <p className="text-xs text-muted-foreground">
               {API_FORMAT_OPTIONS.find((o) => o.value === form.api_format)?.hint}
             </p>
+            {!isEdit && !form.api_key.trim() && form.provider !== "ollama" ? (
+              <p className="text-xs text-muted-foreground">
+                新建时检测协议需要先填 API Key；编辑已有 Provider 可复用已保存的 Key。
+              </p>
+            ) : null}
           </div>
+
+          <div className="space-y-1.5">
+            <Label>联网搜索 API Format</Label>
+            <Select
+              value={form.web_search_api_format}
+              onChange={(e) => setField("web_search_api_format", e.target.value as LLMWebSearchApiFormat)}
+            >
+              {WEB_SEARCH_API_FORMAT_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {WEB_SEARCH_API_FORMAT_OPTIONS.find((o) => o.value === form.web_search_api_format)?.hint}
+            </p>
+          </div>
+
+          {protocolDetection ? (
+            <ProtocolDetectionPanel result={protocolDetection} />
+          ) : null}
 
           <div className="space-y-1.5">
             <Label>API Key {isEdit ? "" : "*（建议）"}</Label>
@@ -611,7 +766,7 @@ function ProviderEditDialog({
             <div>
               <Label className="text-sm font-semibold">路由元数据</Label>
               <p className="text-xs text-muted-foreground">
-                这些字段决定「自动路由」模式下，一条 {cmdPrefix}ai 命令的请求是否会被分配给本 provider。
+                这些字段决定「自动路由」模式下，一条 <CommandBadge>{cmdPrefix}ai</CommandBadge> 命令的请求是否会被分配给本 provider。
                 只用 fixed 模式可以全留默认。
               </p>
             </div>
@@ -759,6 +914,47 @@ function ProviderEditDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function ProtocolDetectionPanel({ result }: { result: DetectProviderProtocolsResponse }) {
+  return (
+    <div className="rounded-md border bg-muted/30 p-3 text-xs">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="font-medium text-foreground">协议检测结果</div>
+        {result.recommended_api_format ? (
+          <div className="text-muted-foreground">
+            推荐：<Badge variant="secondary" className="font-mono">{result.recommended_api_format}</Badge>
+            {" "}· 联网{" "}
+            <Badge variant="secondary" className="font-mono">
+              {result.recommended_web_search_api_format || "auto"}
+            </Badge>
+          </div>
+        ) : null}
+      </div>
+      {result.note ? <p className="mt-1 text-muted-foreground">{result.note}</p> : null}
+      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        <ProbeRow label="models" probe={result.models} />
+        <ProbeRow label="chat/completions" probe={result.chat_completions} />
+        <ProbeRow label="responses" probe={result.responses} />
+        <ProbeRow label="anthropic/messages" probe={result.anthropic_messages} />
+      </div>
+    </div>
+  );
+}
+
+function ProbeRow({ label, probe }: { label: string; probe: ProtocolProbeResult }) {
+  return (
+    <div className="rounded-md border bg-background px-2 py-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-mono">{label}</span>
+        <Badge variant={probe.ok ? "success" : "warn"} className="font-mono">
+          {probe.ok ? "OK" : probe.status_code ? `HTTP ${probe.status_code}` : "FAIL"}
+        </Badge>
+      </div>
+      <div className="mt-1 text-muted-foreground">{probe.latency_ms} ms</div>
+      {probe.error ? <div className="mt-1 break-words text-muted-foreground">{probe.error}</div> : null}
+    </div>
   );
 }
 

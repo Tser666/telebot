@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
-import type { ReactNode } from "react";
-import { ArrowLeft, ArrowRight, History } from "lucide-react";
+import { Link } from "react-router-dom";
+import { ArrowRight, History } from "lucide-react";
 
 import { listRecentLLMUsage } from "@/api/llmUsage";
 import { listLLMProviders } from "@/api/commands";
@@ -9,18 +8,8 @@ import { getErrMsg } from "@/lib/api";
 import { Spinner } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { goBackOr } from "@/lib/navigation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-
-export function AIUsage() {
-  const nav = useNavigate();
-  return (
-    <AIUsageShell onBack={() => goBackOr(nav, "/ai")}>
-      <RecentUsageContent />
-    </AIUsageShell>
-  );
-}
 
 function SummaryTile({ label, value }: { label: string; value: string | number }) {
   return (
@@ -76,7 +65,7 @@ export function RecentUsageContent() {
         </CardHeader>
         <CardContent>
           <Button asChild>
-            <Link to="/ai/providers">
+            <Link to="/ai?tab=providers">
               前往配置模型提供商
               <ArrowRight className="ml-1 h-4 w-4" />
             </Link>
@@ -166,22 +155,5 @@ export function RecentUsageContent() {
         )}
       </CardContent>
     </Card>
-  );
-}
-
-function AIUsageShell({
-  children,
-  onBack,
-}: {
-  children: ReactNode;
-  onBack: () => void;
-}) {
-  return (
-    <div className="space-y-4">
-      <Button variant="ghost" size="sm" onClick={onBack}>
-        <ArrowLeft className="mr-1 h-4 w-4" /> 返回上一页
-      </Button>
-      {children}
-    </div>
   );
 }

@@ -23,6 +23,7 @@ from ..db.models.command import (
     COMMAND_TYPE_REPLY_TEXT,
     COMMAND_TYPE_RUN_PLUGIN,
     LLM_API_FORMAT_CHAT_COMPLETIONS,
+    LLM_WEB_SEARCH_API_FORMAT_AUTO,
     LLM_MODALITY_TEXT,
 )
 
@@ -118,8 +119,27 @@ class CommandTemplateBase(BaseModel):
             if not v.get("plugin_key"):
                 raise ValueError("run_plugin 类型必须配置 plugin_key")
         elif t == COMMAND_TYPE_AI:
+            mode = str(v.get("mode", "chat") or "chat").strip().lower()
+            if mode not in ("chat", "search", "image", "video"):
+                raise ValueError("mode 只能是 chat / search / image / video")
+            v["mode"] = mode
+            image_backend = str(v.get("image_backend", "codex_image") or "codex_image").strip()
+            if image_backend not in ("codex_image", "llm"):
+                raise ValueError("image_backend 只能是 codex_image / llm")
+            if mode == "image":
+                v["image_backend"] = image_backend
+            needs_provider = mode != "image" or image_backend != "codex_image"
             if not v.get("provider_id"):
-                raise ValueError("ai 类型必须配置 provider_id（在系统设置 → LLM Provider 里建）")
+                if needs_provider:
+                    raise ValueError("ai 类型必须配置 provider_id（在系统设置 → LLM Provider 里建）")
+            else:
+                try:
+                    provider_id = int(v.get("provider_id"))
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("provider_id 必须是 LLM Provider 的整数 id") from exc
+                if provider_id <= 0:
+                    raise ValueError("provider_id 必须是正整数")
+                v["provider_id"] = provider_id
             # 路由模式：fixed（默认）/ auto；其它值拒绝
             rm = v.get("routing_mode", "fixed")
             if rm not in ("fixed", "auto"):
@@ -155,6 +175,8 @@ class CommandTemplateBase(BaseModel):
             ws = v.get("web_search", False)
             if not isinstance(ws, bool):
                 raise ValueError("web_search 必须是布尔值")
+            if mode == "search":
+                ws = True
             v["web_search"] = ws
             wscs = v.get("web_search_context_size", "medium")
             if wscs not in ("low", "medium", "high"):
@@ -232,6 +254,14 @@ class AccountCommandItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AICommandEnablementSummary(BaseModel):
+    """AI 命令在账号上的启用统计。"""
+
+    total_accounts: int
+    enabled_accounts: int
+    ai_templates: int
+
+
 class BuiltinCommandItem(BaseModel):
     """``GET /api/commands/builtin`` 返回的一条。
 
@@ -285,6 +315,11 @@ class LLMProviderCreate(BaseModel):
         LLM_API_FORMAT_CHAT_COMPLETIONS
     )
     """API 协议；和 provider 厂商解耦——同一个反代 base_url 可能只支持其中某种。"""
+
+    web_search_api_format: Literal["auto", "chat_completions", "responses", "anthropic_messages"] = (
+        LLM_WEB_SEARCH_API_FORMAT_AUTO
+    )
+    """联网搜索时的协议覆盖；auto 会让 OpenAI/chat_completions 在联网时临时走 responses。"""
 
     # ── 路由元数据（全可选；不填走默认）───────────────────────
     modality: Literal["text", "vision", "audio", "multimodal"] = Field(
@@ -355,6 +390,7 @@ class LLMProviderUpdate(BaseModel):
     base_url: str | None = Field(default=None, max_length=255)
     default_model: str | None = Field(default=None, min_length=1, max_length=64)
     api_format: Literal["chat_completions", "responses", "anthropic_messages"] | None = None
+    web_search_api_format: Literal["auto", "chat_completions", "responses", "anthropic_messages"] | None = None
 
     # 路由元数据（全可选；None / 缺省 = 不动）
     modality: Literal["text", "vision", "audio", "multimodal"] | None = None
@@ -391,6 +427,7 @@ class LLMProviderOut(BaseModel):
     base_url: str | None = None
     default_model: str
     api_format: str = LLM_API_FORMAT_CHAT_COMPLETIONS
+    web_search_api_format: str = LLM_WEB_SEARCH_API_FORMAT_AUTO
     # 路由元数据（出参始终带，便于前端展示）
     modality: str = LLM_MODALITY_TEXT
     tags: list[str] = Field(default_factory=list)
@@ -445,6 +482,38 @@ class FetchModelsPreviewResponse(BaseModel):
 
     fetched: int
     ids: list[str]
+
+
+class DetectProviderProtocolsRequest(BaseModel):
+    """``POST /api/commands/llm-providers/detect-protocols`` 入参。"""
+
+    provider: Literal["openai", "anthropic", "ollama"]
+    base_url: str | None = Field(default=None, max_length=255)
+    api_key: str | None = Field(default=None, max_length=512)
+    proxy_id: int | None = Field(default=None, ge=1)
+    pid: int | None = Field(default=None, ge=1)
+    model: str | None = Field(default=None, max_length=128)
+
+
+class ProtocolProbeResult(BaseModel):
+    """单个 API 协议探测结果。"""
+
+    ok: bool
+    status_code: int | None = None
+    latency_ms: int
+    error: str | None = None
+
+
+class DetectProviderProtocolsResponse(BaseModel):
+    """协议探测结果与推荐配置。"""
+
+    chat_completions: ProtocolProbeResult
+    responses: ProtocolProbeResult
+    anthropic_messages: ProtocolProbeResult
+    models: ProtocolProbeResult
+    recommended_api_format: str | None = None
+    recommended_web_search_api_format: str = LLM_WEB_SEARCH_API_FORMAT_AUTO
+    note: str | None = None
 
 
 class TestModelRequest(BaseModel):

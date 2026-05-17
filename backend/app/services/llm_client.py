@@ -846,6 +846,7 @@ def build_client(
     provider_row: LLMProvider,
     override_model: str | None = None,
     proxy_url: str | None = None,
+    api_format_override: str | None = None,
 ) -> LLMClient:
     """根据 ORM 行装配具体 LLMClient。
 
@@ -865,9 +866,10 @@ def build_client(
     if not model:
         raise ValueError("LLM provider 没配 default_model，且当次调用也未提供 model 覆盖")
 
-    # api_format 优先；老数据兼容（无字段时按 provider 厂商兜底）
+    # api_format_override 用于联网搜索等单次调用协议覆盖；否则按 provider 配置。
     fmt = (
-        getattr(provider_row, "api_format", None)
+        api_format_override
+        or getattr(provider_row, "api_format", None)
         or default_api_format_for(provider_row.provider)
     )
 
@@ -897,6 +899,7 @@ def build_client_from_dto(
     dto: LLMProviderDTO,
     override_model: str | None = None,
     proxy_url: str | None = None,
+    api_format_override: str | None = None,
 ) -> LLMClient:
     """根据 LLMProviderDTO 装配具体 LLMClient。
 
@@ -915,8 +918,8 @@ def build_client_from_dto(
     if not model:
         raise ValueError("LLM provider 没配 default_model，且当次调用也未提供 model 覆盖")
 
-    # api_format 优先；兜底按 provider 厂商
-    fmt = dto.api_format or default_api_format_for(dto.provider)
+    # api_format_override 用于联网搜索等单次调用协议覆盖；否则按 provider 配置。
+    fmt = api_format_override or dto.api_format or default_api_format_for(dto.provider)
 
     # proxy 合并：参数传入 > dto 内置
     final_proxy = proxy_url if proxy_url else dto.proxy_url

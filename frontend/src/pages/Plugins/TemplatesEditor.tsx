@@ -4,11 +4,11 @@
 //   列表页：全表展示模板，name 徽章 type，编辑/删除按钮
 //   编辑对话框：根据 type 切不同子表单
 //   保存后后端会通知所有启用此模板的 worker 热加载
-import { useMemo, useState } from "react";
+import { forwardRef, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Trash2, Edit3, Search } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { ChevronDown, Plus, Trash2, Edit3 } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,7 +17,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { OutputTemplateEditor } from "@/components/ai/OutputTemplateEditor";
+import { OutputFormatFields } from "@/components/ai/OutputFormatFields";
+import { RoutingFields } from "@/components/ai/RoutingFields";
+import { WebSearchFields } from "@/components/ai/WebSearchFields";
+import { CommandBadge } from "@/components/CommandBadge";
 import { Spinner } from "@/components/ui/misc";
 import {
   Card,
@@ -70,6 +73,9 @@ const TYPE_LABELS: Record<CommandTemplateType, string> = {
   ai: "AI",
 };
 
+type AiCapability = "routing" | "search" | "output";
+type AiCommandMode = "chat" | "search" | "image" | "video";
+
 interface FormState {
   id?: number;
   name: string;
@@ -88,6 +94,7 @@ interface FormState {
   plugin_key: string;
   plugin_method: string;
   plugin_args: string; // JSON string
+  ai_mode: AiCommandMode;
   ai_provider_id: string; // <select> value，转 number 后下发
   ai_model: string;
   ai_system_prompt: string;
@@ -103,6 +110,7 @@ interface FormState {
   ai_escape_values: boolean;
   ai_web_search: boolean;
   ai_web_search_context_size: "low" | "medium" | "high";
+  ai_image_backend: "codex_image" | "llm";
   // ── 发送方式 ──
   // edit:    原地编辑 ,ai 命令消息（默认；保留 reply 链）
   // send_new: 删命令、发新消息（不带 reply_to）——避免在被回复方那里留下"你回复了我"痕迹
@@ -122,6 +130,7 @@ const EMPTY_FORM: FormState = {
   plugin_key: "",
   plugin_method: "",
   plugin_args: "[]",
+  ai_mode: "chat",
   ai_provider_id: "",
   ai_model: "",
   ai_system_prompt: "你是简洁有用的中文助手。回答控制在 100 字内。",
@@ -135,8 +144,13 @@ const EMPTY_FORM: FormState = {
   ai_escape_values: true,
   ai_web_search: false,
   ai_web_search_context_size: "medium",
+  ai_image_backend: "codex_image",
   ai_send_mode: "edit",
 };
+
+function normalizeAiMode(value: unknown): AiCommandMode {
+  return value === "search" || value === "image" || value === "video" ? value : "chat";
+}
 
 function formFromTemplate(t: CommandTemplateOut): FormState {
   const cfg = t.config || {};
@@ -160,6 +174,7 @@ function formFromTemplate(t: CommandTemplateOut): FormState {
     plugin_key: typeof cfg.plugin_key === "string" ? (cfg.plugin_key as string) : "",
     plugin_method: typeof cfg.method === "string" ? (cfg.method as string) : "",
     plugin_args: cfg.args ? JSON.stringify(cfg.args) : "[]",
+    ai_mode: normalizeAiMode(cfg.mode),
     ai_provider_id:
       cfg.provider_id !== undefined && cfg.provider_id !== null
         ? String(cfg.provider_id)
@@ -201,6 +216,7 @@ function formFromTemplate(t: CommandTemplateOut): FormState {
         cfg.web_search_context_size === "high"
         ? cfg.web_search_context_size
         : "medium",
+    ai_image_backend: cfg.image_backend === "llm" ? "llm" : "codex_image",
     ai_send_mode: cfg.send_mode === "send_new" ? "send_new" : "edit",
   };
 }
@@ -270,15 +286,22 @@ function buildPayload(form: FormState): {
   }
   // ai
   const pid = Number(form.ai_provider_id);
-  if (!Number.isInteger(pid) || pid <= 0)
+  const usesCodexImage = form.ai_mode === "image" && form.ai_image_backend === "codex_image";
+  if (!usesCodexImage && (!Number.isInteger(pid) || pid <= 0))
     return { ok: false, errMsg: "AI 类型必须选择模型提供商" };
   const mt = form.ai_max_tokens.trim();
   const cfg: Record<string, unknown> = {
-    provider_id: pid,
+    mode: form.ai_mode,
     quote_replied: form.ai_quote_replied,
     system_prompt: form.ai_system_prompt,
     routing_mode: form.ai_routing_mode,
   };
+  if (Number.isInteger(pid) && pid > 0) {
+    cfg.provider_id = pid;
+  }
+  if (form.ai_mode === "image") {
+    cfg.image_backend = form.ai_image_backend;
+  }
   if (form.ai_model.trim()) cfg.model = form.ai_model.trim();
   if (mt) cfg.max_tokens = Number(mt) || 512;
   // 路由字段：只在 auto 模式下下发，避免 fixed 留脏数据
@@ -305,7 +328,7 @@ function buildPayload(form: FormState): {
   if (!form.ai_escape_values) {
     cfg.escape_values = false;
   }
-  if (form.ai_web_search) {
+  if (form.ai_mode === "search" || form.ai_web_search) {
     cfg.web_search = true;
     cfg.web_search_context_size = form.ai_web_search_context_size;
   }
@@ -318,6 +341,7 @@ function buildPayload(form: FormState): {
 
 export function CommandTemplates() {
   const nav = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const qc = useQueryClient();
   const listQ = useQuery({
     queryKey: ["cmd-tpl"],
@@ -340,8 +364,88 @@ export function CommandTemplates() {
   );
   const hasProviders = (providersQ.data?.length || 0) > 0;
   const providerUnavailable = providersQ.isSuccess && !hasProviders;
+  const typeFilterParam = searchParams.get("type");
+  const typeFilter = typeFilterParam && typeFilterParam in TYPE_LABELS
+    ? (typeFilterParam as CommandTemplateType)
+    : null;
+  const visibleTemplates = (listQ.data || []).filter((t) =>
+    typeFilter ? t.type === typeFilter : true,
+  );
 
   const [editing, setEditing] = useState<FormState | null>(null);
+  const [focusCapability, setFocusCapability] = useState<AiCapability | null>(null);
+  const returnToRef = useRef<string | null>(null);
+
+  const closeEditor = (shouldReturn = false) => {
+    setEditing(null);
+    setFocusCapability(null);
+    const returnTo = returnToRef.current;
+    returnToRef.current = null;
+    if (shouldReturn && returnTo) {
+      nav(returnTo);
+    }
+  };
+  const clearFocusCapability = useCallback(() => {
+    setFocusCapability(null);
+  }, []);
+
+  useEffect(() => {
+    const editId = searchParams.get("edit");
+    const newType = searchParams.get("new");
+    const providerId = searchParams.get("provider_id");
+    const capabilityParam = searchParams.get("aiCapability");
+    const returnTo = searchParams.get("returnTo");
+    const capability =
+      capabilityParam === "routing" ||
+      capabilityParam === "search" ||
+      capabilityParam === "output"
+        ? capabilityParam
+        : null;
+    const shouldOpenNewAi = newType === "ai" || (!!capability && !editId);
+    const hasConsumableQuery =
+      !!editId || shouldOpenNewAi || !!providerId || !!capability || !!returnTo;
+
+    if (!hasConsumableQuery) return;
+    if (editId && !listQ.isSuccess) return;
+
+    if (returnTo) {
+      returnToRef.current = returnTo;
+    }
+    if (capability) {
+      setFocusCapability(capability);
+    }
+
+    if (editId) {
+      const id = Number(editId);
+      const target = Number.isInteger(id)
+        ? listQ.data?.find((t) => t.id === id)
+        : null;
+      if (target) {
+        const next = formFromTemplate(target);
+        if (providerId) {
+          next.ai_provider_id = providerId;
+          next.ai_model = "";
+        }
+        setEditing(next);
+      } else {
+        toast.error("未找到指定模板");
+      }
+    } else if (shouldOpenNewAi) {
+      setEditing({
+        ...EMPTY_FORM,
+        type: "ai",
+        ai_provider_id: providerId || EMPTY_FORM.ai_provider_id,
+      });
+    }
+
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("edit");
+    nextParams.delete("new");
+    nextParams.delete("provider_id");
+    nextParams.delete("aiCapability");
+    nextParams.delete("returnTo");
+    setSearchParams(nextParams, { replace: true });
+  }, [listQ.data, listQ.isSuccess, searchParams, setSearchParams]);
 
   const createMut = useMutation({
     mutationFn: (form: FormState) => {
@@ -358,7 +462,7 @@ export function CommandTemplates() {
     onSuccess: () => {
       toast.success("已新建模板");
       qc.invalidateQueries({ queryKey: ["cmd-tpl"] });
-      setEditing(null);
+      closeEditor(true);
     },
     onError: (err) => toast.error(getErrMsg(err)),
   });
@@ -379,7 +483,7 @@ export function CommandTemplates() {
     onSuccess: () => {
       toast.success("已保存");
       qc.invalidateQueries({ queryKey: ["cmd-tpl"] });
-      setEditing(null);
+      closeEditor(true);
     },
     onError: (err) => toast.error(getErrMsg(err)),
   });
@@ -402,10 +506,17 @@ export function CommandTemplates() {
             <div>
               <CardTitle className="text-base">自定义命令模板</CardTitle>
               <CardDescription>
-                全局模板库，每条 = 一个 <code>{cmdPrefix}name</code> 命令的"配方"。账号详情 → 自定义命令页签选择是否启用
+                全局模板库，每条 = 一个 <CommandBadge>{cmdPrefix}name</CommandBadge> 命令的"配方"。账号详情 → 自定义命令页签选择是否启用
               </CardDescription>
             </div>
-            <Button size="sm" onClick={() => setEditing({ ...EMPTY_FORM })}>
+            <Button
+              size="sm"
+              onClick={() => {
+                returnToRef.current = null;
+                setFocusCapability(null);
+                setEditing({ ...EMPTY_FORM });
+              }}
+            >
               <Plus className="mr-1 h-4 w-4" /> 新建
             </Button>
           </div>
@@ -413,14 +524,33 @@ export function CommandTemplates() {
         <CardContent>
           {providerUnavailable ? (
             <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-              AI 命令模板不可用：先去模型提供商添加配置。
+              chat/search/video 类 AI 命令需要先添加模型提供商；image + codex_image 可先使用插件配置。
               <Button
                 type="button"
                 variant="link"
                 className="h-auto px-1 py-0 text-xs"
-                onClick={() => nav("/ai/providers")}
+                onClick={() => nav("/ai?tab=providers")}
               >
                 前往模型提供商
+              </Button>
+            </div>
+          ) : null}
+          {typeFilter ? (
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              <span>
+                当前仅显示 <Badge variant="secondary">{TYPE_LABELS[typeFilter]}</Badge> 类型模板。
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  const next = new URLSearchParams(searchParams);
+                  next.delete("type");
+                  setSearchParams(next, { replace: true });
+                }}
+              >
+                清除筛选
               </Button>
             </div>
           ) : null}
@@ -428,7 +558,7 @@ export function CommandTemplates() {
             <div className="flex h-20 items-center justify-center">
               <Spinner className="text-primary" />
             </div>
-          ) : listQ.data && listQ.data.length > 0 ? (
+          ) : visibleTemplates.length > 0 ? (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -440,7 +570,7 @@ export function CommandTemplates() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {listQ.data.map((t) => (
+                {visibleTemplates.map((t) => (
                   <TableRow key={t.id}>
                     <TableCell className="font-mono text-sm">{cmdPrefix}{t.name}</TableCell>
                     <TableCell>
@@ -474,7 +604,11 @@ export function CommandTemplates() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => setEditing(formFromTemplate(t))}
+                        onClick={() => {
+                          returnToRef.current = null;
+                          setFocusCapability(null);
+                          setEditing(formFromTemplate(t));
+                        }}
                       >
                         <Edit3 className="h-4 w-4" />
                       </Button>
@@ -501,7 +635,7 @@ export function CommandTemplates() {
             </Table>
           ) : (
             <p className="rounded-md border border-dashed py-8 text-center text-xs text-muted-foreground">
-              尚无模板。新建一个后即可在账号详情中勾选启用
+              {typeFilter ? "当前筛选下没有模板。" : "尚无模板。新建一个后即可在账号详情中勾选启用"}
             </p>
           )}
         </CardContent>
@@ -511,15 +645,21 @@ export function CommandTemplates() {
             form={editing}
             cmdPrefix={cmdPrefix}
             onChange={setEditing}
-            onCancel={() => setEditing(null)}
+            focusCapability={focusCapability}
+            onCapabilityFocused={clearFocusCapability}
+            onCancel={() => closeEditor(true)}
             onSave={() => {
               const trimName = editing.name.trim();
               if (!NAME_RE.test(trimName)) {
                 toast.error("命令名只能包含字母 / 数字 / 下划线，1-64 字符");
                 return;
               }
-              if (editing.type === "ai" && providerUnavailable) {
-                toast.error("先去模型提供商添加配置");
+              if (
+                editing.type === "ai" &&
+                providerUnavailable &&
+                !(editing.ai_mode === "image" && editing.ai_image_backend === "codex_image")
+              ) {
+                toast.error("chat/search/video 模式需要先添加模型提供商");
                 return;
               }
               if (editing.id) {
@@ -531,7 +671,7 @@ export function CommandTemplates() {
             saving={createMut.isPending || updateMut.isPending}
             hasProviders={hasProviders}
             providerUnavailable={providerUnavailable}
-            onGoProviders={() => nav("/ai/providers")}
+            onGoProviders={() => nav("/ai?tab=providers")}
           />
         )}
       </Card>
@@ -595,6 +735,8 @@ function CommandEditDialog({
   form,
   cmdPrefix,
   onChange,
+  focusCapability,
+  onCapabilityFocused,
   onCancel,
   onSave,
   saving,
@@ -605,6 +747,8 @@ function CommandEditDialog({
   form: FormState;
   cmdPrefix: string;
   onChange: (s: FormState) => void;
+  focusCapability: AiCapability | null;
+  onCapabilityFocused: () => void;
   onCancel: () => void;
   onSave: () => void;
   saving: boolean;
@@ -633,6 +777,45 @@ function CommandEditDialog({
     () => Object.entries(TYPE_LABELS) as [CommandTemplateType, string][],
     [],
   );
+  const [openAiSections, setOpenAiSections] = useState<AiCapability[]>(() => {
+    const defaults: AiCapability[] = [];
+    if (form.ai_routing_mode === "auto") defaults.push("routing");
+    if (form.ai_web_search) defaults.push("search");
+    if (form.ai_output_template.trim() || form.ai_output_format !== "html" || !form.ai_escape_values) {
+      defaults.push("output");
+    }
+    return defaults;
+  });
+  const routingSectionRef = useRef<HTMLDivElement | null>(null);
+  const searchSectionRef = useRef<HTMLDivElement | null>(null);
+  const outputSectionRef = useRef<HTMLDivElement | null>(null);
+  const getSectionRef = (section: AiCapability) => {
+    if (section === "routing") return routingSectionRef;
+    if (section === "search") return searchSectionRef;
+    return outputSectionRef;
+  };
+
+  useEffect(() => {
+    if (!focusCapability || form.type !== "ai") return;
+    setOpenAiSections((prev) =>
+      prev.includes(focusCapability) ? prev : [...prev, focusCapability],
+    );
+    window.setTimeout(() => {
+      getSectionRef(focusCapability).current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+      onCapabilityFocused();
+    }, 80);
+  }, [focusCapability, form.type, onCapabilityFocused]);
+
+  const toggleAiSection = (section: AiCapability) => {
+    setOpenAiSections((prev) =>
+      prev.includes(section)
+        ? prev.filter((item) => item !== section)
+        : [...prev, section],
+    );
+  };
 
   return (
     <Dialog open onOpenChange={(o) => !o && onCancel()}>
@@ -655,7 +838,7 @@ function CommandEditDialog({
                 onChange={(e) => setField("name", e.target.value)}
               />
               <p className="text-xs text-muted-foreground">
-                只允许字母 / 数字 / 下划线；当前为发送【 <code>{cmdPrefix}{form.name || "name"}</code> 】触发
+                只允许字母 / 数字 / 下划线；当前为发送 <CommandBadge>{cmdPrefix}{form.name || "name"}</CommandBadge> 触发
               </p>
             </div>
             <div className="space-y-1.5">
@@ -667,14 +850,14 @@ function CommandEditDialog({
                 }
               >
                 {typeOptions.map(([k, label]) => (
-                  <option key={k} value={k} disabled={k === "ai" && providerUnavailable}>
+                  <option key={k} value={k}>
                     {label}（{k}）
                   </option>
                 ))}
               </Select>
               {providerUnavailable ? (
                 <p className="text-xs text-amber-700">
-                  AI 类型暂不可选，先去 AI 模块添加模型提供商。
+                  chat/search/video 需要模型提供商；image 模式可先桥接 codex_image 插件。
                   <Button
                     type="button"
                     variant="link"
@@ -743,7 +926,7 @@ function CommandEditDialog({
                 />
                 <p className="text-xs text-muted-foreground">
                   留空 = 触发命令时<strong>默认转发到命令消息所在的 chat</strong>。
-                  填了就强制转到这个 chat_id；在该群里执行 <code>{cmdPrefix}id</code> 可获得 chat_id（超级群以 -100 开头）。
+                  填了就强制转到这个 chat_id；在该群里执行 <CommandBadge>{cmdPrefix}id</CommandBadge> 可获得 chat_id（超级群以 -100 开头）。
                 </p>
               </div>
               <div className="space-y-1.5">
@@ -769,7 +952,7 @@ function CommandEditDialog({
                   />
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  开启后，命令触发成功后立即删除你发的 <code>{cmdPrefix}{form.name || "name"}</code> 命令消息（不影响转发/回复的内容）。
+                  开启后，命令触发成功后立即删除你发的 <CommandBadge>{cmdPrefix}{form.name || "name"}</CommandBadge> 命令消息（不影响转发/回复的内容）。
                 </p>
               </div>
               {!form.forward_delete_immediately && (
@@ -788,7 +971,7 @@ function CommandEditDialog({
                     placeholder="留空或 0 = 不删；如 5 = 5 秒后删命令消息"
                   />
                   <p className="text-xs text-muted-foreground">
-                    转发成功后等待 N 秒，删除你刚发的 <code>{cmdPrefix}{form.name || "name"}</code> 命令消息（不影响转过去的内容）。范围 0–3600；不删保留 ✓ 提示。
+                    转发成功后等待 N 秒，删除你刚发的 <CommandBadge>{cmdPrefix}{form.name || "name"}</CommandBadge> 命令消息（不影响转过去的内容）。范围 0–3600；不删保留 ✓ 提示。
                   </p>
                 </div>
               )}
@@ -830,43 +1013,106 @@ function CommandEditDialog({
           {form.type === "ai" && (
             <div className="space-y-3">
               <div className="space-y-1.5">
-                <Label>
-                  {form.ai_routing_mode === "auto"
-                    ? "默认 / 兜底模型 *"
-                    : "提供商 + 模型 *"}
-                </Label>
-                <ProviderModelSelect
-                  value={
-                    form.ai_provider_id && form.ai_model
-                      ? `${form.ai_provider_id}|${form.ai_model}`
-                      : form.ai_provider_id
-                        ? `${form.ai_provider_id}|`
-                        : ""
-                  }
-                  providers={providersQ.data}
-                  loading={providersQ.isLoading}
-                  onChange={(v) => {
-                    // 选项 value 形如 "<pid>|<model>"
-                    // 必须用 setFields 一次性写两个字段——拆成两次 setField 会
-                    // 因为闭包里的旧 form 互相覆盖，最终两个字段都回到空值
-                    const sep = v.indexOf("|");
-                    if (sep < 0) {
-                      setFields({ ai_provider_id: "", ai_model: "" });
-                      return;
-                    }
-                    const pid = v.slice(0, sep);
-                    const model = v.slice(sep + 1);
-                    setFields({ ai_provider_id: pid, ai_model: model });
+                <Label>AI 模式</Label>
+                <Select
+                  value={form.ai_mode}
+                  onChange={(e) => {
+                    const mode = normalizeAiMode(e.target.value);
+                    setFields({
+                      ai_mode: mode,
+                      ai_web_search: mode === "search" ? true : form.ai_web_search,
+                      ai_image_backend: mode === "image" ? form.ai_image_backend : EMPTY_FORM.ai_image_backend,
+                    });
                   }}
-                />
+                >
+                  <option value="chat">chat · 普通问答</option>
+                  <option value="search">search · 联网搜索</option>
+                  <option value="image">image · 图片生成</option>
+                  <option value="video">video · 视频生成（预留）</option>
+                </Select>
                 <p className="text-xs text-muted-foreground">
-                  下拉里每条 = 一个已启用的 (提供商 × 模型) 组合。要新增/启用模型去
-                  <span className="mx-1 font-medium">AI 模块 → 模型提供商</span>编辑。
-                  {form.ai_routing_mode === "auto"
-                    ? " auto 模式下，规则未命中且未设独立兜底时走这条"
-                    : ""}
+                  可创建 <CommandBadge>{cmdPrefix}ai image 提示词</CommandBadge> 这类二级指令，也可新建名为
+                  <CommandBadge className="mx-1">image</CommandBadge> 的 AI 模板作为直接命令。
                 </p>
+                <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                  <p>
+                    <span className="font-medium text-foreground">chat</span>：普通问答、总结、翻译；若打开“允许联网搜索”，后端会把搜索工具交给模型，是否实际搜索由模型/provider 决定。
+                  </p>
+                  <p className="mt-1">
+                    <span className="font-medium text-foreground">search</span>：专门搜索命令，保存时固定启用联网搜索；需要支持 OpenAI Responses API（api_format=responses）的 Provider，适合 <CommandBadge>{cmdPrefix}search</CommandBadge> 或 <CommandBadge>{cmdPrefix}ai search</CommandBadge>。
+                  </p>
+                  <p className="mt-1">
+                    <span className="font-medium text-foreground">image</span>：图片生成；当前推荐桥接 codex_image 插件，可直接做 <CommandBadge>{cmdPrefix}image</CommandBadge>。
+                  </p>
+                  <p className="mt-1">
+                    <span className="font-medium text-foreground">video</span>：视频生成预留入口，运行时会提示下一阶段接入。
+                  </p>
+                </div>
               </div>
+
+              {form.ai_mode === "image" && (
+                <div className="space-y-1.5">
+                  <Label>图片生成后端</Label>
+                  <Select
+                    value={form.ai_image_backend}
+                    onChange={(e) =>
+                      setField(
+                        "ai_image_backend",
+                        e.target.value === "llm" ? "llm" : "codex_image",
+                      )
+                    }
+                  >
+                    <option value="codex_image">codex_image 插件（当前推荐）</option>
+                    <option value="llm">LLM Provider 原生生图（预留）</option>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    codex_image 使用账号插件里的 Codex Access Token、尺寸和发送配置；本模板只负责把
+                    <CommandBadge className="mx-1">{cmdPrefix}{form.name || "image"}</CommandBadge>
+                    转到该插件。
+                  </p>
+                </div>
+              )}
+
+              {!(form.ai_mode === "image" && form.ai_image_backend === "codex_image") && (
+                <div className="space-y-1.5">
+                  <Label>
+                    {form.ai_routing_mode === "auto"
+                      ? "默认 / 兜底模型 *"
+                      : "提供商 + 模型 *"}
+                  </Label>
+                  <ProviderModelSelect
+                    value={
+                      form.ai_provider_id && form.ai_model
+                        ? `${form.ai_provider_id}|${form.ai_model}`
+                        : form.ai_provider_id
+                          ? `${form.ai_provider_id}|`
+                          : ""
+                    }
+                    providers={providersQ.data}
+                    loading={providersQ.isLoading}
+                    onChange={(v) => {
+                      // 选项 value 形如 "<pid>|<model>"
+                      // 必须用 setFields 一次性写两个字段——拆成两次 setField 会
+                      // 因为闭包里的旧 form 互相覆盖，最终两个字段都回到空值
+                      const sep = v.indexOf("|");
+                      if (sep < 0) {
+                        setFields({ ai_provider_id: "", ai_model: "" });
+                        return;
+                      }
+                      const pid = v.slice(0, sep);
+                      const model = v.slice(sep + 1);
+                      setFields({ ai_provider_id: pid, ai_model: model });
+                    }}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    下拉里每条 = 一个已启用的 (提供商 × 模型) 组合。要新增/启用模型去
+                    <span className="mx-1 font-medium">AI 模块 → 模型提供商</span>编辑。
+                    {form.ai_routing_mode === "auto"
+                      ? " auto 模式下，规则未命中且未设独立兜底时走这条"
+                      : ""}
+                  </p>
+                </div>
+              )}
               <div className="space-y-1.5">
                 <Label>System Prompt 系统默认提示词</Label>
                 <Textarea
@@ -919,7 +1165,7 @@ function CommandEditDialog({
                 <p className="text-xs text-muted-foreground">
                   {form.ai_send_mode === "send_new" ? (
                     <>
-                      用于"我回复某人后用 <code>{cmdPrefix}{form.name || "ai"}</code> 提问"的场景：
+                      用于"我回复某人后用 <CommandBadge>{cmdPrefix}{form.name || "ai"}</CommandBadge> 提问"的场景：
                       被回复消息**只作为模型上下文**，发出去的回答**不再是 reply**，
                       也不会在被回复方那里留下"你回复了我"的痕迹（首次发命令的 ping 仍无法避免）。
                       此模式下 <code>{"{display_input}"}</code> 自动回退为你打的字（不复读对方原文）。
@@ -932,150 +1178,96 @@ function CommandEditDialog({
                 </p>
               </div>
 
-              {/* ── 路由模式 ────────────────────────────── */}
-              <div className="rounded-md border bg-muted/30 p-3 space-y-3">
-                <div>
-                  <Label className="text-sm font-semibold">路由模式</Label>
-                  <p className="text-xs text-muted-foreground">
-                    fixed = 固定使用上面选的模型；auto = 看消息类型自动路由调用模型（详见 AI
-                    设置页推荐配置）
-                  </p>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <label
-                    className={
-                      "cursor-pointer rounded-md border p-3 text-sm transition-colors " +
-                      (form.ai_routing_mode === "fixed"
-                        ? "border-primary bg-primary/5"
-                        : "hover:bg-muted")
+              <div className="space-y-2">
+                <CollapsibleAiSection
+                  ref={routingSectionRef}
+                  title="路由策略"
+                  description={
+                    form.ai_routing_mode === "auto"
+                      ? "已开启自动路由"
+                      : "默认固定使用上方模型"
+                  }
+                  open={openAiSections.includes("routing")}
+                  onToggle={() => toggleAiSection("routing")}
+                >
+                  <RoutingFields
+                    value={{
+                      routing_mode: form.ai_routing_mode,
+                      fallback_provider_id: form.ai_routing_fallback_provider_id,
+                      classifier_provider_id: form.ai_classifier_provider_id,
+                    }}
+                    providers={providersQ.data}
+                    loading={providersQ.isLoading}
+                    onChange={(patch) =>
+                      setFields({
+                        ai_routing_mode: patch.routing_mode ?? form.ai_routing_mode,
+                        ai_routing_fallback_provider_id:
+                          patch.fallback_provider_id ??
+                          form.ai_routing_fallback_provider_id,
+                        ai_classifier_provider_id:
+                          patch.classifier_provider_id ??
+                          form.ai_classifier_provider_id,
+                      })
                     }
-                  >
-                    <input
-                      type="radio"
-                      name="routingMode"
-                      className="mr-2"
-                      checked={form.ai_routing_mode === "fixed"}
-                      onChange={() => setField("ai_routing_mode", "fixed")}
-                    />
-                    <span className="font-medium">fixed（固定）</span>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      简单可控；适合"我就要某个模型"
-                    </p>
-                  </label>
-                  <label
-                    className={
-                      "cursor-pointer rounded-md border p-3 text-sm transition-colors " +
-                      (form.ai_routing_mode === "auto"
-                        ? "border-primary bg-primary/5"
-                        : "hover:bg-muted")
-                    }
-                  >
-                    <input
-                      type="radio"
-                      name="routingMode"
-                      className="mr-2"
-                      checked={form.ai_routing_mode === "auto"}
-                      onChange={() => setField("ai_routing_mode", "auto")}
-                    />
-                    <span className="font-medium">auto（自动路由）</span>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      按消息类型选合适的 模型；省钱 + 更对路
-                    </p>
-                  </label>
-                </div>
-
-                {form.ai_routing_mode === "auto" && (
-                  <div className="space-y-3">
-                    <div className="space-y-1.5">
-                      <Label>独立兜底模型提供商（可选）</Label>
-                      <ProviderSelect
-                        value={form.ai_routing_fallback_provider_id}
-                        providers={providersQ.data}
-                        loading={providersQ.isLoading}
-                        onChange={(v) =>
-                          setField("ai_routing_fallback_provider_id", v)
-                        }
-                        allowEmpty
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        留空 = 直接复用上面那条「默认 / 兜底模型提供商」；想分开就在这选另一条
-                      </p>
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label>分类器模型提供商（可选）</Label>
-                      <ProviderSelect
-                        value={form.ai_classifier_provider_id}
-                        providers={providersQ.data}
-                        loading={providersQ.isLoading}
-                        onChange={(v) =>
-                          setField("ai_classifier_provider_id", v)
-                        }
-                        allowEmpty
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        指定后：规则未命中时调一个轻量小模型（建议 tag=classify、cost_tier=1）让它
-                        判断 code/math/translate/vision/reason/chat 中的哪一个
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* ── 联网搜索 ────────────────────────────── */}
-              <div className="rounded-md border bg-muted/30 p-3 space-y-3">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <Label className="inline-flex items-center gap-1.5 text-sm font-semibold">
-                      <Search className="h-4 w-4" /> 联网搜索
-                    </Label>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      开启后，本命令会调用模型的搜索工具并可在模板里用 <code>{"{sources}"}</code> 显示来源。
-                    </p>
-                  </div>
-                  <Switch
-                    checked={form.ai_web_search}
-                    onCheckedChange={(v) => setField("ai_web_search", v)}
-                    id="aiWebSearch"
                   />
-                </div>
-                {form.ai_web_search && (
-                  <div className="grid gap-3 sm:grid-cols-[220px_1fr]">
-                    <div className="space-y-1.5">
-                      <Label>搜索上下文强度</Label>
-                      <Select
-                        value={form.ai_web_search_context_size}
-                        onChange={(e) =>
-                          setField(
-                            "ai_web_search_context_size",
-                            e.target.value as "low" | "medium" | "high",
-                          )
-                        }
-                      >
-                        <option value="low">低：更快，更省</option>
-                        <option value="medium">中：默认平衡</option>
-                        <option value="high">高：更多上下文</option>
-                      </Select>
-                    </div>
-                    <p className="self-end pb-2 text-xs text-muted-foreground">
-                      当前后端仅对 OpenAI Responses API 传 <code>web_search</code> 工具。
-                      选择 Chat Completions 或 Anthropic provider 时会给出明确错误提示。
-                    </p>
-                  </div>
-                )}
-              </div>
+                </CollapsibleAiSection>
 
-              {/* ── 消息格式 ─────────────────────────────── */}
-              <OutputTemplateEditor
-                outputFormat={form.ai_output_format}
-                onOutputFormatChange={(v) => setField("ai_output_format", v)}
-                template={form.ai_output_template}
-                onTemplateChange={(v) => setField("ai_output_template", v)}
-                escapeValues={form.ai_escape_values}
-                onEscapeValuesChange={(v) => setField("ai_escape_values", v)}
-              />
+                <CollapsibleAiSection
+                  ref={searchSectionRef}
+                  title="工具 / 联网搜索"
+                  description={form.ai_web_search ? "已开启联网搜索" : "默认不联网"}
+                  open={openAiSections.includes("search")}
+                  onToggle={() => toggleAiSection("search")}
+                >
+                  <WebSearchFields
+                    value={{
+                      web_search: form.ai_web_search,
+                      web_search_context_size: form.ai_web_search_context_size,
+                    }}
+                    onChange={(patch) =>
+                      setFields({
+                        ai_web_search: patch.web_search ?? form.ai_web_search,
+                        ai_web_search_context_size:
+                          patch.web_search_context_size ??
+                          form.ai_web_search_context_size,
+                      })
+                    }
+                  />
+                </CollapsibleAiSection>
+
+                <CollapsibleAiSection
+                  ref={outputSectionRef}
+                  title="回复样式"
+                  description={
+                    form.ai_output_template.trim()
+                      ? "已自定义消息模板"
+                      : "默认使用简洁模板"
+                  }
+                  open={openAiSections.includes("output")}
+                  onToggle={() => toggleAiSection("output")}
+                >
+                  <OutputFormatFields
+                    value={{
+                      output_format: form.ai_output_format,
+                      output_template: form.ai_output_template,
+                      escape_values: form.ai_escape_values,
+                    }}
+                    onChange={(patch) =>
+                      setFields({
+                        ai_output_format:
+                          patch.output_format ?? form.ai_output_format,
+                        ai_output_template:
+                          patch.output_template ?? form.ai_output_template,
+                        ai_escape_values:
+                          patch.escape_values ?? form.ai_escape_values,
+                      })
+                    }
+                  />
+                </CollapsibleAiSection>
+              </div>
 
               <p className="text-xs text-muted-foreground">
-                调用流程：用户在 TG 中回复某消息并发 <code>{cmdPrefix}{form.name || "ai"} 问题</code>，worker 将「被回复消息正文 + 问题」拼成 用户提示词，把回答编辑回原消息
+                调用流程：用户在 TG 中回复某消息并发 <CommandBadge>{cmdPrefix}{form.name || "ai"} 问题</CommandBadge>，worker 将「被回复消息正文 + 问题」拼成用户提示词，把回答编辑回原消息
               </p>
             </div>
           )}
@@ -1094,47 +1286,40 @@ function CommandEditDialog({
   );
 }
 
-function ProviderSelect({
-  value,
-  providers,
-  loading,
-  onChange,
-  allowEmpty = false,
-}: {
-  value: string;
-  providers?: LLMProviderOut[];
-  loading: boolean;
-  onChange: (v: string) => void;
-  /** 允许"不选"；选了就 value="" 上送（CommandTemplates 在保存时会按情况省略字段） */
-  allowEmpty?: boolean;
-}) {
-  if (loading) {
-    return (
-      <div className="flex h-10 items-center gap-2 rounded-md border px-3 text-xs text-muted-foreground">
-        <Spinner className="text-primary" /> 加载中…
-      </div>
-    );
+const CollapsibleAiSection = forwardRef<
+  HTMLDivElement,
+  {
+    title: string;
+    description: string;
+    open: boolean;
+    onToggle: () => void;
+    children: ReactNode;
   }
-  if (!providers || providers.length === 0) {
-    return (
-      <div className="rounded-md border px-3 py-2 text-xs alert-warning">
-        尚未配置模型提供商。先到「AI 模块 → 模型提供商」新建一个
-      </div>
-    );
-  }
-  return (
-    <Select value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="">{allowEmpty ? "— 不指定 —" : "— 请选择 —"}</option>
-      {providers.map((p) => (
-        <option key={p.id} value={String(p.id)}>
-          {p.name}（{p.provider} · {p.default_model}）
-          {p.has_api_key ? "" : " · ⚠ 未配置 key"}
-          {p.tags && p.tags.length > 0 ? ` · [${p.tags.join(",")}]` : ""}
-        </option>
-      ))}
-    </Select>
-  );
-}
+>(({ title, description, open, onToggle, children }, ref) => (
+  <section ref={ref} className="rounded-md border bg-muted/30">
+    <button
+      type="button"
+      className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
+      onClick={onToggle}
+      aria-expanded={open}
+    >
+      <span className="min-w-0">
+        <span className="block text-sm font-semibold">{title}</span>
+        <span className="block truncate text-xs text-muted-foreground">
+          {description}
+        </span>
+      </span>
+      <ChevronDown
+        className={
+          "h-4 w-4 shrink-0 text-muted-foreground transition-transform " +
+          (open ? "rotate-180" : "")
+        }
+      />
+    </button>
+    {open ? <div className="border-t p-3">{children}</div> : null}
+  </section>
+));
+CollapsibleAiSection.displayName = "CollapsibleAiSection";
 
 /**
  * 展开式 provider × model 选择器：

@@ -299,6 +299,7 @@ def _provider_to_out(row: LLMProvider) -> LLMProviderOut:
         base_url=row.base_url,
         default_model=row.default_model,
         api_format=getattr(row, "api_format", None) or "chat_completions",
+        web_search_api_format=getattr(row, "web_search_api_format", None) or "auto",
         # 路由元数据（老数据可能为 None / [] / 缺字段；用属性 getattr 兼容）
         modality=getattr(row, "modality", None) or "text",
         tags=list(getattr(row, "tags", None) or []),
@@ -368,6 +369,7 @@ async def create_provider(
         base_url=payload.base_url,
         default_model=payload.default_model,
         api_format=payload.api_format,
+        web_search_api_format=payload.web_search_api_format,
         # 路由元数据
         modality=payload.modality,
         tags=list(payload.tags or []),
@@ -412,6 +414,8 @@ async def update_provider(
         row.default_model = data["default_model"]
     if "api_format" in data and data["api_format"]:
         row.api_format = data["api_format"]
+    if "web_search_api_format" in data and data["web_search_api_format"]:
+        row.web_search_api_format = data["web_search_api_format"]
 
     # 路由元数据：明确出现在 patch 内才覆盖
     if "modality" in data and data["modality"] is not None:
@@ -497,6 +501,22 @@ async def list_aids_with_ai_commands(db: AsyncSession) -> list[int]:
         )
     ).scalars().all()
     return list(rows)
+
+
+async def ai_command_enablement_summary(db: AsyncSession) -> dict[str, int]:
+    """返回 AI 命令模板在账号上的启用摘要。"""
+    total_accounts = (
+        await db.execute(select(Account.id))
+    ).scalars().all()
+    ai_templates = (
+        await db.execute(select(CommandTemplate.id).where(CommandTemplate.type == "ai"))
+    ).scalars().all()
+    enabled_accounts = await list_aids_with_ai_commands(db)
+    return {
+        "total_accounts": len(total_accounts),
+        "enabled_accounts": len(enabled_accounts),
+        "ai_templates": len(ai_templates),
+    }
 
 
 async def list_all_account_ids(db: AsyncSession) -> list[int]:

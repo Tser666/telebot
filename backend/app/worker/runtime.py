@@ -704,6 +704,7 @@ async def _refresh_command_context(account_id: int) -> None:
                 "default_model": p.default_model,
                 # API 协议格式：build_client 据此决定走哪条 client 实现
                 "api_format": getattr(p, "api_format", None),
+                "web_search_api_format": getattr(p, "web_search_api_format", None),
                 # 路由元数据：worker 选 provider 时要看
                 "modality": getattr(p, "modality", None) or "text",
                 "tags": list(getattr(p, "tags", None) or []),

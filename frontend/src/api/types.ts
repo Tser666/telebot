@@ -827,8 +827,10 @@ export interface RunPluginConfig {
 }
 
 export interface AICommandConfig {
+  /** AI 命令能力模式：chat 默认问答；search 强制联网；image/video 对齐 TeleBox 二级指令 */
+  mode?: "chat" | "search" | "image" | "video";
   /** 关联的 LLMProvider.id（fixed 模式下的固定 provider；auto 模式下没命中规则也用它兜底） */
-  provider_id: number;
+  provider_id?: number;
   /** 单次覆盖 provider.default_model；空 = 用 provider 默认 */
   model?: string;
   /** 拼 prompt 时引用被回复消息内容 */
@@ -863,12 +865,23 @@ export interface AICommandConfig {
   web_search?: boolean;
   /** 联网搜索上下文强度 */
   web_search_context_size?: "low" | "medium" | "high";
+  /** edit = 原地编辑命令消息；send_new = 删除命令并另发一条 */
+  send_mode?: "edit" | "send_new";
+  /** image 模式后端：codex_image 复用图片生成插件；llm 预留给后续 Provider 原生生图 */
+  image_backend?: "codex_image" | "llm";
 }
 
 /** 账号详情 → 命令 tab 一行：模板内容 + 该账号是否启用 */
 export interface AccountCommandItem {
   template: CommandTemplateOut;
   enabled: boolean;
+}
+
+/** AI 总览：账号启用 AI 命令的批量统计 */
+export interface AICommandEnablementSummary {
+  total_accounts: number;
+  enabled_accounts: number;
+  ai_templates: number;
 }
 
 // ===== Sprint4 Wave1 =====
@@ -887,6 +900,7 @@ export type LLMProviderKind = "openai" | "anthropic" | "ollama";
  * 切到对应 api_format 即可解决报 404 / "模型不支持" 一类问题。
  */
 export type LLMApiFormat = "chat_completions" | "responses" | "anthropic_messages";
+export type LLMWebSearchApiFormat = "auto" | LLMApiFormat;
 
 /**
  * LLMProvider 下挂的一个候选模型条目（与后端 ProviderModel 对齐）。
@@ -943,6 +957,8 @@ export interface LLMProviderOut {
   default_model: string;
   /** API 协议；老数据可能缺，前端按 chat_completions 兜底 */
   api_format?: LLMApiFormat | string;
+  /** 联网搜索时的协议覆盖；auto = OpenAI/chat_completions 在联网时临时走 responses */
+  web_search_api_format?: LLMWebSearchApiFormat | string;
   /** 模态；老数据可能缺，前端按 "text" 兜底 */
   modality?: LLMModality | string;
   /** 路由标签；老数据可能为空数组 */
@@ -966,6 +982,7 @@ export interface LLMProviderCreate {
   base_url?: string | null;
   default_model: string;
   api_format?: LLMApiFormat;
+  web_search_api_format?: LLMWebSearchApiFormat;
   modality?: LLMModality;
   tags?: string[];
   cost_tier?: number;
@@ -996,6 +1013,7 @@ export interface LLMProviderUpdate {
   base_url?: string | null;
   default_model?: string;
   api_format?: LLMApiFormat;
+  web_search_api_format?: LLMWebSearchApiFormat;
   modality?: LLMModality;
   tags?: string[];
   cost_tier?: number;
@@ -1031,6 +1049,32 @@ export interface FetchModelsPreviewRequest {
 export interface FetchModelsPreviewResponse {
   fetched: number;
   ids: string[];
+}
+
+export interface DetectProviderProtocolsRequest {
+  provider: LLMProviderKind;
+  base_url?: string | null;
+  api_key?: string | null;
+  proxy_id?: number | null;
+  pid?: number | null;
+  model?: string | null;
+}
+
+export interface ProtocolProbeResult {
+  ok: boolean;
+  status_code?: number | null;
+  latency_ms: number;
+  error?: string | null;
+}
+
+export interface DetectProviderProtocolsResponse {
+  chat_completions: ProtocolProbeResult;
+  responses: ProtocolProbeResult;
+  anthropic_messages: ProtocolProbeResult;
+  models: ProtocolProbeResult;
+  recommended_api_format?: LLMApiFormat | string | null;
+  recommended_web_search_api_format: LLMWebSearchApiFormat | string;
+  note?: string | null;
 }
 
 /** ``POST /api/commands/llm-providers/{pid}/test-model`` 入参 */

@@ -7,6 +7,7 @@ import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { getSystemSettings } from "@/api/system";
+import { CommandBadge } from "@/components/CommandBadge";
 
 export type OutputFormat = "html" | "markdown" | "plain";
 
@@ -76,7 +77,8 @@ export const OUTPUT_TEMPLATE_PLACEHOLDERS: OutputTemplatePlaceholder[] = [
   { insert: "{display_input_rest}", label: "[输入-剩余]", desc: "输入从第 3 行起（配 <blockquote expandable> 折叠）" },
   { insert: "{question}", label: "[问题]", desc: "用户在命令后跟的问题" },
   { insert: "{quoted}", label: "[被引用]", desc: "被回复消息的正文（无被回复时为空）" },
-  { insert: "{model}", label: "[模型]", desc: "API 实际返回的模型名" },
+  { insert: "{model}", label: "[模型]", desc: "模型展示名（优先使用 Provider 模型标签）" },
+  { insert: "{model_id}", label: "[模型ID]", desc: "API 实际返回的原始模型 ID" },
   { insert: "{provider}", label: "[提供商]", desc: "提供商名称（如 Any GPT）" },
   { insert: "{provider_kind}", label: "[厂商]", desc: "openai / anthropic / ollama" },
   { insert: "{in_tokens}", label: "[输入tokens]", desc: "输入 token 数" },
@@ -156,7 +158,8 @@ export function OutputTemplateEditor({
     display_input_rest: "这里是输入内容的剩余部分。",
     question: "请总结这段内容",
     quoted: "这是一段被回复的原文。",
-    model: "gpt-5.4",
+    model: "GPT-5.4",
+    model_id: "gpt-5.4",
     provider: "OpenAI",
     provider_kind: "openai",
     in_tokens: "128",
@@ -197,7 +200,7 @@ export function OutputTemplateEditor({
       <div>
         <Label className="text-sm font-semibold">消息格式</Label>
         <p className="text-xs text-muted-foreground">
-          决定 {cmdPrefix}ai 调用后编辑回 TG 的消息长什么样。留空 = 用"简洁"预设。
+          决定 <CommandBadge>{cmdPrefix}ai</CommandBadge> 调用后编辑回 TG 的消息长什么样。留空 = 用"简洁"预设。
           支持的占位符见下方按钮，点击直接插入光标位置。
         </p>
       </div>

@@ -6,10 +6,10 @@ import { NavLink } from "react-router-dom";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import {
   Boxes,
-  BrainCircuit,
   Cog,
   Home,
   ScrollText,
+  Sparkles,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -27,7 +27,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { to: "/", label: "首页", icon: Home, end: true },
   { to: "/plugins", label: "模块", icon: Boxes },
-  { to: "/ai", label: "AI", icon: BrainCircuit },
+  { to: "/ai", label: "AI", icon: Sparkles },
   { to: "/logs", label: "日志", icon: ScrollText },
   { to: "/settings", label: "系统", icon: Cog },
 ];

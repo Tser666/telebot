@@ -2,18 +2,113 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与 [SemVer](https://semver.org/lang/zh-CN/)：MAJOR.MINOR.PATCH。
 
-- **MAJOR**：不向后兼容（数据库不兼容迁移 / 协议大改 / 配置项重命名 / API 路径变更）
-- **MINOR**：向后兼容的功能增量（一个 Sprint 通常 +1）
-- **PATCH**：bug 修复 / 文档 / 小调整 / hotfix
+- **MAJOR**：破坏兼容的数据库迁移、配置格式变更、API 路径或语义不兼容、老版本无法平滑升级。
+- **MINOR**：用户可感知的新能力、主要入口/信息架构重组、后端能力完整前端化、新模块或重要工作流变化。
+- **PATCH**：bug 修复、文案、小 UI、错误提示、测试补充、兼容性补丁和不改变主要用户路径的小调整。
 
-> 版本号在 5 处必须保持同步：`backend/app/__init__.py`、`backend/pyproject.toml`、`frontend/package.json`、`frontend/src/lib/version.ts`、本文件顶部段落。`backend/app/main.py` 通过 `from . import __version__` 自动跟随，无需单独改。详见 `agent-plans/README.md` §6。
+> 不要为每个微小提交单独迭代版本号。开发过程中先把变更积累在 `Unreleased`；只有准备发布、推送稳定检查点、创建 release/PR，或用户明确要求“推一版/发一版”时，才按本批改动的最高影响级别统一 bump 一次版本号。
+>
+> 发布时版本号在 4 处必须保持同步：`backend/app/__init__.py`、`backend/pyproject.toml`、`frontend/package.json`、`frontend/src/lib/version.ts`。同时把 `Unreleased` 内容移动到新的正式版本段落，并使用中文更新说明。`backend/app/main.py` 通过 `from . import __version__` 自动跟随，无需单独改。
 
 ---
 
 ## [Unreleased]
 
 ### Changed
-- （空）
+- 明确版本号只在发布、推送稳定检查点、创建 release/PR，或用户要求“推一版/发一版”时统一迭代；开发过程中的微小提交先累积到 `Unreleased`。
+
+---
+
+## [0.16.4] — 2026-05-17 · feature · Provider 协议检测
+
+### Added
+- 模型提供商新增“检测协议”能力，可在保存前探测 `/models`、`/chat/completions`、`/responses` 和 Anthropic `/messages` 是否可用。
+- 协议检测会根据探测结果自动填入推荐的默认 API Format 与联网搜索 API Format，降低新建 Provider 时选错协议的概率。
+
+### Verification
+- `pnpm --dir frontend build` 通过。
+- `backend/.venv/bin/python -m pytest backend/app/tests/test_commands.py backend/app/tests/test_ai_runtime.py backend/app/tests/test_scheduler_runtime.py backend/app/tests/test_llm_runtime.py -q` 通过。
+- `git diff --check` 通过。
+
+---
+
+## [0.16.3] — 2026-05-17 · feature · Provider 联网搜索协议覆盖
+
+### Added
+- 模型提供商新增“联网搜索 API Format”配置，支持默认聊天协议与联网搜索协议分开设置。
+- OpenAI 兼容 Provider 默认启用自动协议覆盖：日常调用可走 `chat_completions`，联网搜索调用会临时切到 `responses`。
+- 新增数据库迁移 `0024`，为 `llm_provider` 增加 `web_search_api_format` 字段。
+
+### Changed
+- Provider 列表和编辑弹窗展示联网搜索协议，降低 `。ai search` 配置成本。
+
+### Verification
+- `pnpm --dir frontend build` 通过。
+- `backend/.venv/bin/python -m pytest backend/app/tests/test_commands.py backend/app/tests/test_ai_runtime.py backend/app/tests/test_scheduler_runtime.py backend/app/tests/test_llm_runtime.py -q` 通过。
+- `git diff --check` 通过。
+
+---
+
+## [0.16.2] — 2026-05-17 · fix · AI 搜索提示与命令样式
+
+### Changed
+- 带命令前缀的说明统一使用命令胶囊样式，避免和普通正文混在一起。
+- AI 模式说明补充 search 模式需要 OpenAI Responses API provider（api_format=responses）。
+
+### Fixed
+- `search` 模式绑定到不支持联网搜索的 provider 时，Telegram 端错误提示会明确指出需要 Responses API provider。
+
+### Verification
+- `pnpm --dir frontend build` 通过。
+- `git diff --check` 通过。
+
+---
+
+## [0.16.1] — 2026-05-17 · fix · AI 导航图标统一
+
+### Changed
+- 侧边栏 AI 入口改用更轻量的闪光图标，和 AI 命令中心的入口气质保持一致。
+- AI 命令中心切换器补齐“总览”图标，并把“已配置的命令”保留在同一组入口中。
+- 日志中心主切换器与运行日志来源切换器补齐图标，减少只有文字的页签。
+
+### Verification
+- `pnpm --dir frontend build` 通过。
+- `git diff --check` 通过。
+
+---
+
+## [0.16.0] — 2026-05-17 · feature · AI 模块信息架构收敛
+
+### Added
+- 自定义命令模板页支持 `edit`、`new=ai`、`provider_id`、`aiCapability`、`returnTo` 深链，用于直接打开 AI 模板抽屉、预填 Provider、展开指定能力组并保存后返回。
+- 插件中心新增“图片生成 (codex_image)”显眼入口，并支持 `highlight=codex_image` 滚动高亮。
+- AI 总览新增工作原理、配置示例和术语速查折叠说明，替代原独立帮助页。
+- AI 总览新增账号启用 AI 命令摘要，显示已有多少账号启用了至少一条 AI 命令。
+- AI 总览“去启用”支持按账号数量分流：单账号直接进入命令 Tab，多账号先选择账号。
+- AI 消息格式新增 `{model_id}` 原始模型 ID，占位符 `{model}` 改为输出更友好的模型展示名。
+- AI 命令模板新增 `chat/search/image/video` 模式字段，开始对齐 TeleBox `ai.ts` 的二级指令结构。
+
+### Changed
+- `/ai` 收敛为总览、模型提供商、调用记录三种 Tab 状态，支持 `tab=overview|providers|usage` URL 驱动并在切换时保留 query。
+- `/ai/providers?new=1` 兼容跳转为 `/ai?tab=providers&newProvider=1`，进入模型提供商 Tab 后自动打开新建 Provider 弹窗并清理一次性 query。
+- `/ai/chat`、`/ai/routing`、`/ai/search`、`/ai/output`、`/ai/vision`、`/ai/images` 改为精确深链到命令模板、Provider 筛选或插件中心，不再保留独立 AI 子页。
+- AI 总览改为三张状态卡、三步引导和 AI 命令快览，最近调用摘要统一使用最近 20 次口径。
+- AI 总览帮助区的“推荐配置”改名为“配置示例”。
+- 命令模板编辑器中的 AI 路由、联网搜索和回复样式从平铺字段改为默认折叠的能力组，非默认配置会自动展开。
+- `search` 模式会自动启用联网搜索；`image` 模式可桥接到账号已启用的 `codex_image` 插件，也支持直接创建 `image` 命令模板。
+- 模型提供商列表支持 `filter=modality:vision` 过滤视觉/多模态 Provider。
+- 最近调用内容迁移为 `/ai` 内部组件，供调用记录 Tab 复用。
+- 后端标准 LLM 调用薄包装从 `services.ai_runtime` 重命名为 `services.llm_invoke`，避免与 worker 侧 Telegram 事件运行时混淆。
+
+### Removed
+- 删除 AI 模块历史 wrapper 和独立子页：`Providers`、`Help`、`Usage`、`Chat`、`Routing`、`Search`、`Vision`、`Images`、`Output` 与 `_shared`。
+- 删除孤儿帮助页 `AISettings.tsx`，其内容拆入 AI 总览的内联折叠组件。
+
+### Verification
+- `pnpm --dir frontend build` 通过。
+- `backend/.venv/bin/python -m pytest backend/app/tests/test_ai_runtime.py backend/app/tests/test_scheduler_runtime.py -q` 通过。
+- `backend/.venv/bin/python -m pytest backend/app/tests/test_commands.py -q` 通过。
+- `git diff --check` 通过。
 
 ---
 

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -13,6 +13,7 @@ import {
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { CommandBadge } from "@/components/CommandBadge";
 import { Spinner } from "@/components/ui/misc";
 import { AccountSummaryCard } from "@/components/AccountSummaryCard";
 import {
@@ -28,7 +29,7 @@ import { formatDateTime } from "@/lib/utils";
 type GuideStep = {
   icon: typeof Plus;
   title: string;
-  desc: string;
+  desc: ReactNode;
   actionLabel: string;
   actionTo: string;
 };
@@ -44,7 +45,7 @@ const GUIDE_STEPS: GuideStep[] = [
   {
     icon: Wand,
     title: "2. 设置命令前缀",
-    desc: "在系统设置里确定命令开头字符，比如 ,ai。",
+    desc: "在系统设置里确定 Telegram 命令开头字符。",
     actionLabel: "去设置前缀",
     actionTo: "/settings?tab=platform",
   },
@@ -307,7 +308,7 @@ function GuideContextCard({
     ...GUIDE_STEPS[currentStep],
     desc:
       currentStep === 1
-        ? `在系统设置里确定命令开头字符，比如 ${cmdPrefix}ai。`
+        ? <>在系统设置里确定命令开头字符，比如 <CommandBadge>{cmdPrefix}ai</CommandBadge>。</>
         : GUIDE_STEPS[currentStep].desc,
   };
   const percent = ((currentStep + 1) / GUIDE_STEPS.length) * 100;

@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from app.services import ai_runtime as service_ai_runtime
+from app.services import llm_invoke as service_ai_runtime
 from app.services.llm_client import LLMResult
 from app.services.llm_dto import LLMProviderDTO
 from app.worker import ai_runtime
@@ -58,6 +58,71 @@ async def test_ai_runtime_provider_not_loaded_returns_friendly_error(monkeypatch
 
     event.edit.assert_awaited()
     assert "99" in event.edit.call_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_ai_runtime_image_mode_bridges_to_codex_image(monkeypatch) -> None:
+    from app.worker import command as worker_command
+
+    wcmd.set_command_context(CommandContext(account_id=1, templates={}, providers={}))
+    dispatched = AsyncMock(return_value=True)
+    monkeypatch.setattr(worker_command, "dispatch_plugin_command", dispatched)
+
+    client = AsyncMock()
+    event = AsyncMock()
+    tpl = {
+        "name": "image",
+        "type": "ai",
+        "config": {"mode": "image", "image_backend": "codex_image"},
+    }
+
+    await ai_runtime.invoke(client, event, ["画一只猫"], tpl, 1)
+
+    dispatched.assert_awaited_once_with(
+        client,
+        event,
+        ["画一只猫"],
+        1,
+        plugin_key="codex_image",
+        method=None,
+    )
+    event.edit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ai_runtime_ai_subcommand_image_consumes_mode(monkeypatch) -> None:
+    from app.worker import command as worker_command
+
+    wcmd.set_command_context(CommandContext(account_id=1, templates={}, providers={}))
+    dispatched = AsyncMock(return_value=True)
+    monkeypatch.setattr(worker_command, "dispatch_plugin_command", dispatched)
+
+    client = AsyncMock()
+    event = AsyncMock()
+    tpl = {"name": "ai", "type": "ai", "config": {"mode": "chat", "provider_id": 1}}
+
+    await ai_runtime.invoke(client, event, ["image", "画一只猫"], tpl, 1)
+
+    dispatched.assert_awaited_once()
+    assert dispatched.call_args.args[2] == ["画一只猫"]
+
+
+def test_ai_runtime_model_display_name_prefers_label() -> None:
+    assert (
+        ai_runtime._model_display_name(  # noqa: SLF001
+            "gpt-5.5",
+            {"models": [{"id": "gpt-5.5", "label": "GPT-5.5"}]},
+        )
+        == "GPT-5.5"
+    )
+
+
+def test_ai_runtime_model_display_name_prettifies_id() -> None:
+    assert (
+        ai_runtime._model_display_name("claude-3-5-sonnet", {"models": []})  # noqa: SLF001
+        == "Claude 3.5 Sonnet"
+    )
+    assert ai_runtime._model_display_name("gpt-4o", {"models": []}) == "GPT-4o"  # noqa: SLF001
 
 
 @pytest.mark.asyncio

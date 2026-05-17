@@ -1052,6 +1052,34 @@ def test_provider_create_default_models_empty() -> None:
     assert p.models == []
 
 
+def test_ai_command_image_codex_allows_missing_provider() -> None:
+    """image + codex_image 后端可以不选择 LLM Provider。"""
+    from app.schemas.command import CommandTemplateCreate
+
+    tpl = CommandTemplateCreate(
+        name="image",
+        type="ai",
+        config={"mode": "image", "image_backend": "codex_image"},
+    )
+
+    assert tpl.config["mode"] == "image"
+    assert tpl.config["image_backend"] == "codex_image"
+
+
+def test_ai_command_search_forces_web_search() -> None:
+    """search 模式保存时强制开启 web_search。"""
+    from app.schemas.command import CommandTemplateCreate
+
+    tpl = CommandTemplateCreate(
+        name="search",
+        type="ai",
+        config={"mode": "search", "provider_id": 1, "web_search": False},
+    )
+
+    assert tpl.config["mode"] == "search"
+    assert tpl.config["web_search"] is True
+
+
 # ════════════════════════════════════════════════════════════
 # 10) test-model endpoint：成功 / 失败路径
 # ════════════════════════════════════════════════════════════
@@ -1365,7 +1393,7 @@ async def test_run_ai_rejects_image_on_non_vision_provider() -> None:
 @pytest.mark.asyncio
 async def test_run_ai_downloads_image_for_vision_provider(monkeypatch) -> None:
     """provider modality=vision 时应下载图片字节并以 ``images=[bytes]`` 传给 LLM。"""
-    from app.services import ai_runtime as service_ai_runtime
+    from app.services import llm_invoke as service_ai_runtime
     from app.services.llm_client import LLMResult
     from app.services.llm_dto import LLMProviderDTO
 
@@ -1428,7 +1456,7 @@ async def test_run_ai_downloads_self_photo_caption_mode(monkeypatch) -> None:
 
     回归这一条是因为之前只看 ``replied.photo``，自己发图时反而被
     反幻觉守卫误伤——明明带了图却被告知"未收到图像数据"。"""
-    from app.services import ai_runtime as service_ai_runtime
+    from app.services import llm_invoke as service_ai_runtime
     from app.services.llm_client import LLMResult
     from app.services.llm_dto import LLMProviderDTO
 
@@ -1472,7 +1500,7 @@ async def test_run_ai_downloads_self_photo_caption_mode(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_run_ai_self_photo_routes_to_vision_in_auto_mode(monkeypatch) -> None:
     """auto 模式下命令消息自带图也要触发视觉路由（pick_provider 看到 has_photo=True）。"""
-    from app.services import ai_runtime as service_ai_runtime
+    from app.services import llm_invoke as service_ai_runtime
     from app.services import llm_router as _lr
     from app.services.llm_client import LLMResult
     from app.services.llm_dto import LLMProviderDTO
