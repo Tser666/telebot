@@ -19,6 +19,21 @@
 
 ---
 
+## [0.17.0] — 2026-05-17 · feature · 插件模板配置分组
+
+### Added
+- 插件通用配置弹窗会按字段名自动归类：普通配置保留在顶部，`*_template` 模板进入“消息模板”折叠组，`*_preview` 预览进入底部“预览结果”。
+- 模板预览现在会根据当前表单里的模板内容和示例变量实时渲染，而不是只显示 schema 中的静态默认预览。
+
+### Changed
+- 每个模板预览都使用独立的 `TelegramHtmlPreview` 气泡展示，方便同时检查开局、进行中、成功、超时、取消和错误提示等多条消息。
+
+### Verification
+- `pnpm --dir frontend build` 通过。
+- `git diff --check` 通过。
+
+---
+
 ## [0.16.8] — 2026-05-17 · changed · Telegram 消息预览
 
 ### Changed
