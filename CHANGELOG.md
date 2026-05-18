@@ -14,22 +14,43 @@
 
 ## [Unreleased]
 
+---
+
+## [0.17.1] — 2026-05-18 · fixed · PWA 导航与 ChatGPT2API 配置体验
+
+### Added
+- ChatGPT2API 配置页新增消息模板编辑、占位符快捷插入和 Telegram HTML 预览，生成图片 caption 可自定义状态、提示词、模型、画幅、格式、耗时、参考图和代理等信息。
+- ChatGPT2API manifest 新增默认消息模板，并标记为实验性插件，配置页同步展示实验性说明和更完整的命令示例。
+
 ### Changed
 - 明确版本号只在发布、推送稳定检查点、创建 release/PR，或用户要求“推一版/发一版”时统一迭代；开发过程中的微小提交先累积到 `Unreleased`。
+- PWA 底栏、通用选项卡、桌面侧边栏和导航选中态统一为更柔和的 Liquid Glass 视觉，弱化硬边割裂感并增强背景折射和选中态层次。
+- PWA standalone 模式下左上角不再显示侧边栏按钮，改为展示 TelePilot 项目名，导航入口交给底栏承载；普通移动浏览器仍保留侧边栏按钮。
+- ChatGPT 图片助手统一命名为实验性 `ChatGPT2API`，并补充 `--size`、回复图片编辑和管理命令说明。
+
+### Fixed
+- 修复 PWA 模式下移动侧边栏只出现遮罩、不显示抽屉的问题：关闭态遮罩不再拦截点击，并让抽屉位移由专用 data-state 样式控制。
+
+### Verification
+- `backend/.venv/bin/ruff check backend/app/worker/plugins/builtin/chatgpt_image backend/app/tests/test_chatgpt_image_plugin.py`
+- `backend/.venv/bin/python -m pytest backend/app/tests/test_chatgpt_image_plugin.py -q`
+- `pnpm --dir frontend build`
+- `git diff --check`
 
 ---
 
-## [0.17.0] — 2026-05-18 · feature · ChatGPT 图片助手插件
+## [0.17.0] — 2026-05-18 · feature · ChatGPT2API 实验性插件
 
 ### Added
-- 新增内置插件 `chatgpt_image`，按 chatgpt2api 的核心逻辑在 TelePilot 插件内完成 ChatGPT 图片生成、回复图片编辑、最近图片续改、模型检测、额度刷新、代理测试和插件状态查看。
-- 新增 ChatGPT 图片助手专属配置页，支持自定义文生图、编辑和管理命令，配置模型列表、默认模型、生成张数、画幅、输出方式、风格模板、轮询超时与参考图数量。
+- 新增实验性内置插件 `chatgpt_image`，显示名为 `ChatGPT2API`，按 chatgpt2api 的核心逻辑在 TelePilot 插件内完成 ChatGPT 图片生成、回复图片编辑、最近图片续改、模型检测、额度刷新、代理测试和插件状态查看。
+- 新增 ChatGPT2API 专属配置页，支持自定义文生图、编辑和管理命令，配置模型列表、默认模型、生成张数、画幅、输出方式、风格模板、轮询超时与参考图数量。
 - Token 池改为逐条管理：每条 token 可填写备注，已保存 token 按首尾各 10 字符脱敏显示，并支持粘贴 `chatgpt.com/api/auth/session` 完整 JSON 自动提取 `accessToken`。
 - 将 CPA、sub2api、健康检测与自动禁用失效 token 配置收进默认折叠的高级容器。
+- 配置页新增支持的命令格式示例、输出消息模板、占位符快捷插入和 Telegram 消息预览。
 
 ### Changed
-- ChatGPT 图片助手不提供 OpenAI 兼容 `/v1/*` HTTP 服务，也不内置 Docker、号池或外部服务；它只作为 Telegram 侧原生插件调用 ChatGPT Web 图片链路。
-- ChatGPT 图片助手的网络出口改为直接跟随当前 Telegram 账号代理，不再提供插件内独立代理配置，避免启动阶段重复读取代理表。
+- ChatGPT2API 不提供 OpenAI 兼容 `/v1/*` HTTP 服务，也不内置 Docker、号池或外部服务；它只作为 Telegram 侧原生插件调用 ChatGPT Web 图片链路。
+- ChatGPT2API 的网络出口改为直接跟随当前 Telegram 账号代理，不再提供插件内独立代理配置，避免启动阶段重复读取代理表。
 - 健康检测失败不再配置额外异常通知聊天 ID；用户触发的失败会直接用中文更新原聊天消息，详细错误写入插件日志。
 - 插件配置接口对 `chatgpt_image` token 池做专用脱敏与回填，编辑备注或保存其他配置时不会覆盖真实 token。
 - PWA 底栏升级为五栏浮动玻璃风格，补齐 AI 与系统入口，并统一移动端安全区留白。
@@ -38,8 +59,8 @@
 - PWA 名称与图标统一为 TelePilot，替换旧的 Userbot 名称和旧占位图标。
 
 ### Verification
-- `backend/.venv/bin/ruff check backend/app/worker/runtime.py backend/app/worker/plugins/base.py backend/app/worker/plugins/loader.py backend/app/worker/plugins/builtin/chatgpt_image backend/app/tests/test_chatgpt_image_plugin.py`
-- `backend/.venv/bin/python -m pytest backend/app/tests/test_chatgpt_image_plugin.py backend/app/tests/test_runtime_helpers.py backend/app/tests/test_plugin_loader.py -q`
+- `backend/.venv/bin/ruff check backend/app/worker/plugins/builtin/chatgpt_image backend/app/tests/test_chatgpt_image_plugin.py`
+- `backend/.venv/bin/python -m pytest backend/app/tests/test_chatgpt_image_plugin.py -q`
 - `pnpm --dir frontend build`
 - `git diff --check`
 

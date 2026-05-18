@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  AlertTriangle,
   ArrowLeft,
   ClipboardPaste,
   Loader2,
@@ -13,6 +14,9 @@ import { toast } from "sonner";
 
 import { listAccountFeatures } from "@/api/accounts";
 import { getEffectiveConfig, updateAccountFeatureConfig } from "@/api/features";
+import { getSystemSettings } from "@/api/system";
+import { CommandBadge } from "@/components/CommandBadge";
+import { TelegramHtmlPreview } from "@/components/TelegramHtmlPreview";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -48,6 +52,7 @@ type ChatGPTImageConfig = {
   default_size: string;
   image_format: string;
   output_mode: string;
+  message_template: string;
   style_templates: string;
   default_style: string;
   timeout: number;
@@ -88,6 +93,28 @@ const DEFAULT_MODELS = [
   "gpt-5-mini",
 ].join("\n");
 
+const DEFAULT_MESSAGE_TEMPLATE =
+  "<b>ChatGPT2API</b>\n<b>状态:</b> {status}\n<b>提示词:</b> {prompt}\n<b>模型:</b> {model} · <b>数量:</b> {count}\n<b>画幅:</b> {size} · <b>格式:</b> {image_format}\n<b>耗时:</b> {elapsed}";
+
+const TEMPLATE_PLACEHOLDERS = [
+  { key: "{status}", label: "状态" },
+  { key: "{prompt}", label: "提示词" },
+  { key: "{model}", label: "模型" },
+  { key: "{count}", label: "请求张数" },
+  { key: "{result_count}", label: "结果张数" },
+  { key: "{size}", label: "画幅" },
+  { key: "{style}", label: "风格" },
+  { key: "{image_format}", label: "格式" },
+  { key: "{output_mode}", label: "发送方式" },
+  { key: "{elapsed}", label: "耗时" },
+  { key: "{command}", label: "文生图命令" },
+  { key: "{edit_command}", label: "编辑命令" },
+  { key: "{admin_command}", label: "管理命令" },
+  { key: "{has_reference}", label: "参考图" },
+  { key: "{reference_count}", label: "参考图数" },
+  { key: "{proxy}", label: "代理" },
+];
+
 const DEFAULT_CONFIG: ChatGPTImageConfig = {
   command: "draw",
   edit_command: "edit",
@@ -101,6 +128,7 @@ const DEFAULT_CONFIG: ChatGPTImageConfig = {
   default_size: "1:1",
   image_format: "png",
   output_mode: "auto",
+  message_template: DEFAULT_MESSAGE_TEMPLATE,
   style_templates: DEFAULT_STYLE_TEMPLATES,
   default_style: "",
   timeout: 300,
@@ -205,6 +233,15 @@ function parseTokenInput(raw: string): string[] {
   );
 }
 
+function renderTemplate(template: string, values: Record<string, string>): string {
+  let out = template || DEFAULT_CONFIG.message_template;
+  out = out.replace(/\{\?([a-zA-Z0-9_]+)\}([\s\S]*?)\{\/\?\}/g, (_, key: string, inner: string) =>
+    values[key] ? inner : "",
+  );
+  out = out.replace(/\{([a-zA-Z0-9_]+)\}/g, (_, key: string) => values[key] ?? "");
+  return out;
+}
+
 function CollapsibleSection({
   title,
   description,
@@ -243,8 +280,13 @@ export function ChatGPTImageConfigPage() {
     queryFn: () => getEffectiveConfig(aid, "chatgpt_image"),
     enabled: !!aid,
   });
+  const settingsQ = useQuery({
+    queryKey: ["system", "settings"],
+    queryFn: getSystemSettings,
+  });
 
   const feature = featuresQ.data?.find((item) => item.feature_key === "chatgpt_image");
+  const cmdPrefix = settingsQ.data?.command_prefix || ",";
 
   const [command, setCommand] = useState(DEFAULT_CONFIG.command);
   const [editCommand, setEditCommand] = useState(DEFAULT_CONFIG.edit_command);
@@ -259,6 +301,7 @@ export function ChatGPTImageConfigPage() {
   const [defaultSize, setDefaultSize] = useState(DEFAULT_CONFIG.default_size);
   const [imageFormat, setImageFormat] = useState(DEFAULT_CONFIG.image_format);
   const [outputMode, setOutputMode] = useState(DEFAULT_CONFIG.output_mode);
+  const [messageTemplate, setMessageTemplate] = useState(DEFAULT_CONFIG.message_template);
   const [styleTemplates, setStyleTemplates] = useState(DEFAULT_CONFIG.style_templates);
   const [defaultStyle, setDefaultStyle] = useState(DEFAULT_CONFIG.default_style);
   const [timeout, setTimeoutInput] = useState(String(DEFAULT_CONFIG.timeout));
@@ -294,6 +337,7 @@ export function ChatGPTImageConfigPage() {
     setDefaultSize(text(cfg.default_size, DEFAULT_CONFIG.default_size));
     setImageFormat(text(cfg.image_format, DEFAULT_CONFIG.image_format));
     setOutputMode(text(cfg.output_mode, DEFAULT_CONFIG.output_mode));
+    setMessageTemplate(text(cfg.message_template, DEFAULT_CONFIG.message_template));
     setStyleTemplates(text(cfg.style_templates, DEFAULT_CONFIG.style_templates));
     setDefaultStyle(text(cfg.default_style, DEFAULT_CONFIG.default_style));
     setTimeoutInput(String(num(cfg.timeout, DEFAULT_CONFIG.timeout)));
@@ -395,6 +439,7 @@ export function ChatGPTImageConfigPage() {
       default_size: defaultSize.trim() || DEFAULT_CONFIG.default_size,
       image_format: imageFormat,
       output_mode: outputMode,
+      message_template: messageTemplate || DEFAULT_CONFIG.message_template,
       style_templates: styleTemplates,
       default_style: defaultStyle.trim(),
       timeout: clampedInt(timeout, DEFAULT_CONFIG.timeout, 30, 900),
@@ -418,6 +463,28 @@ export function ChatGPTImageConfigPage() {
     });
   }
 
+  const effectiveCommand = command.trim() || DEFAULT_CONFIG.command;
+  const effectiveEditCommand = editCommand.trim() || DEFAULT_CONFIG.edit_command;
+  const effectiveAdminCommand = adminCommand.trim() || DEFAULT_CONFIG.admin_command;
+  const previewValues = {
+    status: "已完成",
+    prompt: "精致二次元插画：云海里的未来城市，电影感光影",
+    model: defaultModel,
+    count: defaultCount || "1",
+    result_count: defaultCount || "1",
+    size: defaultSize,
+    style: defaultStyle || "二次元",
+    image_format: imageFormat,
+    output_mode: outputMode,
+    elapsed: "42秒",
+    command: effectiveCommand,
+    edit_command: effectiveEditCommand,
+    admin_command: effectiveAdminCommand,
+    has_reference: "是",
+    reference_count: "1",
+    proxy: "跟随账号代理",
+  };
+
   if (!aid) return <p>账号 ID 不合法</p>;
   if (featuresQ.isLoading || configQ.isLoading) {
     return (
@@ -439,9 +506,9 @@ export function ChatGPTImageConfigPage() {
             <ArrowLeft className="mr-1 h-4 w-4" /> 返回账号
           </Button>
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">ChatGPT 图片助手</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">ChatGPT2API</h1>
             <p className="text-sm text-muted-foreground">
-              状态：{feature?.enabled ? "已启用" : "未启用"} · {feature?.state || "unknown"}
+              实验性 · 状态：{feature?.enabled ? "已启用" : "未启用"} · {feature?.state || "unknown"}
             </p>
           </div>
         </div>
@@ -459,6 +526,45 @@ export function ChatGPTImageConfigPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
+          <div className="flex items-start gap-2 rounded-md border px-3 py-2 text-xs alert-warning">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <div className="font-medium">实验性能力</div>
+              <div className="mt-0.5 text-muted-foreground">
+                依赖 ChatGPT Web 非公开接口，可能随上游变化出现排队、风控、降级或失效。
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
+            <div className="font-medium text-foreground">支持的命令格式</div>
+            <ul className="mt-1.5 list-inside list-disc space-y-0.5">
+              <li>
+                文生图：<CommandBadge>{cmdPrefix}{effectiveCommand} 提示词</CommandBadge>
+              </li>
+              <li>
+                指定模型/数量/风格：{" "}
+                <CommandBadge>{cmdPrefix}{effectiveCommand} -m gpt-image-2 -n 1 -s 二次元 云海里的未来城市</CommandBadge>
+              </li>
+              <li>
+                指定画幅：{" "}
+                <CommandBadge>{cmdPrefix}{effectiveCommand} --size 16:9 赛博朋克街景</CommandBadge>
+              </li>
+              <li>
+                回复图片编辑：<CommandBadge>{cmdPrefix}{effectiveEditCommand} 给这张图加上雨夜霓虹</CommandBadge>
+              </li>
+              <li>
+                续改最近图片：<CommandBadge>{cmdPrefix}{effectiveEditCommand} last 改成二次元头像</CommandBadge>
+              </li>
+              <li>
+                管理命令：{" "}
+                <CommandBadge>{cmdPrefix}{effectiveAdminCommand} ping</CommandBadge>{" "}
+                <CommandBadge>{cmdPrefix}{effectiveAdminCommand} status</CommandBadge>{" "}
+                <CommandBadge>{cmdPrefix}{effectiveAdminCommand} token list</CommandBadge>
+              </li>
+            </ul>
+          </div>
+
           <div className="grid gap-4 md:grid-cols-3">
             <div className="space-y-1.5">
               <Label>文生图命令</Label>
@@ -527,6 +633,52 @@ export function ChatGPTImageConfigPage() {
               <Label>最多参考图数量</Label>
               <Input value={referenceImageLimit} onChange={(e) => { setReferenceImageLimit(e.target.value); markDirty(); }} />
               <p className="text-xs text-muted-foreground">图片编辑时最多读取的参考图片数。</p>
+            </div>
+          </div>
+
+          <div className="space-y-2 rounded-md border bg-muted/30 p-3">
+            <div>
+              <Label>消息模板</Label>
+              <p className="text-xs text-muted-foreground">
+                用于最终图片 caption，支持 HTML 标签和占位符。点击下方按钮会把占位符追加到模板末尾。
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {TEMPLATE_PLACEHOLDERS.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  className="rounded border px-1.5 py-0.5 text-[11px] font-mono hover:bg-background"
+                  title={item.key}
+                  onClick={() => {
+                    setMessageTemplate((value) => `${value}${item.key}`);
+                    markDirty();
+                  }}
+                >
+                  {item.label}
+                </button>
+              ))}
+              <button
+                type="button"
+                className="rounded border px-1.5 py-0.5 text-[11px] font-mono hover:bg-background"
+                onClick={() => {
+                  setMessageTemplate((value) => `${value}{?has_reference}\n参考图：{reference_count} 张{/?}`);
+                  markDirty();
+                }}
+              >
+                条件:参考图
+              </button>
+            </div>
+            <Textarea
+              rows={8}
+              maxLength={1000}
+              className="font-mono text-xs"
+              value={messageTemplate}
+              onChange={(e) => { setMessageTemplate(e.target.value); markDirty(); }}
+            />
+            <div className="rounded-md border bg-background p-3 text-xs">
+              <div className="mb-1 font-medium">消息预览</div>
+              <TelegramHtmlPreview value={renderTemplate(messageTemplate, previewValues)} />
             </div>
           </div>
 

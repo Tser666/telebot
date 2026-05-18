@@ -1,4 +1,4 @@
-"""ChatGPT 图片助手 Manifest。"""
+"""ChatGPT2API Manifest。"""
 
 from __future__ import annotations
 
@@ -10,12 +10,20 @@ DEFAULT_STYLE_TEMPLATES = """写实=请以高质量写实摄影风格生成：{p
 二次元=请以精致二次元插画风格生成：{prompt}
 Logo=请生成简洁现代的品牌 Logo 草案，适合矢量化：{prompt}"""
 
+DEFAULT_MESSAGE_TEMPLATE = """<b>ChatGPT2API</b>
+<b>状态:</b> {status}
+<b>提示词:</b> {prompt}
+<b>模型:</b> {model} · <b>数量:</b> {count}
+<b>画幅:</b> {size} · <b>格式:</b> {image_format}
+<b>耗时:</b> {elapsed}"""
+
 MANIFEST = Manifest(
     key="chatgpt_image",
-    display_name="ChatGPT 图片助手",
+    display_name="ChatGPT2API",
     version="0.1.0",
     author="builtin",
-    description="按 chatgpt2api 的核心思路在 Telegram 内完成 ChatGPT 图片生成、编辑与 token 池管理。",
+    description="实验性：按 chatgpt2api 的核心思路在 Telegram 内完成 ChatGPT 图片生成、编辑与 token 池管理。",
+    experimental=True,
     permissions=["send_message", "edit_message", "read_chat", "send_file"],
     config_schema={
         "type": "object",
@@ -150,6 +158,14 @@ MANIFEST = Manifest(
                 "description": "image 表示按图片发送；file 表示按文件发送；auto 表示优先图片，失败后改发文件。",
                 "default": "auto",
                 "enum": ["auto", "image", "file"],
+                "level": "account",
+            },
+            "message_template": {
+                "type": "string",
+                "title": "消息模板",
+                "description": "用于最终图片 caption 的输出格式。支持 {status}、{prompt}、{model}、{count}、{size}、{image_format}、{elapsed} 等占位符。",
+                "default": DEFAULT_MESSAGE_TEMPLATE,
+                "x-ui-widget": "textarea",
                 "level": "account",
             },
             "style_templates": {
@@ -310,7 +326,7 @@ MANIFEST = Manifest(
                 "type": "string",
                 "title": "命令说明",
                 "description": "只读说明：所有主命令都可自定义，子命令固定为 ping、models、status、version、refresh、token、import、proxy。",
-                "default": "文生图：,{command} [-m 模型] [-n 数量] [-s 风格] 提示词\n图片编辑：,{edit_command} 提示词；或 ,{edit_command} last 提示词\n管理：,{admin_command} ping/models/status/version/refresh/token/import/proxy",
+                "default": "文生图：,{command} [-m 模型] [-n 数量] [-s 风格] [--size 画幅] 提示词\n图片编辑：回复图片后 ,{edit_command} 提示词；或 ,{edit_command} last 提示词\n管理：,{admin_command} ping/models/status/version/refresh/token/import/proxy",
                 "readOnly": True,
                 "level": "account",
             },

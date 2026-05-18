@@ -216,62 +216,121 @@
     scrollbar-width: thin;
   }
 
-  .liquid-glass {
+  .liquid-glass,
+  .liquid-tab-list {
     position: relative;
     isolation: isolate;
     overflow: hidden;
-    border: 1px solid hsl(var(--background) / 0.62);
+    transform: translateZ(0);
+    border: 1px solid hsl(var(--background) / 0.30);
     background:
-      linear-gradient(135deg, hsl(var(--card) / 0.82), hsl(var(--card) / 0.58)),
-      radial-gradient(circle at 18% 0%, hsl(var(--primary) / 0.16), transparent 42%),
-      radial-gradient(circle at 92% 18%, hsl(var(--foreground) / 0.08), transparent 38%);
+      linear-gradient(118deg, transparent 0 20%, hsl(var(--background) / 0.38) 30%, transparent 46% 100%),
+      linear-gradient(135deg, hsl(var(--background) / 0.46), hsl(var(--background) / 0.12) 52%, hsl(var(--foreground) / 0.08)),
+      linear-gradient(160deg, hsl(var(--background) / 0.34) 0%, transparent 36%),
+      linear-gradient(320deg, transparent 0 58%, hsl(var(--primary) / 0.18) 78%, transparent 100%),
+      hsl(var(--card) / 0.12);
+    background-blend-mode: screen, normal, screen, soft-light, normal;
     box-shadow:
-      0 20px 60px hsl(222 47% 8% / 0.18),
+      0 26px 72px hsl(222 47% 8% / 0.22),
+      0 8px 24px hsl(222 47% 8% / 0.10),
       inset 0 1px 0 hsl(var(--background) / 0.78),
-      inset 0 -1px 0 hsl(var(--foreground) / 0.08);
-    -webkit-backdrop-filter: blur(24px) saturate(180%);
-    backdrop-filter: blur(24px) saturate(180%);
+      inset 0 0 0 1px hsl(var(--background) / 0.18),
+      inset 0 -1px 0 hsl(var(--foreground) / 0.10),
+      inset 0 -22px 44px hsl(var(--foreground) / 0.06);
+    -webkit-backdrop-filter: blur(42px) saturate(260%) brightness(1.12) contrast(1.06);
+    backdrop-filter: blur(42px) saturate(260%) brightness(1.12) contrast(1.06);
   }
 
-  .liquid-glass::before {
+  .liquid-glass > *,
+  .liquid-tab-list > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  .liquid-glass::before,
+  .liquid-tab-list::before {
     content: "";
     position: absolute;
     inset: 0;
-    z-index: -1;
+    z-index: 0;
     border-radius: inherit;
     background:
-      linear-gradient(180deg, hsl(var(--background) / 0.56), transparent 42%),
-      linear-gradient(90deg, transparent, hsl(var(--background) / 0.24), transparent);
-    opacity: 0.9;
+      linear-gradient(118deg, hsl(var(--background) / 0.62) 0%, transparent 20% 58%, hsl(var(--background) / 0.22) 74%, transparent 100%),
+      linear-gradient(180deg, hsl(var(--background) / 0.46), transparent 36%),
+      linear-gradient(90deg, transparent 0 36%, hsl(var(--background) / 0.22) 50%, transparent 68% 100%),
+      linear-gradient(205deg, transparent 0 70%, hsl(var(--foreground) / 0.08) 100%);
+    opacity: 0.82;
     pointer-events: none;
+    mix-blend-mode: screen;
   }
 
-  .liquid-glass::after {
+  .liquid-glass::after,
+  .liquid-tab-list::after {
     content: "";
     position: absolute;
     inset: 1px;
-    z-index: -1;
+    z-index: 0;
     border-radius: inherit;
-    border: 1px solid hsl(var(--background) / 0.28);
+    background:
+      linear-gradient(150deg, hsl(var(--background) / 0.22), transparent 34% 64%, hsl(var(--foreground) / 0.08));
+    box-shadow:
+      inset 0 0 0 1px hsl(var(--background) / 0.20),
+      inset 12px 0 24px hsl(var(--background) / 0.12),
+      inset -14px -18px 28px hsl(var(--foreground) / 0.06);
     pointer-events: none;
   }
 
   .liquid-bottom-nav {
     border-radius: 2rem;
     background:
-      linear-gradient(135deg, hsl(var(--card) / 0.78), hsl(var(--card) / 0.50)),
-      radial-gradient(circle at 16% 0%, hsl(var(--primary) / 0.18), transparent 45%),
-      radial-gradient(circle at 86% 14%, hsl(var(--foreground) / 0.10), transparent 42%);
+      linear-gradient(116deg, transparent 0 18%, hsl(var(--background) / 0.44) 30%, transparent 48%),
+      linear-gradient(135deg, hsl(var(--background) / 0.50), hsl(var(--background) / 0.12) 54%, hsl(var(--foreground) / 0.10)),
+      linear-gradient(180deg, hsl(var(--background) / 0.42), transparent 50%),
+      linear-gradient(310deg, transparent 0 56%, hsl(var(--primary) / 0.18) 78%, transparent 100%),
+      hsl(var(--card) / 0.10);
     box-shadow:
-      0 18px 48px hsl(222 47% 8% / 0.24),
-      0 4px 14px hsl(222 47% 8% / 0.10),
+      0 28px 82px hsl(222 47% 8% / 0.28),
+      0 8px 24px hsl(222 47% 8% / 0.14),
       inset 0 1px 0 hsl(var(--background) / 0.82),
-      inset 0 -1px 0 hsl(var(--foreground) / 0.08);
+      inset 0 0 0 1px hsl(var(--background) / 0.20),
+      inset 0 -24px 42px hsl(var(--foreground) / 0.06);
+    -webkit-backdrop-filter: blur(48px) saturate(280%) brightness(1.14) contrast(1.08);
+    backdrop-filter: blur(48px) saturate(280%) brightness(1.14) contrast(1.08);
+  }
+
+  .liquid-bottom-nav::before {
+    background:
+      linear-gradient(105deg, transparent 0 22%, hsl(var(--background) / 0.58) 36%, transparent 52% 100%),
+      linear-gradient(180deg, hsl(var(--background) / 0.52), transparent 34%),
+      linear-gradient(90deg, transparent, hsl(var(--primary) / 0.12), transparent);
+    opacity: 0.9;
+  }
+
+  .liquid-bottom-nav::after {
+    box-shadow:
+      inset 0 0 0 1px hsl(var(--background) / 0.24),
+      inset 14px 0 30px hsl(var(--background) / 0.14),
+      inset -16px -22px 34px hsl(var(--foreground) / 0.07),
+      0 1px 0 hsl(var(--background) / 0.24);
   }
 
   .liquid-nav-item {
     position: relative;
     overflow: hidden;
+    border: 1px solid transparent;
+  }
+
+  .liquid-tab-trigger {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid transparent;
+  }
+
+  .liquid-nav-item > *,
+  .liquid-tab-trigger > *,
+  .liquid-sidebar-link > * {
+    position: relative;
+    z-index: 1;
   }
 
   .liquid-nav-item::before {
@@ -279,10 +338,13 @@
     position: absolute;
     inset: 0;
     border-radius: inherit;
-    background: linear-gradient(180deg, hsl(var(--background) / 0.44), transparent);
+    background:
+      linear-gradient(180deg, hsl(var(--background) / 0.42), transparent 72%),
+      linear-gradient(135deg, hsl(var(--background) / 0.26), transparent 42%);
     opacity: 0;
     transition: opacity 160ms ease;
     pointer-events: none;
+    mix-blend-mode: screen;
   }
 
   .liquid-nav-item:hover::before,
@@ -292,30 +354,208 @@
 
   .liquid-nav-item-active {
     color: hsl(var(--foreground));
-    background: hsl(var(--background) / 0.72);
+    border-color: hsl(var(--background) / 0.34);
+    background:
+      linear-gradient(112deg, transparent 0 18%, hsl(var(--background) / 0.46) 36%, transparent 62%),
+      linear-gradient(180deg, hsl(var(--background) / 0.58), hsl(var(--background) / 0.22)),
+      linear-gradient(320deg, transparent 0 62%, hsl(var(--primary) / 0.14) 100%),
+      hsl(var(--card) / 0.12);
     box-shadow:
-      0 8px 22px hsl(222 47% 8% / 0.12),
-      inset 0 1px 0 hsl(var(--background) / 0.85),
-      inset 0 -1px 0 hsl(var(--foreground) / 0.08);
+      0 12px 30px hsl(222 47% 8% / 0.18),
+      inset 0 1px 0 hsl(var(--background) / 0.82),
+      inset 0 0 0 1px hsl(var(--background) / 0.26),
+      inset 0 -1px 0 hsl(var(--foreground) / 0.10),
+      inset 0 -10px 18px hsl(var(--foreground) / 0.05);
+    -webkit-backdrop-filter: blur(26px) saturate(240%) brightness(1.10);
+    backdrop-filter: blur(26px) saturate(240%) brightness(1.10);
     transform: translateY(-1px);
   }
 
-  .liquid-tab-list {
-    border: 1px solid hsl(var(--border) / 0.62);
+  .liquid-nav-item-active::after {
+    content: "";
+    position: absolute;
+    inset: 1px;
+    border-radius: inherit;
     background:
-      linear-gradient(135deg, hsl(var(--muted) / 0.78), hsl(var(--muted) / 0.48)),
-      radial-gradient(circle at 12% 0%, hsl(var(--background) / 0.62), transparent 48%);
+      linear-gradient(135deg, hsl(var(--background) / 0.18), transparent 42% 72%, hsl(var(--foreground) / 0.06));
     box-shadow:
-      inset 0 1px 0 hsl(var(--background) / 0.68),
-      0 8px 24px hsl(222 47% 8% / 0.06);
-    -webkit-backdrop-filter: blur(16px) saturate(160%);
-    backdrop-filter: blur(16px) saturate(160%);
+      inset 0 0 0 1px hsl(var(--background) / 0.20),
+      inset 8px 0 16px hsl(var(--background) / 0.12),
+      inset -8px -10px 16px hsl(var(--foreground) / 0.05);
+    pointer-events: none;
+  }
+
+  .liquid-tab-list {
+    border-color: hsl(var(--background) / 0.26);
+    background:
+      linear-gradient(116deg, transparent 0 20%, hsl(var(--background) / 0.34) 32%, transparent 48%),
+      linear-gradient(135deg, hsl(var(--background) / 0.40), hsl(var(--background) / 0.12) 54%, hsl(var(--foreground) / 0.06)),
+      linear-gradient(180deg, hsl(var(--background) / 0.32), transparent 60%),
+      hsl(var(--muted) / 0.10);
+    box-shadow:
+      inset 0 1px 0 hsl(var(--background) / 0.72),
+      inset 0 0 0 1px hsl(var(--background) / 0.14),
+      inset 0 -1px 0 hsl(var(--foreground) / 0.06),
+      0 10px 28px hsl(222 47% 8% / 0.10);
+    -webkit-backdrop-filter: blur(32px) saturate(230%) brightness(1.08);
+    backdrop-filter: blur(32px) saturate(230%) brightness(1.08);
   }
 
   .liquid-tab-trigger[data-state="active"] {
+    border: 1px solid hsl(var(--background) / 0.34);
+    background:
+      linear-gradient(112deg, transparent 0 18%, hsl(var(--background) / 0.48) 38%, transparent 64%),
+      linear-gradient(180deg, hsl(var(--background) / 0.58), hsl(var(--background) / 0.24)),
+      linear-gradient(320deg, transparent 0 64%, hsl(var(--primary) / 0.14) 100%),
+      hsl(var(--card) / 0.12);
     box-shadow:
-      0 6px 16px hsl(222 47% 8% / 0.08),
-      inset 0 1px 0 hsl(var(--background) / 0.82);
+      0 10px 24px hsl(222 47% 8% / 0.16),
+      inset 0 1px 0 hsl(var(--background) / 0.82),
+      inset 0 0 0 1px hsl(var(--background) / 0.26),
+      inset 0 -1px 0 hsl(var(--foreground) / 0.10),
+      inset 0 -10px 18px hsl(var(--foreground) / 0.05);
+    -webkit-backdrop-filter: blur(24px) saturate(240%) brightness(1.10);
+    backdrop-filter: blur(24px) saturate(240%) brightness(1.10);
+    transform: translateY(-1px);
+  }
+
+  .liquid-tab-trigger[data-state="active"]::after {
+    content: "";
+    position: absolute;
+    inset: 1px;
+    border-radius: inherit;
+    background:
+      linear-gradient(135deg, hsl(var(--background) / 0.18), transparent 42% 72%, hsl(var(--foreground) / 0.05));
+    box-shadow:
+      inset 0 0 0 1px hsl(var(--background) / 0.18),
+      inset 8px 0 16px hsl(var(--background) / 0.12),
+      inset -8px -10px 16px hsl(var(--foreground) / 0.04);
+    pointer-events: none;
+  }
+
+  .liquid-sidebar {
+    border-radius: 0;
+    border-width: 0 1px 0 0;
+    border-color: hsl(var(--background) / 0.26);
+    outline-width: 0;
+    background:
+      linear-gradient(118deg, transparent 0 14%, hsl(var(--background) / 0.38) 30%, transparent 48%),
+      linear-gradient(180deg, hsl(var(--background) / 0.42), hsl(var(--background) / 0.14) 56%, hsl(var(--foreground) / 0.06)),
+      linear-gradient(300deg, transparent 0 54%, hsl(var(--primary) / 0.12) 78%, transparent 100%),
+      hsl(var(--card) / 0.14);
+    box-shadow:
+      16px 0 48px hsl(222 47% 8% / 0.14),
+      3px 0 14px hsl(222 47% 8% / 0.08),
+      inset -1px 0 0 hsl(var(--background) / 0.28),
+      inset 1px 0 0 hsl(var(--background) / 0.22),
+      inset -18px 0 36px hsl(var(--foreground) / 0.04);
+    -webkit-backdrop-filter: blur(40px) saturate(240%) brightness(1.10);
+    backdrop-filter: blur(40px) saturate(240%) brightness(1.10);
+  }
+
+  .liquid-sidebar-drawer {
+    border-radius: 0 1rem 1rem 0;
+    transform: translate3d(-100%, 0, 0) translateZ(0);
+    transition: transform 200ms ease-out;
+    will-change: transform;
+  }
+
+  .liquid-sidebar-drawer[data-state="open"] {
+    transform: translate3d(0, 0, 0) translateZ(0);
+  }
+
+  .liquid-sidebar-drawer[data-state="closed"] {
+    transform: translate3d(-100%, 0, 0) translateZ(0);
+  }
+
+  .liquid-sidebar::before {
+    background:
+      linear-gradient(112deg, transparent 0 18%, hsl(var(--background) / 0.52) 34%, transparent 52%),
+      linear-gradient(180deg, hsl(var(--background) / 0.46), transparent 30%),
+      linear-gradient(90deg, transparent 70%, hsl(var(--background) / 0.20));
+    opacity: 0.86;
+  }
+
+  .liquid-sidebar::after {
+    inset: 0;
+    border-width: 0 1px 0 0;
+    box-shadow:
+      inset -1px 0 0 hsl(var(--background) / 0.28),
+      inset -16px 0 30px hsl(var(--foreground) / 0.04),
+      1px 0 0 hsl(var(--background) / 0.18);
+  }
+
+  .liquid-sidebar-header,
+  .liquid-sidebar-footer {
+    background:
+      linear-gradient(180deg, hsl(var(--background) / 0.18), transparent);
+    box-shadow:
+      inset 0 1px 0 hsl(var(--background) / 0.30),
+      inset 0 -1px 0 hsl(var(--foreground) / 0.04);
+  }
+
+  .liquid-sidebar-header {
+    border-bottom: 1px solid hsl(var(--background) / 0.16);
+  }
+
+  .liquid-sidebar-footer {
+    border-top: 1px solid hsl(var(--background) / 0.14);
+  }
+
+  .liquid-sidebar-link {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid transparent;
+  }
+
+  .liquid-sidebar-link::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background:
+      linear-gradient(112deg, transparent 0 18%, hsl(var(--background) / 0.38) 36%, transparent 60%),
+      linear-gradient(180deg, hsl(var(--background) / 0.28), transparent 72%);
+    opacity: 0;
+    transition: opacity 160ms ease;
+    pointer-events: none;
+    mix-blend-mode: screen;
+  }
+
+  .liquid-sidebar-link:hover::before,
+  .liquid-sidebar-link-active::before {
+    opacity: 1;
+  }
+
+  .liquid-sidebar-link-active {
+    border-color: hsl(var(--background) / 0.30);
+    background:
+      linear-gradient(112deg, transparent 0 16%, hsl(var(--background) / 0.46) 36%, transparent 64%),
+      linear-gradient(180deg, hsl(var(--background) / 0.48), hsl(var(--background) / 0.16)),
+      linear-gradient(300deg, transparent 0 62%, hsl(var(--primary) / 0.14) 100%),
+      hsl(var(--card) / 0.12);
+    box-shadow:
+      0 10px 26px hsl(222 47% 8% / 0.14),
+      inset 0 1px 0 hsl(var(--background) / 0.78),
+      inset 0 0 0 1px hsl(var(--background) / 0.24),
+      inset 0 -1px 0 hsl(var(--foreground) / 0.09);
+    -webkit-backdrop-filter: blur(22px) saturate(220%) brightness(1.08);
+    backdrop-filter: blur(22px) saturate(220%) brightness(1.08);
+    transform: translateX(1px);
+  }
+
+  .liquid-sidebar-link-active::after {
+    content: "";
+    position: absolute;
+    inset: 1px;
+    border-radius: inherit;
+    background:
+      linear-gradient(135deg, hsl(var(--background) / 0.16), transparent 42% 72%, hsl(var(--foreground) / 0.05));
+    box-shadow:
+      inset 0 0 0 1px hsl(var(--background) / 0.18),
+      inset 8px 0 16px hsl(var(--background) / 0.10),
+      inset -8px -10px 16px hsl(var(--foreground) / 0.04);
+    pointer-events: none;
   }
 
   .prose-pwa-safe {

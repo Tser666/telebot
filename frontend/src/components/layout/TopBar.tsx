@@ -1,7 +1,7 @@
 // 顶栏：移动端汉堡按钮 + 副标题（仅 sm+ 显示）+ 系统健康灯 + 更新检查 + 紧急停用 + 登出
 // iOS PWA：背景色延伸到 safe-area-inset-top（与 black-translucent 状态栏配合），
 // 内容区高度仍维持 56px。
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -38,6 +38,7 @@ export function TopBar({ username, onMenuClick }: TopBarProps) {
   const nav = useNavigate();
   const qc = useQueryClient();
   const [updateOpen, setUpdateOpen] = useState(false);
+  const isStandalone = useStandaloneDisplayMode();
   const mut = useMutation({
     mutationFn: logout,
     onSettled: () => {
@@ -57,16 +58,25 @@ export function TopBar({ username, onMenuClick }: TopBarProps) {
       "
     >
       <div className="flex min-w-0 items-center gap-2">
-        {/* 移动端汉堡按钮，桌面隐藏 */}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="md:hidden"
-          onClick={onMenuClick}
-          aria-label="打开导航菜单"
-        >
-          <Menu className="h-5 w-5" />
-        </Button>
+        {isStandalone ? (
+          <div className="md:hidden">
+            <div className="text-base font-semibold leading-none">TelePilot</div>
+            <div className="mt-0.5 text-[11px] leading-none text-muted-foreground">
+              管理控制台
+            </div>
+          </div>
+        ) : (
+          /* 移动端汉堡按钮，桌面隐藏；PWA 下由底栏承担导航 */
+          <Button
+            variant="ghost"
+            size="icon"
+            className="md:hidden"
+            onClick={onMenuClick}
+            aria-label="打开导航菜单"
+          >
+            <Menu className="h-5 w-5" />
+          </Button>
+        )}
         <div className="hidden truncate text-sm text-muted-foreground sm:block">
           TelePilot 管理控制台
         </div>
@@ -103,6 +113,37 @@ export function TopBar({ username, onMenuClick }: TopBarProps) {
       </div>
     </header>
   );
+}
+
+function isStandaloneDisplayMode() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const navigatorWithStandalone = window.navigator as Navigator & {
+    standalone?: boolean;
+  };
+  return (
+    window.matchMedia?.("(display-mode: standalone)").matches === true ||
+    navigatorWithStandalone.standalone === true
+  );
+}
+
+function useStandaloneDisplayMode() {
+  const [standalone, setStandalone] = useState(isStandaloneDisplayMode);
+
+  useEffect(() => {
+    const media = window.matchMedia?.("(display-mode: standalone)");
+    if (!media) {
+      return;
+    }
+
+    const update = () => setStandalone(isStandaloneDisplayMode());
+    update();
+    media.addEventListener?.("change", update);
+    return () => media.removeEventListener?.("change", update);
+  }, []);
+
+  return standalone;
 }
 
 function ThemeSwitcher() {

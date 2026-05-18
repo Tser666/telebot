@@ -47,8 +47,8 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
           onClick={onNavigate}
           className={({ isActive }) =>
             cn(
-              "flex items-center gap-2 rounded-md px-3 py-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-              isActive && "bg-accent text-accent-foreground",
+              "liquid-sidebar-link flex items-center gap-2 rounded-md px-3 py-2 text-muted-foreground transition-all hover:text-accent-foreground",
+              isActive && "liquid-sidebar-link-active text-accent-foreground",
             )
           }
         >
@@ -63,11 +63,11 @@ function NavList({ onNavigate }: { onNavigate?: () => void }) {
 function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <>
-      <div className="flex h-14 shrink-0 items-center border-b px-4 text-base font-semibold">
+      <div className="liquid-sidebar-header flex h-14 shrink-0 items-center px-4 text-base font-semibold">
         TelePilot
       </div>
       <NavList onNavigate={onNavigate} />
-      <div className="shrink-0 border-t p-3 text-xs text-muted-foreground">
+      <div className="liquid-sidebar-footer shrink-0 p-3 text-xs text-muted-foreground">
         {APP_VERSION_LABEL}
       </div>
     </>
@@ -77,7 +77,7 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
 // 桌面常驻侧栏：< md 隐藏，由 MobileSidebar 接管
 export function Sidebar() {
   return (
-    <aside className="hidden w-56 shrink-0 flex-col border-r bg-card md:flex">
+    <aside className="liquid-glass liquid-sidebar hidden w-56 shrink-0 flex-col md:flex">
       <SidebarBody />
     </aside>
   );
@@ -97,16 +97,15 @@ export function MobileSidebar({ open, onOpenChange }: MobileSidebarProps) {
         <DialogPrimitive.Overlay
           className={cn(
             "fixed inset-0 z-50 bg-black/60 transition-opacity duration-200 md:hidden",
-            "data-[state=closed]:opacity-0 data-[state=open]:opacity-100",
+            "data-[state=closed]:pointer-events-none data-[state=closed]:opacity-0 data-[state=open]:opacity-100",
           )}
         />
         <DialogPrimitive.Content
           className={cn(
-            "fixed inset-y-0 left-0 z-50 flex w-64 max-w-[80vw] flex-col border-r bg-card shadow-lg md:hidden",
+            "liquid-glass liquid-sidebar liquid-sidebar-drawer fixed inset-y-0 left-0 z-[60] flex w-64 max-w-[80vw] flex-col md:hidden",
             // 安全区适配：iPhone 横屏时左侧刘海，全屏 PWA 顶/底状态栏区
             "pl-[env(safe-area-inset-left)] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]",
-            "transition-transform duration-200 ease-out",
-            "data-[state=closed]:-translate-x-full data-[state=open]:translate-x-0",
+            "data-[state=closed]:pointer-events-none",
           )}
           // 屏幕阅读器需要 Title；视觉上隐藏
           aria-describedby={undefined}

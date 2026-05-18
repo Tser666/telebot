@@ -15,6 +15,7 @@ from app.worker.plugins.builtin.chatgpt_image.plugin import (
     ChatGPTImagePlugin,
     _load_config,
     _parse_image_args,
+    _render_message_template,
 )
 from app.worker.plugins.builtin.chatgpt_image.token_pool import (
     TokenEntry,
@@ -31,8 +32,13 @@ def test_chatgpt_image_manifest_has_chinese_config_descriptions() -> None:
     props = schema["properties"]
 
     assert MANIFEST.key == "chatgpt_image"
+    assert MANIFEST.display_name == "ChatGPT2API"
+    assert MANIFEST.experimental is True
+    assert MANIFEST.to_dict()["x-experimental"] is True
     assert schema["x-ui-mode"] == "single"
     assert props["command"]["title"] == "文生图命令"
+    assert props["message_template"]["title"] == "消息模板"
+    assert "{model}" in props["message_template"]["description"]
     assert "一条一条保存" in props["tokens"]["description"]
     assert "proxy_id" not in props
     assert "proxy_url" not in props
@@ -69,6 +75,15 @@ def test_chatgpt_image_config_and_args_are_customizable() -> None:
     assert parsed.count == 3
     assert parsed.style == "海报"
     assert parsed.prompt == "咖啡 新品"
+
+
+def test_message_template_renders_placeholders_and_conditionals() -> None:
+    rendered = _render_message_template(
+        "{status} {model}{?has_reference} ref={reference_count}{/?}",
+        {"status": "已完成", "model": "gpt-image-2", "has_reference": "是", "reference_count": "1"},
+    )
+
+    assert rendered == "已完成 gpt-image-2 ref=1"
 
 
 def test_token_pool_round_robin_and_failure_skip() -> None:

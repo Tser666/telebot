@@ -1,4 +1,4 @@
-"""ChatGPT 图片助手。
+"""ChatGPT2API。
 
 这是一个 TelePilot 原生插件版的 chatgpt2api-lite：token 池保存在插件配置中，
 运行时按 token 轮询调用 ChatGPT Web 图片链路，并把结果发回 Telegram。
@@ -29,6 +29,7 @@ from .importers import (
     extract_auth_session_access_token,
     parse_names,
 )
+from .manifest import DEFAULT_MESSAGE_TEMPLATE
 from .token_pool import (
     TokenEntry,
     TokenPool,
@@ -64,6 +65,7 @@ CONFIG_RELOAD_KEYS = {
     "default_size",
     "image_format",
     "output_mode",
+    "message_template",
     "style_templates",
     "default_style",
     "timeout",
@@ -101,6 +103,7 @@ class ChatGPTImageConfig:
     default_size: str = "1:1"
     image_format: str = "png"
     output_mode: str = "auto"
+    message_template: str = DEFAULT_MESSAGE_TEMPLATE
     style_templates: dict[str, str] = None  # type: ignore[assignment]
     default_style: str = ""
     timeout: int = 300
@@ -190,6 +193,7 @@ def _load_config(raw: dict[str, Any] | None) -> ChatGPTImageConfig:
         default_size=str(cfg.get("default_size") or "1:1").strip() or "1:1",
         image_format=image_format,
         output_mode=output_mode,
+        message_template=str(cfg.get("message_template") or DEFAULT_MESSAGE_TEMPLATE).strip() or DEFAULT_MESSAGE_TEMPLATE,
         style_templates=_parse_style_templates(cfg.get("style_templates")),
         default_style=str(cfg.get("default_style") or "").strip(),
         timeout=_int_range(cfg.get("timeout"), 300, 30, 900),
@@ -256,6 +260,16 @@ def _render_style(prompt: str, style: str, templates: dict[str, str]) -> str:
     return template.replace("{prompt}", prompt)
 
 
+def _render_message_template(template: str, values: dict[str, str]) -> str:
+    out = template or DEFAULT_MESSAGE_TEMPLATE
+    out = re.sub(
+        r"\{\?([a-zA-Z0-9_]+)\}([\s\S]*?)\{/\?\}",
+        lambda match: match.group(2) if values.get(match.group(1)) else "",
+        out,
+    )
+    return re.sub(r"\{([a-zA-Z0-9_]+)\}", lambda match: values.get(match.group(1), ""), out)
+
+
 def _parse_image_args(args: list[str], cfg: ChatGPTImageConfig) -> ParsedImageCommand:
     model = cfg.default_model
     count = cfg.default_count
@@ -292,7 +306,7 @@ def _parse_image_args(args: list[str], cfg: ChatGPTImageConfig) -> ParsedImageCo
 @register
 class ChatGPTImagePlugin(Plugin):
     key = "chatgpt_image"
-    display_name = "ChatGPT 图片助手"
+    display_name = "ChatGPT2API"
     message_channels = {"incoming", "outgoing"}
     owner_only = True
     command_config_keys = CONFIG_RELOAD_KEYS
@@ -329,7 +343,7 @@ class ChatGPTImagePlugin(Plugin):
         await self._log(
             ctx,
             "info",
-            f"ChatGPT 图片助手 v{PLUGIN_VERSION} 已启动。",
+            f"ChatGPT2API v{PLUGIN_VERSION} 已启动。",
             commands=[self._cfg.command, self._cfg.edit_command, self._cfg.admin_command],
             token_count=len(self._pool.tokens),
             health_check_enabled=self._cfg.health_check_enabled,
@@ -422,7 +436,7 @@ class ChatGPTImagePlugin(Plugin):
         chat_id = _event_chat_id(event)
         if chat_id is not None and self._cfg.remember_last_image:
             self._last_images_by_chat[int(chat_id)] = [result.data for result in results]
-        await self._send_results(ctx, event, results, parsed.model, prompt, elapsed)
+        await self._send_results(ctx, event, results, parsed, prompt, elapsed, len(reference_images))
         await _safe_edit(event, f"已完成：{len(results)} 张，耗时 {_format_seconds(elapsed)}。")
         await self._log(
             ctx,
@@ -463,17 +477,36 @@ class ChatGPTImagePlugin(Plugin):
         ctx: PluginContext,
         event: Any,
         results: list[ImageResult],
-        model: str,
+        parsed: ParsedImageCommand,
         prompt: str,
         elapsed: float,
+        reference_count: int,
     ) -> None:
         if ctx.client is None:
             return
         chat_id = _event_chat_id(event)
         reply_to = _event_message_id(event)
-        caption = f"ChatGPT 图片助手 · {model} · {_format_seconds(elapsed)}"
-        if self._cfg.log_prompt_preview:
-            caption += f"\n{_preview(prompt, 120)}"
+        caption = _render_message_template(
+            self._cfg.message_template,
+            {
+                "status": "已完成",
+                "prompt": _preview(prompt, 240),
+                "model": parsed.model,
+                "count": str(parsed.count),
+                "result_count": str(len(results)),
+                "size": parsed.size,
+                "style": parsed.style,
+                "image_format": self._cfg.image_format,
+                "output_mode": self._cfg.output_mode,
+                "elapsed": _format_seconds(elapsed),
+                "command": self._cfg.command,
+                "edit_command": self._cfg.edit_command,
+                "admin_command": self._cfg.admin_command,
+                "has_reference": "是" if reference_count else "",
+                "reference_count": str(reference_count),
+                "proxy": self._proxy_label(),
+            },
+        ).strip()
         for idx, result in enumerate(results, start=1):
             ext = result.extension or (".jpg" if self._cfg.image_format == "jpeg" else f".{self._cfg.image_format}")
             file_obj = telegram_file(result.data, f"chatgpt_image_{int(time.time())}_{idx}{ext}")
@@ -520,7 +553,7 @@ class ChatGPTImagePlugin(Plugin):
             elif sub == "ping":
                 await _safe_edit(event, await self._ping_text())
             elif sub == "version":
-                await _safe_edit(event, f"ChatGPT 图片助手 v{PLUGIN_VERSION}\n命令：{self._cfg.command} / {self._cfg.edit_command} / {self._cfg.admin_command}")
+                await _safe_edit(event, f"ChatGPT2API v{PLUGIN_VERSION}\n命令：{self._cfg.command} / {self._cfg.edit_command} / {self._cfg.admin_command}")
             elif sub == "status":
                 await _safe_edit(event, self._status_text())
             elif sub == "refresh":
@@ -535,12 +568,12 @@ class ChatGPTImagePlugin(Plugin):
                 await _safe_edit(event, f"未知管理子命令：{sub}\n\n{self._help_text()}")
         except Exception as exc:  # noqa: BLE001
             await _safe_edit(event, f"管理命令执行失败：{humanize_error(exc)}")
-            await self._log(ctx, "error", "ChatGPT 图片助手管理命令失败。", subcommand=sub, error=humanize_error(exc))
+            await self._log(ctx, "error", "ChatGPT2API 管理命令失败。", subcommand=sub, error=humanize_error(exc))
 
     def _help_text(self) -> str:
         prefix = current_command_prefix()
         return (
-            "ChatGPT 图片助手命令：\n"
+            "ChatGPT2API 命令：\n"
             f"- {prefix}{self._cfg.command} [-m 模型] [-n 数量] [-s 风格] 提示词\n"
             f"- {prefix}{self._cfg.edit_command} 提示词（回复图片使用）\n"
             f"- {prefix}{self._cfg.edit_command} last 提示词\n"
@@ -553,7 +586,7 @@ class ChatGPTImagePlugin(Plugin):
     def _status_text(self) -> str:
         states = self._pool.states()
         lines = [
-            f"ChatGPT 图片助手 v{PLUGIN_VERSION}",
+            f"ChatGPT2API v{PLUGIN_VERSION}",
             f"token 数量：{len(states)}",
             f"默认模型：{self._cfg.default_model}",
             f"代理：{self._proxy_label()}",
