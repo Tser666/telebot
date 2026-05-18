@@ -18,6 +18,20 @@
 
 ---
 
+## [0.18.3] — 2026-05-18 · fixed · 生产环境远程模块库拉取
+
+### Fixed
+- 生产后端 Docker 镜像补充 `git` 与 `openssh-client`，修复 VPS 部署后无法克隆 / 刷新远程模块库内容的问题。
+- 远程模块库执行 git 操作前新增运行环境检查；缺少 git 时返回明确的 `GIT_NOT_FOUND` 业务错误，不再在前端只显示“服务器内部错误”。
+
+### Verification
+- `backend/.venv/bin/ruff check backend/app/services/remote_plugin_service.py backend/app/tests/test_plugin_security_regression.py`
+- `backend/.venv/bin/python -m py_compile backend/app/services/remote_plugin_service.py backend/app/tests/test_plugin_security_regression.py`
+- `backend/.venv/bin/python -m pytest backend/app/tests/test_plugin_security_regression.py -q`
+- `git diff --check`
+
+---
+
 ## [0.18.2] — 2026-05-18 · fixed · AI 原生生图后端接入
 
 ### Added

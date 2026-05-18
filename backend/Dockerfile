@@ -27,9 +27,9 @@ FROM python:3.12-slim AS runtime
 
 WORKDIR /app
 
-# runtime 仅需 cffi/cryptography 用到的 libffi 与 CA 证书
+# runtime 需要 libffi/CA；远程模块库浏览和安装依赖 git，SSH 仓库依赖 openssh-client
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        libffi8 ca-certificates && \
+        libffi8 ca-certificates git openssh-client && \
     rm -rf /var/lib/apt/lists/*
 
 # 从 builder 拷贝已安装的 Python 包与可执行入口（uvicorn/alembic 等都在这里）

@@ -175,6 +175,18 @@ class TestRemotePluginSecurity:
 
         asyncio.get_event_loop().run_until_complete(_test())
 
+    def test_run_git_reports_missing_binary(self, monkeypatch):
+        """运行环境缺少 git 时必须返回可读错误，而不是冒泡成 500。"""
+
+        async def _test():
+            monkeypatch.setattr(svc.shutil, "which", lambda name: None)
+            with pytest.raises(svc.GitOperationFailed) as ex:
+                await svc._run_git("--version")
+            assert ex.value.code == "GIT_NOT_FOUND"
+            assert "缺少 git" in ex.value.message
+
+        asyncio.get_event_loop().run_until_complete(_test())
+
 
 class TestSandboxClientSecurity:
     """SandboxClient 安全测试。"""

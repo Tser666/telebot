@@ -298,13 +298,29 @@ async def _run_git(*args: str, cwd: str | Path | None = None, timeout: float = 1
     Args:
         timeout: git 操作超时秒数，默认 120s。clone 超时会导致半目录被清理。
     """
-    proc = await asyncio.create_subprocess_exec(
-        "git",
-        *args,
-        cwd=str(cwd) if cwd else None,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+    if shutil.which("git") is None:
+        raise GitOperationFailed(
+            "GIT_NOT_FOUND",
+            "服务器运行环境缺少 git，无法拉取远程模块库；请更新生产镜像或在运行环境安装 git。",
+        )
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "git",
+            *args,
+            cwd=str(cwd) if cwd else None,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except FileNotFoundError as exc:
+        raise GitOperationFailed(
+            "GIT_NOT_FOUND",
+            "服务器运行环境缺少 git，无法拉取远程模块库；请更新生产镜像或在运行环境安装 git。",
+        ) from exc
+    except PermissionError as exc:
+        raise GitOperationFailed(
+            "GIT_NOT_EXECUTABLE",
+            "服务器运行环境中的 git 无法执行，请检查容器镜像或文件权限。",
+        ) from exc
     try:
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(), timeout=timeout
