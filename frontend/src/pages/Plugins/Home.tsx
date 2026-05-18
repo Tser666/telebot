@@ -474,7 +474,7 @@ function FeatureZone({
           <div className="space-y-2">
             {features.map((f) => {
               const status = selectedFeatures[f.key] ?? "disabled";
-              const path = featureConfigPath(selectedAccountId, f.key);
+              const path = featureConfigPath(selectedAccountId, f.key, f);
               const canConfigure = Boolean(path);
               return (
                 <div key={f.key} className="flex items-center justify-between rounded-md border p-2">

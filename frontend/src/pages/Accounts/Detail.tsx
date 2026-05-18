@@ -592,7 +592,7 @@ export function AccountDetail() {
                                       variant="outline"
                                       className="h-9 px-3"
                                       onClick={() => {
-                                        const path = featureConfigPath(aid, f.key);
+                                        const path = featureConfigPath(aid, f.key, f);
                                         if (path) {
                                           nav(path);
                                         }

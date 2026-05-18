@@ -1,3 +1,5 @@
+import type { FeatureInfo } from "@/api/types";
+
 export const FEATURE_CONFIG_PAGE_KEYS = new Set([
   "auto_reply",
   "autorepeat",
@@ -10,7 +12,9 @@ export const FEATURE_CONFIG_PAGE_KEYS = new Set([
 export function featureConfigPath(
   aid: number | null | undefined,
   key: string,
+  feature?: Pick<FeatureInfo, "config_schema"> | null,
 ): string | null {
-  if (!aid || !key || !FEATURE_CONFIG_PAGE_KEYS.has(key)) return null;
+  if (!aid || !key) return null;
+  if (!FEATURE_CONFIG_PAGE_KEYS.has(key) && !feature?.config_schema) return null;
   return `/accounts/${aid}/features/${key}`;
 }
