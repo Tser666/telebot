@@ -315,6 +315,18 @@ def test_probe_alembic_db_connect_failure() -> None:
     assert out.ok is False
 
 
+def test_run_git_without_worktree_returns_deploy_hint(monkeypatch) -> None:
+    """生产容器没有 .git 时返回中文部署提示，而不是裸 git root 错误。"""
+    monkeypatch.setattr(sh, "_git_root", lambda: None)
+
+    out, err, rc = sh._run_git("fetch", "origin")
+
+    assert out == ""
+    assert rc == 1
+    assert "不是 Git 工作树" in err
+    assert "git root not found" not in err
+
+
 def test_read_process_stats_prefers_psutil(monkeypatch) -> None:
     """资源面板优先用 psutil 读取进程 CPU/RSS/USS，避免 Linux/Oracle 上 ps 输出差异。
 

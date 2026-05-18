@@ -17,7 +17,7 @@ export async function installRemotePlugin(
 
 export async function enableRemotePlugin(
   name: string
-): Promise<{ ok: boolean; name: string; enabled: boolean }> {
+): Promise<{ ok: boolean; name: string; enabled: boolean; applied?: number }> {
   const { data } = await api.post(`${BASE}/${encodeURIComponent(name)}/enable`);
   return data;
 }

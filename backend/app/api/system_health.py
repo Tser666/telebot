@@ -1079,11 +1079,17 @@ def _git_root() -> Path | None:
     return None
 
 
+GIT_WORKTREE_UNAVAILABLE_MESSAGE = (
+    "当前运行环境不是 Git 工作树，无法在应用容器内执行 git 更新。"
+    "如果你使用 Docker / 一键部署，请在服务器上进入部署目录，重新拉取镜像或运行部署脚本更新。"
+)
+
+
 def _run_git(*args: str, timeout: int = 30) -> tuple[str, str, int]:
     """同步执行 git 命令，返回 (stdout, stderr, returncode)。"""
     root = _git_root()
     if not root:
-        return "", "git root not found", 1
+        return "", GIT_WORKTREE_UNAVAILABLE_MESSAGE, 1
     try:
         result = subprocess.run(
             ["git"] + list(args),
@@ -1104,6 +1110,7 @@ class CheckUpdateResponse(BaseModel):
     current_commit: str | None = None
     remote_commit: str | None = None
     ahead: int = 0
+    changed_files: list[str] = Field(default_factory=list)
     error: str | None = None
 
 
@@ -1123,8 +1130,11 @@ class RestartResponse(BaseModel):
 async def check_update(_user: CurrentUser) -> CheckUpdateResponse:
     """仅 git fetch + 对比本地/远程 commit，不拉取代码。"""
     try:
+        if _git_root() is None:
+            return CheckUpdateResponse(error=GIT_WORKTREE_UNAVAILABLE_MESSAGE)
+
         fetch_out, fetch_err, fetch_rc = await asyncio.to_thread(
-            _run_git, "fetch", "origin", timeout=30
+            _run_git, "fetch", "origin", "main:refs/remotes/origin/main", timeout=30
         )
         if fetch_rc != 0:
             return CheckUpdateResponse(error=f"git fetch 失败: {fetch_err or fetch_out}")
@@ -1139,31 +1149,28 @@ async def check_update(_user: CurrentUser) -> CheckUpdateResponse:
             _run_git, "rev-parse", "origin/main", timeout=10
         )
         if remote_rc != 0:
-            # 尝试 origin/master 作为 fallback
-            remote_out, _, remote_rc = await asyncio.to_thread(
-                _run_git, "rev-parse", "origin/master", timeout=10
-            )
-        if remote_rc != 0:
-            return CheckUpdateResponse(error="无法获取远程 commit（origin/main 或 origin/master）")
+            return CheckUpdateResponse(error="无法获取远程 commit（仅检查 origin/main）")
 
         current = head_out[:12]
         remote = remote_out[:12]
         has_update = head_out != remote_out
 
-        # 计算 ahead（本地落后远程多少个 commit）
-        ahead_out, _, ahead_rc = await asyncio.to_thread(
-            _run_git, "rev-list", "--count", f"{remote_out}..{head_out}", timeout=10
-        )
-        behind_out, _, _ = await asyncio.to_thread(
+        # 计算本地落后远程多少个 commit；前端展示的是待拉取数量。
+        behind_out, _, behind_rc = await asyncio.to_thread(
             _run_git, "rev-list", "--count", f"{head_out}..{remote_out}", timeout=10
         )
-        behind = int(behind_out) if not _ else 0
+        behind = int(behind_out) if not behind_rc else 0
+        changed_out, _, changed_rc = await asyncio.to_thread(
+            _run_git, "diff", "--name-only", "HEAD..origin/main", timeout=10
+        )
+        changed_files = changed_out.splitlines()[:80] if changed_rc == 0 and changed_out else []
 
         return CheckUpdateResponse(
             has_update=has_update and behind > 0,
             current_commit=current,
             remote_commit=remote,
             ahead=behind,
+            changed_files=changed_files,
         )
     except Exception as e:  # noqa: BLE001
         return CheckUpdateResponse(error=f"{type(e).__name__}: {str(e)[:200]}")
@@ -1173,14 +1180,12 @@ async def check_update(_user: CurrentUser) -> CheckUpdateResponse:
 async def pull_update(_user: CurrentUser) -> PullUpdateResponse:
     """仅执行 git pull，不重启。"""
     try:
+        if _git_root() is None:
+            return PullUpdateResponse(error=GIT_WORKTREE_UNAVAILABLE_MESSAGE)
+
         out, err, rc = await asyncio.to_thread(
             _run_git, "pull", "origin", "main", timeout=60
         )
-        if rc != 0:
-            # 尝试 master
-            out, err, rc = await asyncio.to_thread(
-                _run_git, "pull", "origin", "master", timeout=60
-            )
         if rc != 0:
             return PullUpdateResponse(error=f"git pull 失败: {err or out}")
 
@@ -1208,7 +1213,7 @@ async def restart_app(_user: CurrentUser) -> RestartResponse:
     try:
         root = _git_root()
         if not root:
-            return RestartResponse(error="git root not found")
+            return RestartResponse(error=GIT_WORKTREE_UNAVAILABLE_MESSAGE)
 
         # 检测运行方式：有 docker-compose.yml 用 docker，否则用 make
         compose = root / "docker-compose.yml"

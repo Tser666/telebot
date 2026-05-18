@@ -1207,6 +1207,7 @@ export interface CheckUpdateResult {
   current_commit: string | null;
   remote_commit: string | null;
   ahead: number;
+  changed_files: string[];
   error: string | null;
 }
 export interface PullUpdateResult {

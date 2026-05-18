@@ -19,7 +19,7 @@ import type {
 type Step =
   | { kind: "checking" }
   | { kind: "up_to_date"; commit: string }
-  | { kind: "has_update"; current: string; remote: string; ahead: number }
+  | { kind: "has_update"; current: string; remote: string; ahead: number; changedFiles: string[] }
   | { kind: "pulling" }
   | { kind: "pulled"; newCommit: string | null; summary: string | null }
   | { kind: "pull_failed"; error: string }
@@ -50,6 +50,7 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
           current: res.current_commit || "?",
           remote: res.remote_commit || "?",
           ahead: res.ahead,
+          changedFiles: res.changed_files ?? [],
         });
       }
     } catch (e) {
@@ -147,7 +148,7 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
           {step?.kind === "checking" && (
             <div className="flex items-center gap-3 text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin" />
-              <span className="text-sm">git fetch origin ...</span>
+              <span className="text-sm">git fetch origin main ...</span>
             </div>
           )}
 
@@ -171,6 +172,21 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
                 <p>当前: {step.current}</p>
                 <p>远程: {step.remote}</p>
               </div>
+              {step.changedFiles.length > 0 && (
+                <div className="rounded-md border bg-background px-3 py-2">
+                  <p className="mb-1 text-xs text-muted-foreground">
+                    本次可能变更 {step.changedFiles.length} 个文件
+                  </p>
+                  <div className="max-h-24 space-y-0.5 overflow-y-auto font-mono text-xs">
+                    {step.changedFiles.slice(0, 20).map((file) => (
+                      <p key={file} className="truncate">{file}</p>
+                    ))}
+                    {step.changedFiles.length > 20 && (
+                      <p className="text-muted-foreground">...</p>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

@@ -58,13 +58,14 @@ async def api_install_plugin(
 
 @router.post("/{name}/enable")
 async def api_enable(name: str, db: DBSession, _user: CurrentUser):
-    """启用指定远程插件（全局开关）。"""
+    """启用指定远程插件，并为所有现有账号打开账号级开关。"""
     try:
-        row = await svc.enable(db, name, bootstrap_accounts=True)
+        row = await svc.enable(db, name, bootstrap_accounts=False)
+        applied = await svc.enable_for_all_accounts(db, name)
         plugin_name = row.name
         await db.commit()
         await svc.trigger_reload(db, plugin_name)
-        return {"ok": True, "name": plugin_name, "enabled": True}
+        return {"ok": True, "name": plugin_name, "enabled": True, "applied": applied}
     except RemotePluginNotFound as e:
         raise HTTPException(404, detail={"code": e.code, "message": e.message}) from e
 

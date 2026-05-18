@@ -469,8 +469,9 @@ function InstalledPluginsSection() {
 
   const enableRMMut = useMutation({
     mutationFn: (name: string) => enableRemotePlugin(name),
-    onSuccess: () => {
-      toast.success("已启用；回模块中心按账号开启和配置");
+    onSuccess: (res) => {
+      const suffix = typeof res.applied === "number" ? `，已同步 ${res.applied} 个账号` : "";
+      toast.success(`已启用远程模块${suffix}`);
       qc.invalidateQueries({ queryKey: REMOTE_QK });
       qc.invalidateQueries({ queryKey: ["matrix"] });
     },
@@ -508,6 +509,11 @@ function InstalledPluginsSection() {
   const builtin = builtinQ.data ?? [];
   const thirdParty = thirdPartyQ.data ?? [];
   const remote = remoteQ.data ?? [];
+  const matrixQ = useQuery({ queryKey: ["matrix"], queryFn: getFeatureMatrix });
+  const accounts = matrixQ.data?.accounts ?? [];
+  const accountCount = accounts.length;
+  const remoteEnabledCount = (name: string) =>
+    accounts.filter((account) => account.features[name] && account.features[name] !== "disabled").length;
 
   return (
     <Card>
@@ -587,8 +593,13 @@ function InstalledPluginsSection() {
                   <TableCell>{formatPluginVersion(p.version)}</TableCell>
                   <TableCell>
                     <Badge variant={p.enabled ? "default" : "outline"}>
-                      {p.enabled ? "已启用" : "未启用"}
+                      {p.enabled ? "全局已启用" : "全局未启用"}
                     </Badge>
+                    {p.enabled && accountCount > 0 ? (
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        账号启用 {remoteEnabledCount(p.name)}/{accountCount}
+                      </div>
+                    ) : null}
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex flex-wrap justify-end gap-2">

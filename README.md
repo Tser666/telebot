@@ -182,7 +182,7 @@ SSH 到 Debian / Ubuntu 服务器后，可直接执行：
 curl -fsSL https://raw.githubusercontent.com/Anoyou/telebot/main/scripts/install-server.sh | bash
 ```
 
-这条命令会自动安装基础依赖与 Docker Compose v2、拉取仓库、生成生产 `.env`，然后调用 `make prod-up` 启动 `postgres` / `redis` / `web` / `frontend` 四个容器。默认安装到 `/opt/telepilot`，默认对外发布 80 端口。
+这条命令会自动安装基础依赖与 Docker Compose v2、拉取仓库、生成生产 `.env`，然后调用 `make prod-up` 启动 `postgres` / `redis` / `web` / `frontend` 四个容器。默认安装到 `/opt/telepilot`，默认对外发布 80 端口；如果端口已被占用，脚本会自动改用可用端口并写入 `.env`。
 
 可通过环境变量覆盖安装目录、分支或端口：
 

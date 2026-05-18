@@ -21,7 +21,7 @@ curl -fsSL https://raw.githubusercontent.com/Anoyou/telebot/main/scripts/install
   | env WEB_PORT_PUBLISH=127.0.0.1:8080 COOKIE_SECURE=true bash
 ```
 
-这条命令会安装基础依赖与 Docker Compose v2、拉取仓库到 `/opt/telepilot`、生成生产 `.env`，并执行 `make prod-up` 启动 `postgres` / `redis` / `web` / `frontend`。
+这条命令会安装基础依赖与 Docker Compose v2、拉取仓库到 `/opt/telepilot`、生成生产 `.env`，并执行 `make prod-up` 启动 `postgres` / `redis` / `web` / `frontend`。如果 `WEB_PORT_PUBLISH` 指定的端口已被占用，脚本会保留 host 绑定并自动递增到可用端口，例如从 `127.0.0.1:8080` 改到 `127.0.0.1:8081`。
 
 如果已经克隆仓库，也可以在仓库目录内手动配置：
 

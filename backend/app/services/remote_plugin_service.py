@@ -522,6 +522,44 @@ async def _enable_for_all_accounts_if_unclaimed(db: AsyncSession, name: str) -> 
     return len(aids)
 
 
+async def enable_for_all_accounts(db: AsyncSession, name: str) -> int:
+    """为所有现有账号启用远程插件的账号级开关。
+
+    远程插件实际加载需要 RemotePlugin.enabled 和 AccountFeature.enabled 同时为真。
+    管理页的“启用”是用户可见的显式动作，因此应让它收敛到“当前账号都能实际运行”，
+    避免只打开全局开关却留下账号级 disabled 的半启用状态。
+    """
+    aids = (await db.execute(select(Account.id))).scalars().all()
+    changed = 0
+    for aid in aids:
+        account_id = int(aid)
+        af = (
+            await db.execute(
+                select(AccountFeature).where(
+                    AccountFeature.account_id == account_id,
+                    AccountFeature.feature_key == name,
+                )
+            )
+        ).scalar_one_or_none()
+        if af is None:
+            db.add(
+                AccountFeature(
+                    account_id=account_id,
+                    feature_key=name,
+                    enabled=True,
+                    state=FEATURE_STATE_DISABLED,
+                )
+            )
+            changed += 1
+        elif not af.enabled:
+            af.enabled = True
+            af.state = FEATURE_STATE_DISABLED
+            af.last_error = None
+            changed += 1
+    await db.flush()
+    return changed
+
+
 # ─────────────────────────────────────────────────────
 # 核心动作
 # ─────────────────────────────────────────────────────

@@ -12,7 +12,7 @@
 #   TELEPILOT_REPO=https://github.com/Anoyou/telebot.git
 #   TELEPILOT_BRANCH=main
 #   TELEPILOT_DIR=/opt/telepilot
-#   WEB_PORT_PUBLISH=80
+#   WEB_PORT_PUBLISH=80          # 支持 8080 或 127.0.0.1:8080；端口占用时自动递增
 #   COOKIE_SECURE=false
 
 set -euo pipefail
@@ -226,6 +226,94 @@ print("".join(secrets.choice(alphabet) for _ in range(32)))
 PY
 }
 
+split_publish_host_port() {
+  local publish="$1"
+  if [[ "$publish" == *":"* ]]; then
+    printf '%s\n' "${publish%:*}" "${publish##*:}"
+  else
+    printf '%s\n' "" "$publish"
+  fi
+}
+
+join_publish_host_port() {
+  local host="$1" port="$2"
+  if [[ -n "$host" ]]; then
+    printf '%s:%s\n' "$host" "$port"
+  else
+    printf '%s\n' "$port"
+  fi
+}
+
+is_publish_port_free() {
+  local publish="$1"
+  python3 - "$publish" <<'PY'
+import errno
+import socket
+import sys
+
+raw = sys.argv[1].strip()
+host = ""
+port_text = raw
+if ":" in raw:
+    host, port_text = raw.rsplit(":", 1)
+try:
+    port = int(port_text)
+except ValueError:
+    sys.exit(2)
+if not 1 <= port <= 65535:
+    sys.exit(2)
+
+bind_host = host or "0.0.0.0"
+try:
+    family = socket.AF_INET6 if ":" in bind_host else socket.AF_INET
+    with socket.socket(family, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((bind_host, port))
+except OSError as exc:
+    if exc.errno == errno.EACCES:
+        probe_host = "127.0.0.1" if bind_host in ("", "0.0.0.0") else bind_host
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.settimeout(0.4)
+            if probe.connect_ex((probe_host, port)) != 0:
+                sys.exit(0)
+    sys.exit(1)
+sys.exit(0)
+PY
+}
+
+pick_publish_port() {
+  local host port start candidate
+  mapfile -t _publish_parts < <(split_publish_host_port "$WEB_PORT_PUBLISH")
+  host="${_publish_parts[0]}"
+  port="${_publish_parts[1]}"
+  [[ "$port" =~ ^[0-9]+$ ]] || die "WEB_PORT_PUBLISH 端口无效：$WEB_PORT_PUBLISH"
+  (( port >= 1 && port <= 65535 )) || die "WEB_PORT_PUBLISH 端口范围必须是 1-65535：$WEB_PORT_PUBLISH"
+
+  candidate="$(join_publish_host_port "$host" "$port")"
+  if is_publish_port_free "$candidate"; then
+    WEB_PORT_PUBLISH="$candidate"
+    return 0
+  fi
+
+  warn "端口 $candidate 已被占用，正在自动寻找可用端口。"
+  if [[ "$port" == "80" ]]; then
+    start=8080
+  else
+    start=$((port + 1))
+  fi
+
+  for (( port = start; port <= 65535; port++ )); do
+    candidate="$(join_publish_host_port "$host" "$port")"
+    if is_publish_port_free "$candidate"; then
+      WEB_PORT_PUBLISH="$candidate"
+      ok "已改用可用端口：$WEB_PORT_PUBLISH"
+      return 0
+    fi
+  done
+
+  die "未找到可用端口，请手动设置 WEB_PORT_PUBLISH 后重试。"
+}
+
 create_env() {
   cd "$TELEPILOT_DIR"
   if [[ -f .env ]]; then
@@ -315,6 +403,7 @@ print_done() {
 ensure_base_packages
 ensure_docker
 sync_repo
+pick_publish_port
 create_env
 run_prod_up
 print_done
