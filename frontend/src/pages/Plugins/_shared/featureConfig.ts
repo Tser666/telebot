@@ -12,6 +12,6 @@ export function featureConfigPath(
   aid: number | null | undefined,
   key: string,
 ): string | null {
-  if (!aid || !FEATURE_CONFIG_PAGE_KEYS.has(key)) return null;
+  if (!aid || !key) return null;
   return `/accounts/${aid}/features/${key}`;
 }

@@ -122,7 +122,7 @@ export function SudoManagement() {
       (builtinCommandsQ.data || []).map((cmd) => ({
         name: cmd.name,
         aliases: cmd.aliases || [],
-        doc: cmd.doc || "内置命令",
+        doc: cmd.doc || "内置指令",
       })),
     [builtinCommandsQ.data],
   );
@@ -133,9 +133,9 @@ export function SudoManagement() {
         .map((item) => ({
           name: item.template.name,
           aliases: item.template.aliases || [],
-          doc:
-            item.template.description ||
-            `自定义模板：${item.template.type}`,
+        doc:
+          item.template.description ||
+          `自定义指令模板：${item.template.type}`,
         })),
     [accountCommandsQ.data],
   );
@@ -271,7 +271,7 @@ export function SudoManagement() {
       <CardHeader>
         <CardTitle className="text-base">Sudo 用户管理</CardTitle>
         <CardDescription>
-          授权其他 Telegram 用户通过独立前缀触发命令。默认不授予任何对话或命令权限。
+          授权其他 Telegram 用户通过独立前缀触发指令。默认不授予任何对话或指令权限。
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -376,9 +376,9 @@ export function SudoManagement() {
             <div className="space-y-2 sm:col-span-2">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <Label>允许的命令</Label>
+                  <Label>允许的指令</Label>
                   <p className="text-xs text-muted-foreground">
-                    在下方命令卡片里点击即可启用/取消；已启用的卡片会高亮。
+                    在下方指令卡片里点击即可启用/取消；已启用的卡片会高亮。
                   </p>
                 </div>
                 <label className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -392,7 +392,7 @@ export function SudoManagement() {
                       }))
                     }
                   />
-                  允许所有命令
+                  允许所有指令
                 </label>
               </div>
             </div>
@@ -401,7 +401,7 @@ export function SudoManagement() {
           <div className="space-y-3 rounded-md border bg-muted/20 p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <p className="text-sm font-medium">允许的命令 / 当前可用的 sudo 命令</p>
+                <p className="text-sm font-medium">允许的指令 / 当前可用的 sudo 指令</p>
                 <p className="text-xs text-muted-foreground">
                   白名单填写不带前缀的触发词；别名触发也需要单独授权。
                 </p>
@@ -414,17 +414,17 @@ export function SudoManagement() {
             </div>
 
             <CommandCatalog
-              title="内置命令"
+              title="内置指令"
               loading={builtinCommandsQ.isLoading}
               items={builtinCommandItems}
               disabled={form.allow_all_commands}
               selectedCommands={selectedCommands}
               onToggle={toggleAllowedCommand}
-              emptyText="暂无内置命令"
+              emptyText="暂无内置指令"
             />
 
             <CommandCatalog
-              title="该账号已启用的自定义命令"
+              title="该账号已启用的自定义指令"
               loading={accountCommandsQ.isLoading}
               items={enabledTemplateCommandItems}
               disabled={form.allow_all_commands || selectedAccountId === null}
@@ -432,13 +432,13 @@ export function SudoManagement() {
               onToggle={toggleAllowedCommand}
               emptyText={
                 selectedAccountId === null
-                  ? "选择账号后显示该账号已启用的自定义命令"
-                  : "该账号暂无已启用的自定义命令"
+                  ? "选择账号后显示该账号已启用的自定义指令"
+                  : "该账号暂无已启用的自定义指令"
               }
             />
 
             <p className="text-xs text-muted-foreground">
-              插件配置页里的自定义触发词不一定属于命令模板；若没有出现在这里，可以先到对应插件配置页确认触发词。
+              模块配置页里的自定义触发词不一定属于指令模板；若没有出现在这里，可以先到对应模块配置页确认触发词。
             </p>
 
             {!form.allow_all_commands && selectedCommands.size > 0 && (
@@ -459,7 +459,7 @@ export function SudoManagement() {
           </div>
 
           <p className="text-xs text-muted-foreground">
-            需要同时配置对话范围和命令范围；勾选“允许所有”才会授予全部权限。
+            需要同时配置对话范围和指令范围；勾选“允许所有”才会授予全部权限。
           </p>
 
           <div className="flex gap-2">
@@ -511,7 +511,7 @@ export function SudoManagement() {
                       允许对话: {formatChatScope(user)}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      允许命令: {formatCommandScope(user)}
+                      允许指令: {formatCommandScope(user)}
                     </p>
                   </div>
                   <div className="flex gap-1">
@@ -565,7 +565,7 @@ function CommandCatalog({
       </div>
 
       {loading ? (
-        <p className="text-xs text-muted-foreground">正在加载命令...</p>
+        <p className="text-xs text-muted-foreground">正在加载指令...</p>
       ) : items.length === 0 ? (
         <p className="text-xs text-muted-foreground">{emptyText}</p>
       ) : (

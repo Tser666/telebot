@@ -44,14 +44,14 @@ const GUIDE_STEPS: GuideStep[] = [
   },
   {
     icon: Wand,
-    title: "2. 设置命令前缀",
-    desc: "在系统设置里确定 Telegram 命令开头字符。",
+    title: "2. 设置指令前缀",
+    desc: "在系统设置里确定 Telegram 指令开头字符。",
     actionLabel: "去设置前缀",
     actionTo: "/settings?tab=platform",
   },
   {
     icon: Package,
-    title: "3. 启用命令模板或调用模块",
+    title: "3. 启用指令模板或调用模块",
     desc: "去模块中心启用模板或模块，然后就能在 Telegram 里直接调用。",
     actionLabel: "去模块中心",
     actionTo: "/plugins",
@@ -307,7 +307,7 @@ function GuideContextCard({
     ...GUIDE_STEPS[currentStep],
     desc:
       currentStep === 1
-        ? <>在系统设置里确定命令开头字符，比如 <CommandBadge>{cmdPrefix}ai</CommandBadge>。</>
+        ? <>在系统设置里确定指令开头字符，比如 <CommandBadge>{cmdPrefix}ai</CommandBadge>。</>
         : GUIDE_STEPS[currentStep].desc,
   };
   const percent = ((currentStep + 1) / GUIDE_STEPS.length) * 100;

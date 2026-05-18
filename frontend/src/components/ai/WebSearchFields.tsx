@@ -24,7 +24,7 @@ export function WebSearchFields({
             <Search className="h-4 w-4" /> 联网搜索
           </Label>
           <p className="mt-1 text-xs text-muted-foreground">
-            开启后，本命令会调用模型的搜索工具并可在模板里用 <code>{"{sources}"}</code> 显示来源。
+            开启后，本指令会调用模型的搜索工具并可在模板里用 <code>{"{sources}"}</code> 显示来源。
           </p>
         </div>
         <Switch

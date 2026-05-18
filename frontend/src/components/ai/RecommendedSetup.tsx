@@ -76,7 +76,7 @@ export function RecommendedSetup({ cmdPrefix = ",", defaultOpen = false }: { cmd
               配置示例
             </CardTitle>
             <CardDescription>
-              一个 auto 命令搭配几条 fixed 命令，能兼顾省 token、答主力和手动覆盖。
+              一个 auto 指令搭配几条 fixed 指令，能兼顾省 token、答主力和手动覆盖。
             </CardDescription>
           </CardHeader>
           <CardContent className="hidden space-y-4 group-open:block">
@@ -122,7 +122,7 @@ export function RecommendedSetup({ cmdPrefix = ",", defaultOpen = false }: { cmd
                 <li>
                   再建 <CommandBadge>{cmdPrefix}opus</CommandBadge>、<CommandBadge>{cmdPrefix}gpt</CommandBadge>、<CommandBadge>{cmdPrefix}search</CommandBadge>、<CommandBadge>{cmdPrefix}image</CommandBadge> 这类 fixed/direct 模板做手动覆盖。
                 </li>
-                <li>图片生成建议先选 image 模式 + codex_image 后端，具体尺寸和 Token 仍在账号插件配置里维护。</li>
+                <li>图片生成建议先选 image 模式 + codex_image 后端，具体尺寸和 Token 仍在账号模块配置里维护。</li>
                 <li>视觉场景会根据被回复消息和模型 modality 自动进入 vision 或 multimodal 候选池。</li>
               </ul>
             </div>

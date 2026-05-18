@@ -1,9 +1,9 @@
 // 系统设置 → LLM Provider 管理
-// 用于"AI 类自定义命令"的大模型供应商凭据配置；API Key 在后端 Fernet 加密落库
+// 用于"AI 类自定义指令"的大模型供应商凭据配置；API Key 在后端 Fernet 加密落库
 // 列表里只显示 has_api_key:✓/✗，永远不会回显明文 key（与后端约定）
 //
 // 路由元数据（modality / tags / cost_tier / notes）：决定"自动路由"模式下
-// 一条 ,ai 命令该把请求送给哪个 provider；详见 backend/services/llm_router.py
+// 一条 ,ai 指令该把请求送给哪个 provider；详见 backend/services/llm_router.py
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
@@ -360,7 +360,7 @@ export function LLMProviders({
                 <strong>「Fetch 模型列表」</strong>就能自动拉取并可手动选择要启用的模型。<br />
                 <span className="text-muted-foreground/80">
                   modality（模态）+ tags（标签）+ cost_tier（成本档）这三项决定「自动路由」模式下
-                  该模型提供商所配置的模型是否被选中——详见 AI 模块顶部的配置示例。
+                  该模型提供商所配置的模型是否被选中——详见 AI 帮助里的配置示例。
                 </span>
               </CardDescription>
             </div>
@@ -483,7 +483,7 @@ export function LLMProviders({
                           size="sm"
                           disabled={deleteMut.isPending}
                           onClick={() => {
-                            if (confirm(`确认删除 模型提供商「${p.name}」？引用此 模型提供商 的 AI 命令将失败`)) {
+                            if (confirm(`确认删除模型提供商「${p.name}」？引用此模型提供商的 AI 指令将失败`)) {
                               deleteMut.mutate(p.id);
                             }
                           }}
@@ -500,7 +500,7 @@ export function LLMProviders({
             <p className="rounded-md border border-dashed py-8 text-center text-xs text-muted-foreground">
               {isVisionFilter
                 ? "当前没有视觉或多模态模型提供商。可新建一个，或编辑已有 provider 的 modality。"
-                : "尚未配置任何模型提供商。新建一个后，就能在「自定义命令」里创建 AI 类型命令"}
+                : "尚未配置任何模型提供商。新建一个后，就能在「自定义指令」里创建 AI 类型指令"}
             </p>
           )}
         </CardContent>
@@ -770,7 +770,7 @@ function ProviderEditDialog({
             <div>
               <Label className="text-sm font-semibold">路由元数据</Label>
               <p className="text-xs text-muted-foreground">
-                这些字段决定「自动路由」模式下，一条 <CommandBadge>{cmdPrefix}ai</CommandBadge> 命令的请求是否会被分配给本 provider。
+                这些字段决定「自动路由」模式下，一条 <CommandBadge>{cmdPrefix}ai</CommandBadge> 指令的请求是否会被分配给本 provider。
                 只用 fixed 模式可以全留默认。
               </p>
             </div>
@@ -1224,7 +1224,7 @@ function ProviderModelsSection({
           <p className="text-xs text-muted-foreground">
             点 <code>Fetch</code> 用<strong>当前编辑表单的字段</strong>（提供商 / Base URL / API 协议 / API Key / 代理）拉模型列表，
             手动启用要用的几个；也能手动添加。
-            启用的模型会在「自定义命令 → AI 子表单」的下拉里展开成
+            启用的模型会在「自定义指令 → AI 子表单」的下拉里展开成
             <code> 名称（提供商 · 模型ID）</code>
           </p>
         </div>

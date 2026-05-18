@@ -149,19 +149,21 @@ export function AutorepeatConfig() {
       />
 
       <RuleInfoBox>
-        <div>✅ 保存后立即生效，无需重启 worker。</div>
-        <div>
-          📋 每条规则对应一个群组的复读配置。当 <b>指定时间内</b> 有 <b>指定人数</b> 的不同用户发送
+        <li>保存后立即生效，无需重启 worker。</li>
+        <li>
+          每条规则对应一个群组的复读配置。当 <b>指定时间内</b> 有 <b>指定人数</b> 的不同用户发送
           完全相同的内容时，自动复读该内容。
-        </div>
-        <div>
-          🔁 同一内容同群每天只复读一次（UTC+8 0点重置）。匿名消息、非文本消息、自己发送的消息、机器人消息会被忽略。
-        </div>
+        </li>
+        <li>
+          同一内容同群每天只复读一次（UTC+8 0点重置）。匿名消息、非文本消息、自己发送的消息、机器人消息会被忽略。
+        </li>
       </RuleInfoBox>
 
       <RuleFeatureToggleCard
         enabled={crud.isFeatureEnabled}
         onToggle={crud.toggleFeature}
+        state={crud.featureItem?.state}
+        lastError={crud.featureItem?.last_error}
       />
 
       {/* 规则列表 */}

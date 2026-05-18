@@ -32,10 +32,10 @@ export function Templates() {
             <Fingerprint className="h-4 w-4" /> 设备标识模板
           </TabsTrigger>
           <TabsTrigger value="command" className="gap-1.5">
-            <Command className="h-4 w-4" /> 自定义命令模板
+            <Command className="h-4 w-4" /> 自定义指令模板
           </TabsTrigger>
           <TabsTrigger value="alias" className="gap-1.5">
-            <Tags className="h-4 w-4" /> 命令别名
+            <Tags className="h-4 w-4" /> 指令别名
           </TabsTrigger>
         </TabsList>
 

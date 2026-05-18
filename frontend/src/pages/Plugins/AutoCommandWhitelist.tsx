@@ -63,7 +63,7 @@ export function PluginsAutoCommandWhitelistPage() {
     onSuccess: async () => {
       setDirty(false);
       await schedulerCfgQ.refetch();
-      toast.success("命令白名单已保存");
+      toast.success("指令白名单已保存");
     },
     onError: (err) => toast.error(getErrMsg(err)),
   });
@@ -75,9 +75,9 @@ export function PluginsAutoCommandWhitelistPage() {
       </Button>
 
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">自动命令白名单</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">自动指令白名单</h1>
         <p className="text-sm text-muted-foreground">
-          控制 scheduler/自动动作能触发哪些命令，按账号隔离配置。
+          控制 scheduler/自动动作能触发哪些指令，按账号隔离配置。
         </p>
       </div>
 
@@ -85,7 +85,7 @@ export function PluginsAutoCommandWhitelistPage() {
         <CardHeader>
           <CardTitle className="text-base">选择账号</CardTitle>
           <CardDescription>
-            白名单是账号级安全边界；只填写命令 key，不带系统命令前缀。
+            白名单是账号级安全边界；只填写指令 key，不带系统指令前缀。
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -114,9 +114,9 @@ export function PluginsAutoCommandWhitelistPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">允许自动触发的命令</CardTitle>
+          <CardTitle className="text-base">允许自动触发的指令</CardTitle>
           <CardDescription>
-            每行一个命令 key，例如 <code>help</code> 或模板命令名。未写入白名单的命令不会被自动动作执行。
+            每行一个指令 key，例如 <code>help</code> 或模板指令名。未写入白名单的指令不会被自动动作执行。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">

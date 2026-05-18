@@ -11,6 +11,7 @@ import {
 import { listAccountFeatures, toggleAccountFeature } from "@/api/accounts";
 import { getErrMsg } from "@/lib/api";
 import type {
+  AccountFeatureItem,
   RuleCreate,
   RuleDryRunRequest,
   RuleDryRunResponse,
@@ -29,6 +30,7 @@ export interface RuleCrudApi {
   // queries
   rulesQ: ReturnType<typeof useQuery<RuleOut[]>>;
   isFeatureEnabled: boolean;
+  featureItem?: AccountFeatureItem;
   // mutations
   toggleFeature: (next: boolean) => void;
   saveRule: (args: {
@@ -124,6 +126,7 @@ export function useRuleCrud(opts: UseRuleCrudOptions): RuleCrudApi {
   return {
     rulesQ,
     isFeatureEnabled,
+    featureItem,
     toggleFeature: (next) => featureToggleMut.mutate(next),
     saveRule: async ({ editing, payload, onSuccess }) => {
       await saveMut.mutateAsync(

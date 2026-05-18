@@ -9,9 +9,7 @@
 // 数据来自 ``/api/system/health-overview``——和 SystemHealthCard 共享 react-query
 // cache key，因此一次请求覆盖全页面，不会有"两个组件各拉一次"。
 //
-// hover：弹出一个简短摘要"X 个账号需重登 / Y 条 LLM 缺 key / ..."；
-// click：跳到 / （概览页）让用户看 SystemHealthCard 详情。
-import { useNavigate } from "react-router-dom";
+// click：从顶部展开系统状态浮层。
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
 
@@ -21,6 +19,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { SystemHealthCard } from "@/components/SystemHealthCard";
 import { getHealthOverview } from "@/api/system";
 import type { HealthOverview } from "@/api/types";
 import { cn } from "@/lib/utils";
@@ -74,8 +73,7 @@ function summarize(h: HealthOverview): string[] {
   return out;
 }
 
-export function HealthDot() {
-  const nav = useNavigate();
+export function HealthDot({ compact = false }: { compact?: boolean }) {
   const q = useQuery({
     queryKey: ["system", "health-overview"],
     queryFn: getHealthOverview,
@@ -112,13 +110,17 @@ export function HealthDot() {
   const issues = q.data ? summarize(q.data) : [];
 
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <Button
-          variant="ghost"
+          variant="outline"
           size="sm"
-          className="h-8 gap-1.5 px-2 text-xs"
+          className={cn(
+            "h-10 rounded-full bg-card text-xs shadow-sm hover:bg-card hover:shadow-md",
+            compact ? "w-10 px-0" : "w-10 px-0 sm:w-auto sm:gap-2 sm:px-3",
+          )}
           title={`系统状态：${label}`}
+          aria-label={`系统状态：${label}`}
         >
           {tone === "loading" ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
@@ -128,50 +130,54 @@ export function HealthDot() {
               aria-label={label}
             />
           )}
-          <span className="hidden text-xs sm:inline">{label}</span>
+          {compact ? null : <span className="hidden text-xs sm:inline">{label}</span>}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-[min(280px,calc(100vw-2rem))] p-3">
-        <div className="space-y-2 text-xs">
-          <div className="flex items-center gap-2 border-b pb-2">
-            {tone === "ok" ? (
-              <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
-            ) : tone === "err" ? (
-              <AlertTriangle className="h-4 w-4 text-rose-600 dark:text-rose-300" />
+      <DropdownMenuContent
+        align="end"
+        sideOffset={10}
+        className="max-h-[min(72vh,42rem)] w-[min(42rem,calc(100vw-2rem))] p-0"
+        style={{ overflowY: "auto" }}
+      >
+        <div className="border-b px-4 py-3">
+          <div className="text-base font-semibold">系统状态</div>
+          <div className="mt-1 text-sm text-muted-foreground">
+            基础服务、AI 模型、代理和账号 worker 的运行摘要。
+          </div>
+        </div>
+        <div className="space-y-4 p-4">
+          <div className="rounded-lg border border-border/70 bg-muted/35 p-3 text-xs">
+            <div className="flex items-center gap-2 pb-2">
+              {tone === "ok" ? (
+                <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
+              ) : tone === "err" ? (
+                <AlertTriangle className="h-4 w-4 text-rose-600 dark:text-rose-300" />
+              ) : (
+                <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-300" />
+              )}
+              <span className="text-sm font-medium">系统状态：{label}</span>
+            </div>
+            {q.isLoading ? (
+              <div className="text-muted-foreground">读取中...</div>
+            ) : q.error ? (
+              <div className="text-rose-700 dark:text-rose-300">
+                读取失败：{(q.error as Error).message}
+              </div>
+            ) : issues.length === 0 ? (
+              <div className="text-muted-foreground">
+                所有子系统状态正常，DB / Redis / AI 模型 / 代理 / 账号 worker 都在工作。
+              </div>
             ) : (
-              <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-300" />
+              <ul className="space-y-1 border-t pt-2">
+                {issues.map((line, i) => (
+                  <li key={i} className="leading-snug">
+                    {line}
+                  </li>
+                ))}
+              </ul>
             )}
-            <span className="text-sm font-medium">系统状态：{label}</span>
           </div>
-          {q.isLoading ? (
-            <div className="text-muted-foreground">读取中…</div>
-          ) : q.error ? (
-            <div className="text-rose-700 dark:text-rose-300">
-              ⚠ 读取失败：{(q.error as Error).message}
-            </div>
-          ) : issues.length === 0 ? (
-            <div className="text-muted-foreground">
-              所有子系统状态正常 — DB / Redis / 模型 / 代理 / 账号 worker 都在工作。
-            </div>
-          ) : (
-            <ul className="space-y-1">
-              {issues.map((line, i) => (
-                <li key={i} className="leading-snug">
-                  {line}
-                </li>
-              ))}
-            </ul>
-          )}
-          <div className="flex items-center justify-end border-t pt-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 px-2 text-xs"
-              onClick={() => nav("/")}
-            >
-              到概览查看详情 →
-            </Button>
-          </div>
+          <SystemHealthCard defaultOpen />
         </div>
       </DropdownMenuContent>
     </DropdownMenu>

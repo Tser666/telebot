@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import dataclass
+from html import escape as html_escape
+from html import unescape as html_unescape
 from typing import Any
 
 from app.worker.command import current_command_prefix
@@ -253,6 +255,14 @@ def _format_seconds(value: float) -> str:
     return f"{value:.1f}s"
 
 
+def _escape_html_value(value: Any) -> str:
+    return html_escape(str(value or ""), quote=False)
+
+
+def _strip_html_tags(text: str) -> str:
+    return html_unescape(re.sub(r"</?[^>]+>", "", str(text or "")))
+
+
 def _render_style(prompt: str, style: str, templates: dict[str, str]) -> str:
     template = templates.get(style)
     if not template:
@@ -267,7 +277,7 @@ def _render_message_template(template: str, values: dict[str, str]) -> str:
         lambda match: match.group(2) if values.get(match.group(1)) else "",
         out,
     )
-    return re.sub(r"\{([a-zA-Z0-9_]+)\}", lambda match: values.get(match.group(1), ""), out)
+    return re.sub(r"\{([a-zA-Z0-9_]+)\}", lambda match: _escape_html_value(values.get(match.group(1), "")), out)
 
 
 def _parse_image_args(args: list[str], cfg: ChatGPTImageConfig) -> ParsedImageCommand:
@@ -514,6 +524,8 @@ class ChatGPTImagePlugin(Plugin):
                 "caption": caption if idx == 1 else None,
                 "reply_to": reply_to,
             }
+            if idx == 1 and caption:
+                kwargs["parse_mode"] = "html"
             if self._cfg.output_mode == "file":
                 kwargs["force_document"] = True
             elif self._cfg.output_mode == "image":
@@ -521,10 +533,23 @@ class ChatGPTImagePlugin(Plugin):
             try:
                 await ctx.client.send_file(chat_id, file_obj, **kwargs)
             except Exception:
+                if idx == 1 and caption and kwargs.get("parse_mode") == "html":
+                    plain_kwargs = dict(kwargs)
+                    plain_kwargs["caption"] = _strip_html_tags(caption)[:1024]
+                    plain_kwargs.pop("parse_mode", None)
+                    file_obj.seek(0)
+                    try:
+                        await ctx.client.send_file(chat_id, file_obj, **plain_kwargs)
+                        continue
+                    except Exception:
+                        if self._cfg.output_mode != "auto":
+                            raise
+                        kwargs = plain_kwargs
                 if self._cfg.output_mode == "auto":
                     file_obj.seek(0)
-                    kwargs["force_document"] = True
-                    await ctx.client.send_file(chat_id, file_obj, **kwargs)
+                    fallback_kwargs = dict(kwargs)
+                    fallback_kwargs["force_document"] = True
+                    await ctx.client.send_file(chat_id, file_obj, **fallback_kwargs)
                 else:
                     raise
 

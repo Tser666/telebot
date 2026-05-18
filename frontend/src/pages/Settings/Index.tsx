@@ -72,13 +72,13 @@ const GUIDE_STEPS: Array<{
     actionTo: "/accounts/new",
   },
   {
-    title: "2. 设置命令前缀",
-    desc: "在系统设置里确定 Telegram 命令开头字符。",
+    title: "2. 设置指令前缀",
+    desc: "在系统设置里确定 Telegram 指令开头字符。",
     actionLabel: "去设置前缀",
     actionTo: "/settings?tab=platform",
   },
   {
-    title: "3. 启用命令模板或调用模块",
+    title: "3. 启用指令模板或调用模块",
     desc: "去模块中心启用模板或模块，然后就能在 Telegram 里直接调用。",
     actionLabel: "去模块中心",
     actionTo: "/plugins",
@@ -207,7 +207,7 @@ export function SettingsIndex() {
   const savePrefix = useMutation({
     mutationFn: () => patchSystemSettings({ command_prefix: prefix }),
     onSuccess: () => {
-      toast.success("命令前缀已保存（worker 将热加载）");
+      toast.success("指令前缀已保存（worker 将热加载）");
       qc.invalidateQueries({ queryKey: ["system", "settings"] });
     },
     onError: (err) => toast.error(getErrMsg(err)),
@@ -288,7 +288,7 @@ export function SettingsIndex() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">系统设置</h1>
         <p className="text-sm text-muted-foreground">
-          按账号、平台、安全、迁移拆分，保留常用入口并收敛历史配置位。
+          按用户管理、前缀通知、网络身份、风控限额和备份恢复拆分，保留常用入口并收敛历史配置位。
         </p>
       </div>
 
@@ -301,7 +301,7 @@ export function SettingsIndex() {
             <Link to="/ai?tab=providers">添加模型</Link>
           </Button>
           <Button asChild variant="outline" size="sm">
-            <Link to="/plugins/templates">添加命令</Link>
+            <Link to="/plugins/templates">添加指令</Link>
           </Button>
           <Button
             variant="outline"
@@ -365,19 +365,19 @@ export function SettingsIndex() {
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
         <TabsList>
           <TabsTrigger value="account" className="gap-1.5">
-            <ShieldCheck className="h-4 w-4" /> 账号
+            <ShieldCheck className="h-4 w-4" /> 用户与管理
           </TabsTrigger>
           <TabsTrigger value="platform" className="gap-1.5">
-            <SlidersHorizontal className="h-4 w-4" /> 平台
+            <SlidersHorizontal className="h-4 w-4" /> 前缀与通知
           </TabsTrigger>
           <TabsTrigger value="proxy-identity" className="gap-1.5">
             <Waypoints className="h-4 w-4" /> 代理与标识
           </TabsTrigger>
           <TabsTrigger value="security" className="gap-1.5">
-            <UserPlus className="h-4 w-4" /> 安全
+            <UserPlus className="h-4 w-4" /> 风控与限额
           </TabsTrigger>
           <TabsTrigger value="migration" className="gap-1.5">
-            <Download className="h-4 w-4" /> 迁移
+            <Download className="h-4 w-4" /> 备份与恢复
           </TabsTrigger>
         </TabsList>
 
@@ -389,9 +389,9 @@ export function SettingsIndex() {
         <TabsContent value="platform" className="space-y-6">
           <Card className={guideActive && currentStep === 1 ? "siri-glow-soft" : undefined}>
             <CardHeader>
-              <CardTitle className="text-base">命令前缀</CardTitle>
+              <CardTitle className="text-base">指令前缀</CardTitle>
               <CardDescription>
-                TG 内命令开头字符（默认 <code>,</code>）。修改后 worker 自动热加载
+                TG 内指令开头字符（默认 <code>,</code>）。修改后 worker 自动热加载
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -646,7 +646,7 @@ export function SettingsIndex() {
                     <option value="error">error（只看错误）</option>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    debug 会记录插件排障细节；info 适合日常；warn/error 只保留异常。
+                    debug 会记录模块排障细节；info 适合日常；warn/error 只保留异常。
                   </p>
                 </div>
               </div>
@@ -737,7 +737,7 @@ function GuideInlineCard({
     ...GUIDE_STEPS[currentStep],
     desc:
       currentStep === 1
-        ? <>在系统设置里确定命令开头字符，比如 <CommandBadge>{cmdPrefix}ai</CommandBadge>。</>
+        ? <>在系统设置里确定指令开头字符，比如 <CommandBadge>{cmdPrefix}ai</CommandBadge>。</>
         : GUIDE_STEPS[currentStep].desc,
   };
   const percent = ((currentStep + 1) / GUIDE_STEPS.length) * 100;

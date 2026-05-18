@@ -13,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 
 function SummaryTile({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded-md border bg-muted/20 p-3">
+    <div className="rounded-xl border bg-muted/20 p-3">
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="mt-1 text-lg font-semibold">{value}</p>
     </div>
@@ -29,8 +29,8 @@ export function RecentUsageContent() {
   const providerCount = providersQ.data?.length ?? 0;
   const hasProviders = providerCount > 0;
   const usageQ = useQuery({
-    queryKey: ["llm-usage", "recent"],
-    queryFn: () => listRecentLLMUsage(20),
+    queryKey: ["llm-usage", "recent", 100],
+    queryFn: () => listRecentLLMUsage(100),
     retry: false,
     enabled: hasProviders,
   });
@@ -48,7 +48,7 @@ export function RecentUsageContent() {
       <Card>
         <CardHeader>
           <CardTitle className="inline-flex items-center gap-2">
-            <History className="h-4 w-4" /> 最近调用
+            <History className="h-4 w-4" /> 近期调用
           </CardTitle>
           <CardDescription>暂时无法读取模型提供商：{getErrMsg(providersQ.error)}</CardDescription>
         </CardHeader>
@@ -60,7 +60,7 @@ export function RecentUsageContent() {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>最近调用</CardTitle>
+          <CardTitle>近期调用</CardTitle>
           <CardDescription>先配置至少一个模型提供商，才会产生可查看的调用记录。</CardDescription>
         </CardHeader>
         <CardContent>
@@ -80,7 +80,7 @@ export function RecentUsageContent() {
       <Card>
         <CardHeader>
           <CardTitle className="inline-flex items-center gap-2">
-            <History className="h-4 w-4" /> 最近调用
+            <History className="h-4 w-4" /> 近期调用
           </CardTitle>
           <CardDescription>暂时无法读取调用记录：{getErrMsg(usageQ.error)}</CardDescription>
         </CardHeader>
@@ -96,9 +96,9 @@ export function RecentUsageContent() {
     <Card>
       <CardHeader>
         <CardTitle className="inline-flex items-center gap-2">
-          <History className="h-4 w-4" /> 最近调用
+          <History className="h-4 w-4" /> 近期调用
         </CardTitle>
-        <CardDescription>展示最近 20 条 LLM 调用记录与核心摘要。</CardDescription>
+        <CardDescription>展示最近 100 条 LLM 调用记录与核心摘要。</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {summary && (
@@ -114,10 +114,10 @@ export function RecentUsageContent() {
 
         {rows.length === 0 ? (
           <p className="rounded-md border border-dashed py-8 text-center text-sm text-muted-foreground">
-            暂无调用记录。触发一次 AI 命令后再回来查看。
+            暂无调用记录。触发一次 AI 指令后再回来查看。
           </p>
         ) : (
-          <Table>
+          <Table className="min-w-[900px]">
             <TableHeader>
               <TableRow>
                 <TableHead>时间</TableHead>

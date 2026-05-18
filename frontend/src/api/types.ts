@@ -666,6 +666,7 @@ export interface ProcessResourceStatus {
   pid?: number | null;
   cpu_percent?: number | null;
   rss_mb?: number | null;
+  uss_mb?: number | null;
 }
 
 export interface WorkerRuntimeResourceStatus extends ProcessResourceStatus {
@@ -673,6 +674,16 @@ export interface WorkerRuntimeResourceStatus extends ProcessResourceStatus {
   alive: boolean;
   desired: string;
   fail_count: number;
+}
+
+export interface ContainerResourceStatus {
+  id?: string | null;
+  name: string;
+  service?: string | null;
+  cpu_percent?: number | null;
+  memory_mb?: number | null;
+  memory_limit_mb?: number | null;
+  memory_percent?: number | null;
 }
 
 export interface RuntimeLogStatsStatus {
@@ -685,6 +696,10 @@ export interface ResourceDashboard {
   host: HostResourceStatus;
   main_process: ProcessResourceStatus;
   project_total: ProcessResourceStatus;
+  other_processes: ProcessResourceStatus[];
+  containers: ContainerResourceStatus[];
+  container_total: ProcessResourceStatus;
+  container_probe_error?: string | null;
   workers: WorkerRuntimeResourceStatus[];
   worker_alive: number;
   worker_desired_running: number;

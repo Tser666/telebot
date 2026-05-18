@@ -1,8 +1,9 @@
 // 应用主框架：左侧 Sidebar（桌面）/ MobileSidebar（移动）+ 顶部 TopBar + 内容 outlet
 // 高度用 100dvh：iOS Safari 浏览器模式下避免 100vh 把内容塞到地址栏后面；
 //                PWA 全屏模式下行为与 100vh 一致。
-import { useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { flushSync } from "react-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
 import { MOBILE_PRIMARY_NAV, MobileSidebar, Sidebar } from "./Sidebar";
@@ -14,7 +15,14 @@ import { cn } from "@/lib/utils";
 
 export function AppShell() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
+  const [mobileActivePath, setMobileActivePath] = useState(location.pathname);
+
+  useEffect(() => {
+    setMobileActivePath(location.pathname);
+  }, [location.pathname]);
 
   // 主体框架内顺手取一次当前用户用于顶栏展示
   const { data, isLoading } = useQuery({
@@ -31,60 +39,89 @@ export function AppShell() {
   }
 
   return (
-    <div className="flex h-[100dvh] w-full overflow-hidden bg-background">
-      <Sidebar />
+    <div className="app-frame flex h-[100dvh] w-full overflow-hidden bg-background">
+      <Sidebar collapsed={sidebarCollapsed} />
       <MobileSidebar open={mobileNavOpen} onOpenChange={setMobileNavOpen} />
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="app-workspace flex min-w-0 flex-1 flex-col overflow-hidden">
         <TopBar
           username={data?.username ?? "未知用户"}
           onMenuClick={() => setMobileNavOpen(true)}
+          onSidebarToggle={() => setSidebarCollapsed((value) => !value)}
+          sidebarCollapsed={sidebarCollapsed}
         />
         {/* kill switch 开启时显示全局红色横幅；关闭时不渲染 */}
         <GlobalAlertBar />
         <main
           className="
+            app-main
             flex-1 overflow-auto
-            p-4 md:p-6
+            px-4 py-5 md:px-8 md:py-7 xl:px-10
             pb-[calc(5.75rem+env(safe-area-inset-bottom))]
             sm:pb-[max(1rem,env(safe-area-inset-bottom))]
             pl-[max(1rem,env(safe-area-inset-left))]
             pr-[max(1rem,env(safe-area-inset-right))]
-            md:pl-6 md:pr-6
+            md:pl-8 md:pr-8 xl:pl-10 xl:pr-10
           "
         >
-          <div key={location.pathname} className="min-h-full animate-page-enter">
+          <div
+            key={location.pathname}
+            className="mx-auto min-h-full w-full max-w-[1380px] animate-page-enter"
+          >
             <Outlet />
           </div>
         </main>
         <nav
           className="
             fixed inset-x-0 bottom-0 z-40 sm:hidden
-            pb-[max(0.75rem,env(safe-area-inset-bottom))]
-            pl-[max(0.75rem,env(safe-area-inset-left))]
-            pr-[max(0.75rem,env(safe-area-inset-right))]
+            border-t border-border/70 bg-card/92
+            pb-[env(safe-area-inset-bottom)]
+            pl-[env(safe-area-inset-left)]
+            pr-[env(safe-area-inset-right)]
+            shadow-[0_-12px_32px_hsl(220_20%_20%/0.08)]
           "
         >
-          <div className="liquid-glass liquid-bottom-nav mx-auto grid h-16 max-w-md grid-cols-5 gap-1 p-1.5">
-            {MOBILE_PRIMARY_NAV.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                className={({ isActive }) =>
-                  cn(
-                    "liquid-nav-item flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-[1.5rem] text-[10px] font-medium text-muted-foreground transition duration-200",
-                    "hover:text-accent-foreground",
-                    isActive && "liquid-nav-item-active",
-                  )
-                }
-              >
-                <item.icon className="h-4 w-4 shrink-0" />
-                <span className="max-w-full truncate">{item.label}</span>
-              </NavLink>
-            ))}
+          <div className="liquid-bottom-nav mx-auto grid h-16 w-full max-w-md grid-cols-5 gap-1 px-2 py-1.5">
+            {MOBILE_PRIMARY_NAV.map((item) => {
+              const active = isMobileNavActive(item.to, item.end, mobileActivePath);
+              const activate = () => {
+                flushSync(() => setMobileActivePath(item.to));
+              };
+              return (
+                <button
+                  key={item.to}
+                  type="button"
+                  onPointerDown={activate}
+                  onTouchStart={activate}
+                  onMouseDown={activate}
+                  onClick={() => {
+                    activate();
+                    navigate(item.to);
+                  }}
+                  aria-current={active ? "page" : undefined}
+                  data-active={active ? "true" : undefined}
+                  className={cn(
+                    "liquid-nav-item flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-2xl text-[10px] font-semibold text-muted-foreground transition-none",
+                    active && "liquid-nav-item-active",
+                  )}
+                  style={{
+                    WebkitTapHighlightColor: "transparent",
+                    backgroundColor: active ? "hsl(var(--foreground))" : undefined,
+                    color: active ? "hsl(var(--background))" : undefined,
+                  }}
+                >
+                  <item.icon className="h-4 w-4 shrink-0" />
+                  <span className="max-w-full truncate">{item.label}</span>
+                </button>
+              );
+            })}
           </div>
         </nav>
       </div>
     </div>
   );
+}
+
+function isMobileNavActive(to: string, end: boolean | undefined, pathname: string) {
+  if (end) return pathname === to;
+  return pathname === to || pathname.startsWith(`${to}/`);
 }

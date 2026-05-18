@@ -64,8 +64,8 @@ const ROLE_META: Record<AccountBotRole, { label: string; desc: string }> = {
 const HELP_PREVIEW = `/start  打开主菜单
 /status 查看账号、worker 与最近错误
 /features 查看并启停账号功能
-/commands 查看并启停自定义命令模板
-/plugins 查看插件入口
+/commands 查看并启停自定义指令模板
+/plugins 查看模块入口
 /rules 查看规则，scheduler 规则可手动执行
 /logs 查看最近运行日志
 /pause /resume 暂停或恢复账号
@@ -219,7 +219,7 @@ export function BotTab({ aid }: { aid: number }) {
               安全提示：涉及重启、安装等危险操作时，需在 Telegram 内完成二次确认后才会执行。
             </div>
             <div className="space-y-3 rounded-md border border-red-300 bg-red-50 px-3 py-3">
-              <div className="text-sm font-medium text-red-900">远程插件高风险开关（admin）</div>
+              <div className="text-sm font-medium text-red-900">远程模块高风险开关（admin）</div>
               <div className="text-xs text-red-800">
                 默认全部关闭；即使开启后，Telegram 内仍需二次确认才会执行 install/update/uninstall/第三方启停。
               </div>

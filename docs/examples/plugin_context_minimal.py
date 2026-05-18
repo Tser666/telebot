@@ -13,7 +13,7 @@ class ContextEchoPlugin(Plugin):
         self._command = str(ctx.config.get("command") or "cecho").strip() or "cecho"
 
         async def _handler(client, event, args: list[str], account_id: int, runtime_ctx: PluginContext) -> None:
-            # 运行时访问：只用公开上下文对象；第三方插件应把 engine/redis 视为可选能力
+            # 运行时访问：只用公开上下文对象；第三方模块应把 engine/redis 视为可选能力
             await runtime_ctx.log(
                 "info",
                 "context_echo.triggered",

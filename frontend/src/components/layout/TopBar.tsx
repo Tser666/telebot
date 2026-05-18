@@ -6,10 +6,12 @@ import { useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Check,
+  ChevronDown,
   LogOut,
   Menu,
   Monitor,
   Moon,
+  PanelLeft,
   RefreshCw,
   Sun,
   UserCircle,
@@ -25,6 +27,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { logout } from "@/lib/auth";
 import { useTheme, type Theme } from "@/lib/theme";
+import { cn } from "@/lib/utils";
+import { BrandLogo } from "@/components/BrandLogo";
 import { HealthDot } from "@/components/HealthDot";
 import { KillSwitch } from "./KillSwitch";
 import { UpdateDialog } from "./UpdateDialog";
@@ -32,9 +36,16 @@ import { UpdateDialog } from "./UpdateDialog";
 interface TopBarProps {
   username: string;
   onMenuClick: () => void;
+  onSidebarToggle: () => void;
+  sidebarCollapsed: boolean;
 }
 
-export function TopBar({ username, onMenuClick }: TopBarProps) {
+export function TopBar({
+  username,
+  onMenuClick,
+  onSidebarToggle,
+  sidebarCollapsed,
+}: TopBarProps) {
   const nav = useNavigate();
   const qc = useQueryClient();
   const [updateOpen, setUpdateOpen] = useState(false);
@@ -50,56 +61,95 @@ export function TopBar({ username, onMenuClick }: TopBarProps) {
   return (
     <header
       className="
-        flex shrink-0 items-center justify-between border-b bg-card
-        h-[calc(3.5rem+env(safe-area-inset-top))]
+        app-topbar flex shrink-0 items-center justify-between
+        h-[calc(5rem+env(safe-area-inset-top))]
         pt-[env(safe-area-inset-top)]
         pl-[max(1rem,env(safe-area-inset-left))]
         pr-[max(1rem,env(safe-area-inset-right))]
+        md:px-8 xl:px-10
       "
     >
       <div className="flex min-w-0 items-center gap-2">
         {isStandalone ? (
-          <div className="md:hidden">
-            <div className="text-base font-semibold leading-none">TelePilot</div>
-            <div className="mt-0.5 text-[11px] leading-none text-muted-foreground">
-              管理控制台
+          <div className="flex min-w-0 items-center gap-2 md:hidden">
+            <BrandLogo className="h-9 w-9 rounded-xl" />
+            <div className="min-w-0">
+              <div className="truncate text-base font-semibold leading-none">TelePilot</div>
+              <div className="mt-0.5 truncate text-[11px] leading-none text-muted-foreground">
+                管理控制台
+              </div>
             </div>
           </div>
         ) : (
           /* 移动端汉堡按钮，桌面隐藏；PWA 下由底栏承担导航 */
           <Button
-            variant="ghost"
-            size="icon"
-            className="md:hidden"
+            variant="outline"
+            size="sm"
+            className={cn(topbarActionClass(false), "md:hidden")}
             onClick={onMenuClick}
             aria-label="打开导航菜单"
+            title="打开导航菜单"
           >
-            <Menu className="h-5 w-5" />
+            <Menu className="h-4 w-4" />
+            <span className="hidden text-xs sm:inline">菜单</span>
           </Button>
         )}
-        <div className="hidden truncate text-sm text-muted-foreground sm:block">
-          TelePilot 管理控制台
-        </div>
-      </div>
-      <div className="flex shrink-0 items-center gap-1 sm:gap-2">
-        <HealthDot />
         <Button
-          variant="ghost"
-          size="icon"
+          variant="outline"
+          size="sm"
+          className={cn(topbarActionClass(isStandalone), "hidden md:inline-flex")}
+          onClick={onSidebarToggle}
+          aria-label={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}
+          aria-pressed={sidebarCollapsed}
+          title={sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}
+        >
+          <PanelLeft className="h-4 w-4" />
+          {isStandalone ? null : (
+            <span className="hidden text-xs sm:inline">
+              {sidebarCollapsed ? "展开侧栏" : "收起侧栏"}
+            </span>
+          )}
+        </Button>
+      </div>
+      <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+        <HealthDot compact={isStandalone} />
+        <Button
+          variant="outline"
+          size="sm"
+          className={topbarActionClass(isStandalone)}
           onClick={() => setUpdateOpen(true)}
           aria-label="检查更新"
           title="检查更新"
         >
           <RefreshCw className="h-4 w-4" />
+          {isStandalone ? null : <span className="hidden text-xs sm:inline">检查更新</span>}
         </Button>
         <UpdateDialog open={updateOpen} onOpenChange={setUpdateOpen} />
-        <ThemeSwitcher />
-        <KillSwitch />
+        <ThemeSwitcher compact={isStandalone} />
+        <KillSwitch compact={isStandalone} />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="max-w-[6.75rem] sm:max-w-[8rem]">
-              <UserCircle className="mr-1 h-4 w-4 shrink-0" />
-              <span className="truncate">{username}</span>
+            <Button
+              variant="outline"
+              size="sm"
+              className={cn(
+                "h-10 rounded-full bg-card text-xs shadow-sm hover:bg-card hover:shadow-md",
+                isStandalone
+                  ? "w-10 px-0"
+                  : "w-10 px-0 sm:w-auto sm:max-w-[11rem] sm:gap-2 sm:px-1.5 sm:pr-2",
+              )}
+              aria-label={`当前用户：${username}`}
+              title={`当前用户：${username}`}
+            >
+              <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
+                {getInitial(username)}
+              </span>
+              {isStandalone ? null : (
+                <>
+                  <span className="hidden truncate text-xs font-medium sm:block">{username}</span>
+                  <ChevronDown className="hidden h-3.5 w-3.5 text-muted-foreground sm:block" />
+                </>
+              )}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
@@ -112,6 +162,13 @@ export function TopBar({ username, onMenuClick }: TopBarProps) {
         </DropdownMenu>
       </div>
     </header>
+  );
+}
+
+function topbarActionClass(compact: boolean) {
+  return cn(
+    "h-10 rounded-full bg-card text-xs shadow-sm hover:bg-card hover:shadow-md",
+    compact ? "w-10 px-0" : "w-10 px-0 sm:w-auto sm:gap-2 sm:px-3",
   );
 }
 
@@ -146,7 +203,7 @@ function useStandaloneDisplayMode() {
   return standalone;
 }
 
-function ThemeSwitcher() {
+function ThemeSwitcher({ compact = false }: { compact?: boolean }) {
   const { theme, resolvedTheme, setTheme } = useTheme();
   const Icon = theme === "system" ? Monitor : resolvedTheme === "dark" ? Moon : Sun;
 
@@ -155,17 +212,20 @@ function ThemeSwitcher() {
     { value: "dark", label: "深色", icon: Moon },
     { value: "system", label: "跟随系统", icon: Monitor },
   ];
+  const currentLabel = options.find((item) => item.value === theme)?.label ?? "主题";
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
-          variant="ghost"
-          size="icon"
+          variant="outline"
+          size="sm"
+          className={topbarActionClass(compact)}
           aria-label="切换主题"
           title="切换主题"
         >
           <Icon className="h-4 w-4" />
+          {compact ? null : <span className="hidden text-xs sm:inline">{currentLabel}</span>}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-36">
@@ -185,4 +245,10 @@ function ThemeSwitcher() {
       </DropdownMenuContent>
     </DropdownMenu>
   );
+}
+
+function getInitial(username: string) {
+  const trimmed = username.trim();
+  if (!trimmed) return <UserCircle className="h-4 w-4" />;
+  return trimmed.slice(0, 1).toUpperCase();
 }

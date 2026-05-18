@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 
@@ -35,18 +36,29 @@ export function RuleFeatureToggleCard({
   enabled,
   onToggle,
   description = "关闭后所有规则都不会触发；启用即生效",
+  state,
+  lastError,
 }: {
   enabled: boolean;
   onToggle: (next: boolean) => void;
   description?: string;
+  state?: string | null;
+  lastError?: string | null;
 }) {
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <CardTitle className="text-base">功能总开关</CardTitle>
             <CardDescription>{description}</CardDescription>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <Badge variant={enabled ? "default" : "outline"}>
+                {enabled ? "已启用" : "未启用"}
+              </Badge>
+              {state ? <span>状态：{state}</span> : null}
+              {lastError ? <span className="text-destructive">最近错误：{lastError}</span> : null}
+            </div>
           </div>
           <Switch checked={enabled} onCheckedChange={onToggle} />
         </div>
@@ -55,12 +67,20 @@ export function RuleFeatureToggleCard({
   );
 }
 
-/** 提示条容器（统一 alert-info 样式 + space-y-1）。 */
+/** 使用说明容器，和单配置插件页保持一致。 */
 export function RuleInfoBox({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-md border px-3 py-2 text-xs alert-info space-y-1">
-      {children}
-    </div>
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">使用说明</CardTitle>
+        <CardDescription>规则保存后立即生效，无需重启 worker。</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
+          <ul className="list-inside list-disc space-y-1">{children}</ul>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

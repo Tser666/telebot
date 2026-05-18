@@ -1,4 +1,4 @@
-// 账号详情：3 个 Tab —— 概览 / 插件启停 / 风控
+// 账号详情：3 个 Tab —— 概览 / 模块启停 / 风控
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -19,7 +19,6 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { ConfigDialog } from "@/components/plugin/ConfigDialog";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -56,13 +55,7 @@ import {
   pauseAccount,
   resumeAccount,
   toggleAccountFeature,
-  updateAccountFeatureConfig,
 } from "@/api/accounts";
-import {
-  getPluginGlobalConfig,
-  setPluginGlobalConfig,
-  getEffectiveConfig,
-} from "@/api/features";
 import { listProxies, testProxy } from "@/api/proxies";
 import { listDeviceProfiles } from "@/api/device-profiles";
 import {
@@ -81,11 +74,10 @@ import {
 import { getFeatureMatrix } from "@/api/features";
 import { getErrMsg } from "@/lib/api";
 import { cn, formatDateTime } from "@/lib/utils";
-import { isExperimentalFeature, isPlatformFeature, pluginMode, PLUGIN_MODE_META, type PluginMode } from "@/lib/plugin-modes";
+import { isExperimentalFeature, isPlatformFeature } from "@/lib/plugin-modes";
 import { Select } from "@/components/ui/select";
-import type { HumanizeConfig, ProxyTestResult } from "@/api/types";
+import type { FeatureInfo, HumanizeConfig, ProxyTestResult } from "@/api/types";
 import { actionHint, actionLabel } from "@/lib/rate-actions";
-import type { ConfigSchema } from "@/components/plugin/ConfigDialog";
 import { featureConfigPath } from "@/pages/Plugins/_shared/featureConfig";
 
 const COMMAND_TYPE_LABELS: Record<string, string> = {
@@ -94,6 +86,10 @@ const COMMAND_TYPE_LABELS: Record<string, string> = {
   run_plugin: "调用模块",
   ai: "AI",
 };
+
+function compareFeatureKey(a: FeatureInfo, b: FeatureInfo) {
+  return a.key.localeCompare(b.key, "en", { sensitivity: "base" });
+}
 
 export function AccountDetail() {
   const params = useParams();
@@ -112,14 +108,6 @@ export function AccountDetail() {
     enabled: !!aid,
   });
 
-  const [configDialog, setConfigDialog] = useState<{
-    key: string;
-    name: string;
-    schema: Record<string, unknown> | null;
-    globalConfig: Record<string, unknown>;
-    accountConfig: Record<string, unknown>;
-  } | null>(null);
-
   const featuresQ = useQuery({
     queryKey: ["account", aid, "features"],
     queryFn: () => listAccountFeatures(aid),
@@ -132,29 +120,6 @@ export function AccountDetail() {
     queryFn: getFeatureMatrix,
     select: (data) => data.features,
   });
-
-  // 获取 global config
-  const globalConfigQ = useQuery({
-    queryKey: ["plugin", "global", configDialog?.key ?? ""],
-    queryFn: () => getPluginGlobalConfig(configDialog!.key),
-    enabled: !!configDialog?.key,
-  });
-
-  // 获取 effective config（合并后的最终配置）
-  const effectiveConfigQ = useQuery({
-    queryKey: ["account", aid, "config", configDialog?.key ?? ""],
-    queryFn: () => getEffectiveConfig(aid, configDialog!.key),
-    enabled: !!aid && !!configDialog?.key,
-  });
-
-  // 计算 account config = effective config - global config
-  const accountConfig = configDialog?.globalConfig
-    ? Object.fromEntries(
-        Object.entries(effectiveConfigQ.data ?? {}).filter(
-          ([k]) => !(k in configDialog.globalConfig)
-        )
-      )
-    : (effectiveConfigQ.data ?? {});
 
   const rateQ = useQuery({
     queryKey: ["account", aid, "rate-limit"],
@@ -279,10 +244,10 @@ export function AccountDetail() {
               <LayoutDashboard className="h-4 w-4" /> 概览
             </TabsTrigger>
             <TabsTrigger value="features" className="shrink-0 gap-1.5">
-              <Bot className="h-4 w-4" /> 插件启停
+              <Bot className="h-4 w-4" /> 模块启停
             </TabsTrigger>
             <TabsTrigger value="commands" className="shrink-0 gap-1.5">
-              <Terminal className="h-4 w-4" /> 自定义命令
+              <Terminal className="h-4 w-4" /> 自定义指令
             </TabsTrigger>
             <TabsTrigger value="bot" className="shrink-0 gap-1.5">
               <MessageCircle className="h-4 w-4" /> Bot 联动
@@ -421,13 +386,13 @@ export function AccountDetail() {
             <CardHeader>
               <CardTitle className="text-base">新账号下一步</CardTitle>
               <CardDescription>
-                这个区域主要给新账号配置时用：复用模板、开启插件、把成熟账号的配置复制过来。
+                这个区域主要给新账号配置时用：复用模板、开启模块、把成熟账号的配置复制过来。
               </CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3 md:grid-cols-3">
               <div className="relative flex min-h-[11rem] flex-col rounded-lg border p-4">
                 <div className="pr-12 text-base font-semibold text-foreground">
-                  已启用插件
+                  已启用模块
                 </div>
                 <div className="absolute right-4 top-3 text-2xl font-semibold leading-none">
                   {enabledPluginCount}
@@ -437,21 +402,21 @@ export function AccountDetail() {
                 </div>
                 <Button asChild size="sm" variant="outline" className="mt-auto w-full justify-between">
                   <Link to={`/plugins?account=${aid}`}>
-                    管理插件
+                    管理模块
                     <ChevronRight className="h-4 w-4" />
                   </Link>
                 </Button>
               </div>
               <div className="flex min-h-[11rem] flex-col rounded-lg border p-4">
                 <div className="text-base font-semibold text-foreground">
-                  复用命令模板
+                  复用指令模板
                 </div>
                 <div className="mt-1 text-sm text-muted-foreground">
-                  把账号 A 已经调好的回复、转发、AI 命令分配给这个账号。
+                  把账号 A 已经调好的回复、转发、AI 指令分配给这个账号。
                 </div>
                 <Button asChild size="sm" variant="outline" className="mt-auto w-full justify-between">
                   <Link to={`/accounts/${aid}?tab=commands`}>
-                    启用命令模板
+                    启用指令模板
                     <ChevronRight className="h-4 w-4" />
                   </Link>
                 </Button>
@@ -461,7 +426,7 @@ export function AccountDetail() {
                   复制成熟配置
                 </div>
                 <div className="mt-1 text-sm text-muted-foreground">
-                  适合新账号：从一个已跑顺的账号复制规则和插件配置。
+                  适合新账号：从一个已跑顺的账号复制规则和模块配置。
                 </div>
                 <Button asChild size="sm" variant="outline" className="mt-auto w-full justify-between">
                   <Link to={`/settings?tab=backup&source=${aid}`}>
@@ -474,16 +439,16 @@ export function AccountDetail() {
           </Card>
         </TabsContent>
 
-        {/* 自定义命令 */}
+        {/* 自定义指令 */}
         <TabsContent value="commands">
           <AccountCommandsTab aid={aid} />
         </TabsContent>
 
-        {/* 插件启停 */}
+        {/* 模块启停 */}
         <TabsContent value="features">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">插件启停</CardTitle>
+              <CardTitle className="text-base">模块启停</CardTitle>
               <CardDescription>
                 每个功能可独立启停。开启后跳到对应配置页配置规则
               </CardDescription>
@@ -496,14 +461,16 @@ export function AccountDetail() {
               ) : (
                 <div className="space-y-6">
                   {(() => {
-                    const platformFeatures = (featureListQ.data ?? []).filter((f) => isPlatformFeature(f));
+                    const platformFeatures = [...(featureListQ.data ?? [])]
+                      .filter((f) => isPlatformFeature(f))
+                      .sort(compareFeatureKey);
                     if (platformFeatures.length === 0) return null;
                     return (
                       <section className="space-y-2">
                         <div>
                           <div className="text-sm font-medium">基础能力 · 平台内置</div>
                           <p className="text-xs text-muted-foreground">
-                            不像普通插件那样按开关决定是否运行；它随 worker 初始化，为插件和系统页面提供底层能力。
+                            不像普通模块那样按开关决定是否运行；它随 worker 初始化，为模块和系统页面提供底层能力。
                           </p>
                         </div>
                         <Table className="min-w-[42rem] table-fixed">
@@ -551,14 +518,16 @@ export function AccountDetail() {
                       </section>
                     );
                   })()}
-                  {(["rules", "single", "schema"] as PluginMode[]).map((mode) => {
-                    const grouped = (featureListQ.data ?? []).filter((f) => !isPlatformFeature(f) && pluginMode(f) === mode);
+                  {(() => {
+                    const grouped = [...(featureListQ.data ?? [])]
+                      .filter((f) => !isPlatformFeature(f))
+                      .sort(compareFeatureKey);
                     if (grouped.length === 0) return null;
                     return (
-                      <section key={mode} className="space-y-2">
+                      <section className="space-y-2">
                         <div>
-                          <div className="text-sm font-medium">{PLUGIN_MODE_META[mode].label}</div>
-                          <p className="text-xs text-muted-foreground">{PLUGIN_MODE_META[mode].plain}</p>
+                          <div className="text-sm font-medium">模块</div>
+                          <p className="text-xs text-muted-foreground">统一启停与配置入口；具体规则或表单在独立配置页中管理。</p>
                         </div>
                         <Table className="min-w-[42rem] table-fixed">
                           <colgroup>
@@ -583,27 +552,27 @@ export function AccountDetail() {
                               const enabled = !!item?.enabled;
                               return (
                                 <TableRow key={f.key}>
-                                <TableCell>
-                                  <div className="flex items-center gap-2">
-                                    <div className="font-medium">{f.display_name}</div>
-                                    {isExperimentalFeature(f) && (
-                                      <Badge variant="warn">实验性</Badge>
-                                    )}
-                                  </div>
-                                  <div className="font-mono text-xs text-muted-foreground">
-                                    {f.key}
-                                    {" · "}
-                                    {item?.state ? `状态：${item.state}` : "未启用"}
-                                    {item?.last_error
-                                      ? ` · 最近错误：${item.last_error}`
-                                      : ""}
-                                  </div>
-                                  {isExperimentalFeature(f) && (
-                                    <div className="text-xs text-muted-foreground">
-                                      依赖非公开 API，启用前请确认可接受后续迁移或失效风险。
+                                  <TableCell>
+                                    <div className="flex items-center gap-2">
+                                      <div className="font-medium">{f.display_name}</div>
+                                      {isExperimentalFeature(f) && (
+                                        <Badge variant="warn">实验性</Badge>
+                                      )}
                                     </div>
-                                  )}
-                                </TableCell>
+                                    <div className="font-mono text-xs text-muted-foreground">
+                                      {f.key}
+                                      {" · "}
+                                      {item?.state ? `状态：${item.state}` : "未启用"}
+                                      {item?.last_error
+                                        ? ` · 最近错误：${item.last_error}`
+                                        : ""}
+                                    </div>
+                                    {isExperimentalFeature(f) && (
+                                      <div className="text-xs text-muted-foreground">
+                                        依赖非公开 API，启用前请确认可接受后续迁移或失效风险。
+                                      </div>
+                                    )}
+                                  </TableCell>
                                   <TableCell>
                                     <Badge variant={f.is_builtin ? "secondary" : "outline"}>
                                       {f.is_builtin ? "内置" : "第三方"}
@@ -626,29 +595,7 @@ export function AccountDetail() {
                                         const path = featureConfigPath(aid, f.key);
                                         if (path) {
                                           nav(path);
-                                          return;
                                         }
-                                        // 打开配置弹窗时同时获取 global config
-                                        getPluginGlobalConfig(f.key)
-                                          .then((gc) => {
-                                            setConfigDialog({
-                                              key: f.key,
-                                              name: f.display_name,
-                                              schema: (f.config_schema as Record<string, unknown>) ?? null,
-                                              globalConfig: gc,
-                                              accountConfig: item?.config ?? {},
-                                            });
-                                          })
-                                          .catch(() => {
-                                            // 如果获取失败，使用空配置
-                                            setConfigDialog({
-                                              key: f.key,
-                                              name: f.display_name,
-                                              schema: (f.config_schema as Record<string, unknown>) ?? null,
-                                              globalConfig: {},
-                                              accountConfig: item?.config ?? {},
-                                            });
-                                          });
                                       }}
                                     >
                                       配置 →
@@ -661,55 +608,12 @@ export function AccountDetail() {
                         </Table>
                       </section>
                     );
-                  })}
+                  })()}
                 </div>
               )}
             </CardContent>
           </Card>
 
-          <ConfigDialog
-            open={!!configDialog}
-            onOpenChange={(v) => !v && setConfigDialog(null)}
-            pluginKey={configDialog?.key ?? ""}
-            pluginName={configDialog?.name ?? ""}
-            schema={(configDialog?.schema as unknown as ConfigSchema) ?? null}
-            accountName={acc.display_name || acc.phone}
-            accountId={aid}
-            globalConfig={configDialog?.globalConfig ?? {}}
-            accountConfig={accountConfig}
-            onSave={async (globalVals, accountVals) => {
-              if (!configDialog) return;
-
-              // 1. 保存 global config（如果有变化）
-              const schema = configDialog.schema as unknown as ConfigSchema | null;
-              if (schema?.properties) {
-                const globalFields = Object.entries(schema.properties)
-                  .filter(([, f]) => f.level === "global")
-                  .map(([k]) => k);
-                const hasGlobalChanges = globalFields.some(
-                  (k) => globalVals[k] !== configDialog.globalConfig[k]
-                );
-                if (hasGlobalChanges) {
-                  const globalOnlyVals: Record<string, unknown> = {};
-                  for (const k of globalFields) {
-                    globalOnlyVals[k] = globalVals[k];
-                  }
-                  await setPluginGlobalConfig(configDialog.key, globalOnlyVals);
-                }
-              }
-
-              // 2. 保存 account config
-              if (Object.keys(accountVals).length > 0) {
-                await updateAccountFeatureConfig(aid, configDialog.key, accountVals);
-              }
-
-              // 3. 刷新数据
-              qc.invalidateQueries({ queryKey: ["account", aid, "features"] });
-              qc.invalidateQueries({ queryKey: ["plugin", "global", configDialog.key] });
-              qc.invalidateQueries({ queryKey: ["account", aid, "config", configDialog.key] });
-              qc.invalidateQueries({ queryKey: ["matrix"] });
-            }}
-          />
         </TabsContent>
 
         {/* 账号绑定普通 Bot 联动 */}
@@ -827,7 +731,7 @@ function AccountCommandsTab({ aid }: { aid: number }) {
       }
     },
     onSuccess: (_data, vars) => {
-      toast.success(vars.enabled ? "已启用命令模板" : "已停用命令模板");
+      toast.success(vars.enabled ? "已启用指令模板" : "已停用指令模板");
       qc.invalidateQueries({ queryKey: ["account", aid, "commands"] });
     },
     onError: (err) => toast.error(getErrMsg(err)),
@@ -840,9 +744,9 @@ function AccountCommandsTab({ aid }: { aid: number }) {
       <CardHeader>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <CardTitle className="text-base">自定义命令</CardTitle>
+            <CardTitle className="text-base">自定义指令</CardTitle>
             <CardDescription>
-              这里决定当前账号能不能使用全局命令模板。开启后 worker 会热加载，直接在 Telegram 内用对应命令触发。
+              这里决定当前账号能不能使用全局指令模板。开启后 worker 会热加载，直接在 Telegram 内用对应指令触发。
             </CardDescription>
           </div>
           <Button size="sm" variant="outline" onClick={() => nav("/plugins/templates")}>
@@ -867,7 +771,7 @@ function AccountCommandsTab({ aid }: { aid: number }) {
               </colgroup>
               <TableHeader>
                 <TableRow>
-                  <TableHead>命令</TableHead>
+                  <TableHead>指令</TableHead>
                   <TableHead>类型</TableHead>
                   <TableHead>说明</TableHead>
                   <TableHead>别名</TableHead>
@@ -920,10 +824,10 @@ function AccountCommandsTab({ aid }: { aid: number }) {
           </div>
         ) : (
           <div className="rounded-md border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
-            还没有任何自定义命令模板。先去模板库新建一条，再回到这里给当前账号启用。
+            还没有任何自定义指令模板。先去模板库新建一条，再回到这里给当前账号启用。
             <div className="mt-3">
               <Button size="sm" onClick={() => nav("/plugins/templates")}>
-                新建命令模板
+                新建指令模板
               </Button>
             </div>
           </div>

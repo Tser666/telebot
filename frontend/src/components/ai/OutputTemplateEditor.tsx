@@ -59,7 +59,7 @@ export const PRESET_QUOTE_TEMPLATE =
 export const PRESET_MINIMAL_TEMPLATE = "{answer}\n<code>{model}</code> · {total_tokens}t";
 
 // 翻译/简答风：不显示 quoted（即使 quote_replied=True 仅供模型上下文）
-// 适合 ,翻译 / ,简答 / ,润色 等命令
+// 适合 ,翻译 / ,简答 / ,润色 等指令
 export const PRESET_TRANSLATE_TEMPLATE = "{answer}\n\n<i>— {model}</i>";
 
 export const OUTPUT_TEMPLATE_PRESETS: OutputTemplatePreset[] = [
@@ -77,14 +77,14 @@ export const OUTPUT_TEMPLATE_PLACEHOLDERS: OutputTemplatePlaceholder[] = [
   { insert: "{display_input}", label: "输入", desc: "用户的输入：被回复消息正文（优先）/ 没有则用问题", group: "上下文" },
   { insert: "{display_input_first_2}", label: "输入前2行", desc: "输入的前 2 行（折叠用）", group: "上下文" },
   { insert: "{display_input_rest}", label: "输入剩余", desc: "输入从第 3 行起（配 <blockquote expandable> 折叠）", group: "上下文" },
-  { insert: "{question}", label: "问题", desc: "用户在命令后跟的问题", group: "上下文" },
+  { insert: "{question}", label: "问题", desc: "用户在指令后跟的问题", group: "上下文" },
   { insert: "{quoted}", label: "被引用", desc: "被回复消息的正文（无被回复时为空）", group: "上下文" },
   { insert: "{model}", label: "模型", desc: "模型展示名（优先使用 Provider 模型标签）", group: "模型" },
   { insert: "{model_id}", label: "模型ID", desc: "API 实际返回的原始模型 ID", group: "模型" },
   { insert: "{provider}", label: "提供商", desc: "提供商名称（如 Any GPT）", group: "模型" },
   { insert: "{provider_kind}", label: "厂商", desc: "openai / anthropic / ollama", group: "模型" },
-  { insert: "{command}", label: "命令", desc: "当前命令模板名称，如 ai / search / image", group: "运行" },
-  { insert: "{mode}", label: "AI模式", desc: "当前命令模式：chat / search / image / video 等", group: "运行" },
+  { insert: "{command}", label: "指令", desc: "当前指令模板名称，如 ai / search / image", group: "运行" },
+  { insert: "{mode}", label: "AI模式", desc: "当前指令模式：chat / search / image / video 等", group: "运行" },
   { insert: "{api_format}", label: "实际协议", desc: "本次实际调用协议：chat_completions / responses / anthropic_messages", group: "协议" },
   { insert: "{api_protocol}", label: "API协议", desc: "实际协议的别名，等同于 {api_format}", group: "协议" },
   { insert: "{configured_api_format}", label: "配置协议", desc: "Provider 默认 API 协议", group: "协议" },
@@ -276,7 +276,7 @@ export function OutputTemplateEditor({
       {!escapeValues && (
         <p className="rounded-md border px-3 py-1.5 text-xs alert-warning">
           ⚠ 关闭自动转义后，{"{answer}"} 里的 markdown 字符会被 TG 解析为格式（高级用法）；
-          解析失败时本条命令会回落为纯文本展示
+          解析失败时本条指令会回落为纯文本展示
         </p>
       )}
 

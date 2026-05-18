@@ -1,25 +1,18 @@
 telepilot.example.com {
-    encode gzip
+    encode gzip zstd
 
-    # 限流：每个 IP 每分钟 60 个写请求
-    @writes method POST PUT PATCH DELETE
-    rate_limit @writes 60r/m
-
-    # API 反代到本机后端（仅本地监听）
-    handle /api/* {
-        reverse_proxy 127.0.0.1:8000 {
-            header_up X-Real-IP {remote}
-            header_up X-Forwarded-For {remote}
-        }
-    }
-
-    # 前端静态资源（把路径改成你的真实路径）
-    handle {
-        root * /opt/telepilot/frontend/dist
-        try_files {path} /index.html
-        file_server
+    # 反代到 docker compose 的 frontend nginx 容器。
+    # 推荐 .env 设置：WEB_PORT_PUBLISH=127.0.0.1:8080
+    reverse_proxy 127.0.0.1:8080 {
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
     }
 
     # 安全响应头
-    header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "same-origin"
+    }
 }

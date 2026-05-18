@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/card";
 import { getErrCode, getErrMsg } from "@/lib/api";
 import { login, register } from "@/lib/auth";
+import { BrandLogo } from "@/components/BrandLogo";
 
 type Mode = "login" | "register";
 
@@ -100,105 +101,116 @@ export function Login() {
   const submitting = loginMut.isPending || registerMut.isPending;
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/40 p-6">
-      <Card className="w-full max-w-sm">
-        <CardHeader>
-          <CardTitle>{isLogin ? "登录" : "首次部署 · 创建管理员"}</CardTitle>
-          <CardDescription>
-            {isLogin
-              ? "TelePilot 管理控制台"
-              : "本系统仅有一个超级管理员，密码请妥善保管"}
-          </CardDescription>
-        </CardHeader>
-        <form onSubmit={onSubmit}>
-          <CardContent className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="username">用户名</Label>
-              <Input
-                id="username"
-                autoComplete="username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="password">密码</Label>
-              {/*
-                密码框 + 右侧显示/隐藏按钮：iOS Safari 在 type="password" 时强制系统键盘，
-                切到 type="text" 后第三方输入法（搜狗 / 百度等）才能工作。
-              */}
-              <div className="relative">
-                <Input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
-                  autoComplete={isLogin ? "current-password" : "new-password"}
-                  // 切到 text 时关掉自动大写 / 自动更正避免污染密码
-                  autoCapitalize={showPassword ? "none" : undefined}
-                  autoCorrect={showPassword ? "off" : undefined}
-                  spellCheck={showPassword ? false : undefined}
-                  className="pr-10"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  aria-label={showPassword ? "隐藏密码" : "显示密码"}
-                  title={
-                    showPassword
-                      ? "隐藏密码（切回安全的系统键盘）"
-                      : "显示密码（iOS 上可用第三方输入法）"
-                  }
-                  // tabindex=-1 让 Tab 不停在按钮上，密码 → 提交直接 enter
-                  tabIndex={-1}
-                >
-                  {showPassword ? (
-                    <EyeOff className="h-4 w-4" />
-                  ) : (
-                    <Eye className="h-4 w-4" />
-                  )}
-                </button>
-              </div>
-              {showPassword && (
-                <p className="text-[11px] text-amber-600 dark:text-amber-300">
-                  ⚠ 密码已显示；输完后建议点击眼睛图标隐藏
-                </p>
-              )}
-            </div>
-            {isLogin && needTotp && (
+    <div className="grid min-h-screen place-items-center bg-background p-6">
+      <div className="w-full max-w-sm space-y-5">
+        <div className="flex items-center justify-center gap-3">
+          <div className="grid h-11 w-11 place-items-center">
+            <BrandLogo className="h-11 w-11 shadow-sm" />
+          </div>
+          <div>
+            <div className="text-2xl font-bold tracking-tight">TelePilot</div>
+            <p className="text-xs font-medium text-muted-foreground">管理控制台</p>
+          </div>
+        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>{isLogin ? "登录" : "首次部署 · 创建管理员"}</CardTitle>
+            <CardDescription>
+              {isLogin
+                ? "使用管理员账号进入工作台"
+                : "本系统仅有一个超级管理员，密码请妥善保管"}
+            </CardDescription>
+          </CardHeader>
+          <form onSubmit={onSubmit}>
+            <CardContent className="space-y-4">
               <div className="space-y-1.5">
-                <Label htmlFor="totp">二次验证码 (TOTP)</Label>
+                <Label htmlFor="username">用户名</Label>
                 <Input
-                  id="totp"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  maxLength={6}
-                  value={totpCode}
-                  onChange={(e) => setTotpCode(e.target.value)}
-                  placeholder="6 位数字"
+                  id="username"
+                  autoComplete="username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
                 />
               </div>
-            )}
-          </CardContent>
-          <CardFooter className="flex flex-col gap-2">
-            <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting ? "提交中…" : isLogin ? "登录" : "注册并登录"}
-            </Button>
-            <button
-              type="button"
-              className="text-xs text-muted-foreground hover:underline"
-              onClick={() => {
-                setMode(isLogin ? "register" : "login");
-                setNeedTotp(false);
-                setTotpCode("");
-              }}
-            >
-              {isLogin ? "首次部署？点此创建管理员" : "已有账号？返回登录"}
-            </button>
-          </CardFooter>
-        </form>
-      </Card>
+              <div className="space-y-1.5">
+                <Label htmlFor="password">密码</Label>
+                {/*
+                  密码框 + 右侧显示/隐藏按钮：iOS Safari 在 type="password" 时强制系统键盘，
+                  切到 type="text" 后第三方输入法（搜狗 / 百度等）才能工作。
+                */}
+                <div className="relative">
+                  <Input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    autoComplete={isLogin ? "current-password" : "new-password"}
+                    // 切到 text 时关掉自动大写 / 自动更正避免污染密码
+                    autoCapitalize={showPassword ? "none" : undefined}
+                    autoCorrect={showPassword ? "off" : undefined}
+                    spellCheck={showPassword ? false : undefined}
+                    className="pr-10"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                    aria-label={showPassword ? "隐藏密码" : "显示密码"}
+                    title={
+                      showPassword
+                        ? "隐藏密码（切回安全的系统键盘）"
+                        : "显示密码（iOS 上可用第三方输入法）"
+                    }
+                    // tabindex=-1 让 Tab 不停在按钮上，密码 → 提交直接 enter
+                    tabIndex={-1}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+                {showPassword && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-300">
+                    密码已显示；输完后建议点击眼睛图标隐藏
+                  </p>
+                )}
+              </div>
+              {isLogin && needTotp && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="totp">二次验证码 (TOTP)</Label>
+                  <Input
+                    id="totp"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    value={totpCode}
+                    onChange={(e) => setTotpCode(e.target.value)}
+                    placeholder="6 位数字"
+                  />
+                </div>
+              )}
+            </CardContent>
+            <CardFooter className="flex flex-col gap-2">
+              <Button type="submit" className="w-full" disabled={submitting}>
+                {submitting ? "提交中…" : isLogin ? "登录" : "注册并登录"}
+              </Button>
+              <button
+                type="button"
+                className="text-xs text-muted-foreground hover:underline"
+                onClick={() => {
+                  setMode(isLogin ? "register" : "login");
+                  setNeedTotp(false);
+                  setTotpCode("");
+                }}
+              >
+                {isLogin ? "首次部署？点此创建管理员" : "已有账号？返回登录"}
+              </button>
+            </CardFooter>
+          </form>
+        </Card>
+      </div>
     </div>
   );
 }

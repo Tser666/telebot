@@ -32,7 +32,7 @@ import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
-const MASKED_SECRET_PLACEHOLDER = "••••••••••••••••";
+export const MASKED_SECRET_PLACEHOLDER = "••••••••••••••••";
 
 export interface ConfigField {
   key: string;
@@ -87,8 +87,8 @@ export function ConfigDialog({
   const handleSave = useCallback(async () => {
     if (!onSave) return;
     const properties = ((schema as ConfigSchema | null)?.properties ?? {}) as Record<string, ConfigField>;
-    const editableGlobalVals = withoutReadOnlyValues(globalVals, properties);
-    const editableAccountVals = withoutReadOnlyValues(accountVals, properties);
+    const editableGlobalVals = withoutReadOnlyValues(globalVals, properties, globalConfig);
+    const editableAccountVals = withoutReadOnlyValues(accountVals, properties, accountConfig);
     setSaving(true);
     try {
       await onSave(editableGlobalVals, editableAccountVals);
@@ -105,18 +105,7 @@ export function ConfigDialog({
   useEffect(() => {
     if (open && schema && typeof schema === "object" && "properties" in schema) {
       const s = schema as ConfigSchema;
-      const gv: Record<string, unknown> = {};
-      const av: Record<string, unknown> = {};
-      for (const [k, f] of Object.entries(s.properties)) {
-        // 合并顺序：schema defaults < globalConfig < accountConfig
-        const effectiveVal = accountConfig[k] ?? globalConfig[k] ?? f.default;
-        const displayVal = isSensitiveConfigKey(k) && isRedactedSecretValue(effectiveVal) ? "" : effectiveVal;
-        if (f.level === "global") {
-          gv[k] = displayVal;
-        } else {
-          av[k] = displayVal;
-        }
-      }
+      const { globalVals: gv, accountVals: av } = buildScopedConfigValues(s, globalConfig, accountConfig);
       setGlobalVals(gv);
       setAccountVals(av);
     }
@@ -129,7 +118,7 @@ export function ConfigDialog({
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>{pluginName} — 配置</DialogTitle>
-            <DialogDescription>该插件没有可配置的选项。</DialogDescription>
+            <DialogDescription>该模块没有可配置的选项。</DialogDescription>
           </DialogHeader>
           <DialogFooter><Button onClick={() => onOpenChange(false)}>关闭</Button></DialogFooter>
         </DialogContent>
@@ -146,7 +135,7 @@ export function ConfigDialog({
         <DialogHeader>
           <DialogTitle>{pluginName} — 配置</DialogTitle>
           <DialogDescription>
-            插件: <code className="text-xs">{pluginKey}</code>
+            模块: <code className="text-xs">{pluginKey}</code>
             {accountName && <> · 账号: {accountName}</>}
           </DialogDescription>
         </DialogHeader>
@@ -183,7 +172,7 @@ export function ConfigDialog({
   );
 }
 
-type FieldEntry = [string, ConfigField];
+export type FieldEntry = [string, ConfigField];
 
 interface ConfigScopeSectionProps {
   title: string;
@@ -194,7 +183,7 @@ interface ConfigScopeSectionProps {
   onChange: (key: string, value: unknown) => void;
 }
 
-function ConfigScopeSection({
+export function ConfigScopeSection({
   title,
   description,
   fields,
@@ -578,18 +567,37 @@ function formatConfigValue(value: unknown): string {
   return String(value);
 }
 
-function withoutReadOnlyValues(
+export function buildScopedConfigValues(
+  schema: ConfigSchema,
+  globalConfig: Record<string, unknown>,
+  accountConfig: Record<string, unknown>,
+): { globalVals: Record<string, unknown>; accountVals: Record<string, unknown> } {
+  const globalVals: Record<string, unknown> = {};
+  const accountVals: Record<string, unknown> = {};
+  for (const [key, field] of Object.entries(schema.properties)) {
+    // 合并顺序：schema defaults < globalConfig < accountConfig
+    const effectiveVal = accountConfig[key] ?? globalConfig[key] ?? field.default;
+    const displayVal = isSensitiveConfigKey(key) && isRedactedSecretValue(effectiveVal) ? "" : effectiveVal;
+    if (field.level === "global") {
+      globalVals[key] = displayVal;
+    } else {
+      accountVals[key] = displayVal;
+    }
+  }
+  return { globalVals, accountVals };
+}
+
+export function withoutReadOnlyValues(
   values: Record<string, unknown>,
   properties: Record<string, ConfigField>,
+  originalValues: Record<string, unknown> = {},
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(values)) {
     const field = properties[key];
     if (field && isReadOnlyField(key, field)) continue;
-    if (isSensitiveConfigKey(key) && isRedactedSecretValue(value)) {
-      out[key] = "";
-      continue;
-    }
+    if (isSensitiveConfigKey(key) && isRedactedSecretValue(originalValues[key]) && value === "") continue;
+    if (isSensitiveConfigKey(key) && isRedactedSecretValue(value)) continue;
     out[key] = value;
   }
   return out;

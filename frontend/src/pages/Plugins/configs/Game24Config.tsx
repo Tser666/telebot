@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
-import { listAccountFeatures } from "@/api/accounts";
+import { listAccountFeatures, toggleAccountFeature } from "@/api/accounts";
 import { getSystemSettings } from "@/api/system";
 import { CommandBadge } from "@/components/CommandBadge";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/misc";
+import { Switch } from "@/components/ui/switch";
 import { getErrMsg } from "@/lib/api";
 
 interface Game24Config {
@@ -96,6 +97,15 @@ export function Game24ConfigPage() {
     onError: (err) => toast.error(getErrMsg(err)),
   });
 
+  const toggleMut = useMutation({
+    mutationFn: (enabled: boolean) => toggleAccountFeature(aid, "game24", enabled),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["account", aid, "features"] });
+      qc.invalidateQueries({ queryKey: ["matrix"] });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
   function handleSave() {
     const timeout = parseClampedInt(timeoutInput, 30, 3600);
     if (timeout === null) {
@@ -103,6 +113,12 @@ export function Game24ConfigPage() {
       return;
     }
     saveMut.mutate({ command, timeout });
+  }
+
+  function resetForm() {
+    setCommand(currentConfig.command ?? DEFAULT_CONFIG.command);
+    setTimeoutInput(String(currentConfig.timeout ?? DEFAULT_CONFIG.timeout));
+    setDirty(false);
   }
 
   if (!aid) return <p>账号 ID 不合法</p>;
@@ -123,31 +139,33 @@ export function Game24ConfigPage() {
         <h1 className="text-2xl font-semibold tracking-tight">24 点游戏</h1>
       </div>
 
+      <div className="sticky top-0 z-30 -mx-2 rounded-b-lg border bg-background/95 px-2 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="text-sm">
+            <div className="font-medium">配置操作</div>
+            <div className="text-xs text-muted-foreground">
+              {dirty ? "有未保存修改，保存后 worker 会热加载。" : "当前配置已同步。"}
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <Button disabled={!dirty || saveMut.isPending} onClick={handleSave}>
+              {saveMut.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              保存配置
+            </Button>
+            <Button type="button" variant="ghost" disabled={!dirty || saveMut.isPending} onClick={resetForm} className="px-0">
+              撤销
+            </Button>
+          </div>
+        </div>
+      </div>
+
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">24 点游戏配置</CardTitle>
-          <CardDescription>
-            配置触发指令名和答题限时。修改后 worker 会自动热加载，无需重启。
-          </CardDescription>
+          <CardTitle className="text-base">使用说明</CardTitle>
+          <CardDescription>在群内发起 24 点答题，首个算对的人获得奖金。</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-6 max-w-lg">
-          {/* 状态 */}
-          {game24Feature && (
-            <div className="rounded-md border bg-muted/30 p-3 text-xs">
-              <div className="font-medium">当前状态</div>
-              <div className="mt-1 text-muted-foreground">
-                启用：{game24Feature.enabled ? "是" : "否"} ·
-                状态：{game24Feature.state}
-                {game24Feature.last_error
-                  ? ` · 最近错误：${game24Feature.last_error}`
-                  : ""}
-              </div>
-            </div>
-          )}
-
-          {/* 使用说明 */}
+        <CardContent>
           <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
-            <div className="font-medium text-foreground">使用说明</div>
             <ul className="mt-1.5 list-inside list-disc space-y-0.5">
               <li>在群内发送 <CommandBadge>{cmdPrefix}{command} 奖金金额</CommandBadge> 开始游戏（例：<CommandBadge>{cmdPrefix}{command} 2000</CommandBadge>）</li>
               <li>系统生成 4 个数字，第一个用算式答对的人获得奖金</li>
@@ -155,18 +173,47 @@ export function Game24ConfigPage() {
               <li>指令前缀跟随系统设置，可在系统配置中修改</li>
             </ul>
           </div>
+        </CardContent>
+      </Card>
 
-          {/* 指令名 */}
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle className="text-base">功能总开关</CardTitle>
+              <CardDescription>
+                关闭后 24 点游戏不会响应当前账号的触发指令。
+                {game24Feature?.state ? ` · 状态：${game24Feature.state}` : ""}
+                {game24Feature?.last_error ? ` · 最近错误：${game24Feature.last_error}` : ""}
+              </CardDescription>
+            </div>
+            <Switch
+              checked={Boolean(game24Feature?.enabled)}
+              disabled={toggleMut.isPending || !game24Feature}
+              onCheckedChange={(enabled) => toggleMut.mutate(enabled)}
+            />
+          </div>
+        </CardHeader>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">配置</CardTitle>
+          <CardDescription>
+            配置触发指令名和答题限时。修改后 worker 会自动热加载，无需重启。
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-6 md:grid-cols-2">
           <div className="space-y-1.5">
             <Label htmlFor="command">触发指令名</Label>
             <p className="text-xs text-muted-foreground">
-              在系统命令前缀后输入此指令名触发游戏。默认
+              在系统指令前缀后输入此指令名触发游戏。默认
               <CommandBadge className="mx-1">24d</CommandBadge>
               ，即发送 <CommandBadge>{cmdPrefix}{command} 奖金金额</CommandBadge> 开始游戏。
             </p>
             <Input
               id="command"
-              className="font-mono w-40"
+              className="w-full font-mono"
               value={command}
               onChange={(e) => {
                 setCommand(e.target.value.trim());
@@ -175,7 +222,6 @@ export function Game24ConfigPage() {
             />
           </div>
 
-          {/* 超时 */}
           <div className="space-y-1.5">
             <Label htmlFor="timeout">答题限时（秒）</Label>
             <p className="text-xs text-muted-foreground">
@@ -184,7 +230,7 @@ export function Game24ConfigPage() {
             <Input
               id="timeout"
               inputMode="numeric"
-              className="w-32"
+              className="w-full"
               value={timeoutInput}
               onChange={(e) => {
                 setTimeoutInput(e.target.value.replace(/[^0-9]/g, ""));
@@ -193,32 +239,6 @@ export function Game24ConfigPage() {
             />
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 pt-2">
-            <Button
-              disabled={!dirty || saveMut.isPending}
-              onClick={handleSave}
-            >
-              {saveMut.isPending && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
-              保存
-            </Button>
-            {dirty && (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => {
-                  if (currentConfig.command !== undefined) {
-                    setCommand(currentConfig.command);
-                  }
-                  if (currentConfig.timeout !== undefined) {
-                    setTimeoutInput(String(currentConfig.timeout));
-                  }
-                  setDirty(false);
-                }}
-              >
-                撤销
-              </Button>
-            )}
-          </div>
         </CardContent>
       </Card>
     </div>

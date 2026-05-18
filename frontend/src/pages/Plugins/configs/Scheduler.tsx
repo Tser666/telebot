@@ -48,6 +48,7 @@ import { formatDateTime } from "@/lib/utils";
 import { DryRunDetail } from "@/components/DryRunDetail";
 import {
   Field,
+  RuleInfoBox,
   RuleEditDialogShell,
   RulePageHeader,
   useRuleCrud,
@@ -302,6 +303,12 @@ export function SchedulerConfig() {
         backHref={fromAccountRoute ? `/accounts/${aid}?tab=features` : "/plugins/scheduler"}
       />
 
+      <RuleInfoBox>
+        <li>定时任务按账号隔离运行，每个账号独立维护规则。</li>
+        <li>支持 cron 定时、once 单次和 interval 间隔触发。</li>
+        <li>动作可以发送消息、执行指令或调用 AI 模型；是否执行由每条规则自己的启用状态控制。</li>
+      </RuleInfoBox>
+
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
@@ -324,7 +331,7 @@ export function SchedulerConfig() {
             <div>
               <CardTitle className="text-base">规则</CardTitle>
               <CardDescription>
-                支持 cron 定时 / once 单次 / interval 间隔，触发动作：发送消息 / 执行命令 / 调用 LLM
+                支持 cron 定时 / once 单次 / interval 间隔，触发动作：发送消息 / 执行指令 / 调用 LLM
               </CardDescription>
             </div>
             <Button onClick={openCreate}>
@@ -545,7 +552,7 @@ export function SchedulerConfig() {
               }
             >
               <option value="send_message">发送消息</option>
-              <option value="run_command">执行命令</option>
+              <option value="run_command">执行指令</option>
               <option value="call_llm">调用 LLM</option>
             </Select>
           </Field>
@@ -619,7 +626,7 @@ export function SchedulerConfig() {
           ) : null}
 
           {form.config.action.type === "run_command" ? (
-            <Field label="命令">
+            <Field label="指令">
               <Input
                 value={form.config.action.command || ""}
                 onChange={(e) =>
@@ -813,6 +820,6 @@ function triggerLabel(cfg: SchedulerRuleConfig): string {
 
 const ACTION_TYPE_LABELS: Record<string, string> = {
   send_message: "发送消息",
-  run_command: "执行命令",
+  run_command: "执行指令",
   call_llm: "调用 LLM",
 };

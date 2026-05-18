@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowLeft, Loader2, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 
-import { listAccountFeatures } from "@/api/accounts";
+import { listAccountFeatures, toggleAccountFeature } from "@/api/accounts";
 import { getSystemSettings } from "@/api/system";
 import { CommandBadge } from "@/components/CommandBadge";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/misc";
 import { Select } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { getErrMsg } from "@/lib/api";
 
@@ -111,7 +112,7 @@ const TEMPLATE_PLACEHOLDERS = [
   { key: "{elapsed}", label: "耗时" },
   { key: "{model}", label: "主模型" },
   { key: "{image_model}", label: "图片模型" },
-  { key: "{command}", label: "命令" },
+  { key: "{command}", label: "指令" },
   { key: "{image_size}", label: "分辨率" },
   { key: "{aspect_ratio}", label: "比例" },
   { key: "{image_format}", label: "格式" },
@@ -217,6 +218,15 @@ export function CodexImageConfigPage() {
     onError: (err) => toast.error(getErrMsg(err)),
   });
 
+  const toggleMut = useMutation({
+    mutationFn: (enabled: boolean) => toggleAccountFeature(aid, "codex_image", enabled),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["account", aid, "features"] });
+      qc.invalidateQueries({ queryKey: ["matrix"] });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
   function handleSave() {
     const maxWaitSeconds = parseClampedInt(maxWaitInput, 60, 1800);
     if (maxWaitSeconds === null) {
@@ -244,6 +254,31 @@ export function CodexImageConfigPage() {
       reasoning_effort: reasoningEffort,
       custom_instructions: customInstructions,
     });
+  }
+
+  function resetForm() {
+    setCommand(currentConfig.command ?? DEFAULT_CONFIG.command);
+    setAccessToken("");
+    setHasToken(Boolean(currentConfig.access_token));
+    setShowToken(false);
+    setModel(normalizeMainModel(currentConfig.model));
+    setImageModel(currentConfig.image_model ?? DEFAULT_CONFIG.image_model);
+    setMaxWaitInput(String(currentConfig.max_wait_seconds ?? DEFAULT_CONFIG.max_wait_seconds));
+    setStatusIntervalInput(
+      String(
+        currentConfig.status_interval_seconds ??
+          DEFAULT_CONFIG.status_interval_seconds,
+      ),
+    );
+    setMessageTemplate(currentConfig.message_template ?? DEFAULT_CONFIG.message_template);
+    setImageSize(currentConfig.image_size ?? DEFAULT_CONFIG.image_size);
+    setAspectRatio(currentConfig.aspect_ratio ?? DEFAULT_CONFIG.aspect_ratio);
+    setImageFormat(currentConfig.image_format ?? DEFAULT_CONFIG.image_format);
+    setDeleteCommandMessage(currentConfig.delete_command_message ?? DEFAULT_CONFIG.delete_command_message);
+    setShowRevisedPrompt(currentConfig.show_revised_prompt ?? DEFAULT_CONFIG.show_revised_prompt);
+    setReasoningEffort(currentConfig.reasoning_effort ?? DEFAULT_CONFIG.reasoning_effort);
+    setCustomInstructions(currentConfig.custom_instructions ?? DEFAULT_CONFIG.custom_instructions);
+    setDirty(false);
   }
 
   const effectiveCommand = command || DEFAULT_CONFIG.command;
@@ -286,15 +321,32 @@ export function CodexImageConfigPage() {
         </h1>
       </div>
 
+      <div className="sticky top-0 z-30 -mx-2 rounded-b-lg border bg-background/95 px-2 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="text-sm">
+            <div className="font-medium">配置操作</div>
+            <div className="text-xs text-muted-foreground">
+              {dirty ? "有未保存修改，保存后 worker 会热加载。" : "当前配置已同步。"}
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <Button disabled={!dirty || saveMut.isPending} onClick={handleSave}>
+              {saveMut.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              保存配置
+            </Button>
+            <Button type="button" variant="ghost" disabled={!dirty || saveMut.isPending} onClick={resetForm} className="px-0">
+              撤销
+            </Button>
+          </div>
+        </div>
+      </div>
+
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Codex 图片生成配置</CardTitle>
-          <CardDescription>
-            配置 Codex API 的鉴权 Token、模型和超时时间。修改后 worker
-            会自动热加载，无需重启。
-          </CardDescription>
+          <CardTitle className="text-base">使用说明</CardTitle>
+          <CardDescription>用当前账号通过 Codex 生成图片，支持文本和参考图。</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-6 max-w-lg">
+        <CardContent className="space-y-4">
           <div className="flex items-start gap-2 rounded-md border px-3 py-2 text-xs alert-warning">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <div>
@@ -304,24 +356,7 @@ export function CodexImageConfigPage() {
               </div>
             </div>
           </div>
-
-          {/* 状态 */}
-          {feature && (
-            <div className="rounded-md border bg-muted/30 p-3 text-xs">
-              <div className="font-medium">当前状态</div>
-              <div className="mt-1 text-muted-foreground">
-                启用：{feature.enabled ? "是" : "否"} ·
-                状态：{feature.state}
-                {feature.last_error
-                  ? ` · 最近错误：${feature.last_error}`
-                  : ""}
-              </div>
-            </div>
-          )}
-
-          {/* 使用说明 */}
           <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
-            <div className="font-medium text-foreground">使用说明</div>
             <ul className="mt-1.5 list-inside list-disc space-y-0.5">
               <li>
                 发送 <CommandBadge>{cmdPrefix}{effectiveCommand} 提示词</CommandBadge> 纯文本生成图片
@@ -335,7 +370,7 @@ export function CodexImageConfigPage() {
                 <CommandBadge>{cmdPrefix}{effectiveCommand} --比例 4:3 --size 1536x1024 --format jpeg 云海里的城市</CommandBadge>
               </li>
               <li>
-                也可通过命令{" "}
+                也可通过指令{" "}
                 <CommandBadge>
                   {cmdPrefix}{effectiveCommand} token 你的access_token
                 </CommandBadge>{" "}
@@ -346,18 +381,48 @@ export function CodexImageConfigPage() {
               </li>
             </ul>
           </div>
+        </CardContent>
+      </Card>
 
-          {/* 指令名 */}
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle className="text-base">功能总开关</CardTitle>
+              <CardDescription>
+                关闭后 Codex 图片生成不会响应当前账号的触发指令。
+                {feature?.state ? ` · 状态：${feature.state}` : ""}
+                {feature?.last_error ? ` · 最近错误：${feature.last_error}` : ""}
+              </CardDescription>
+            </div>
+            <Switch
+              checked={Boolean(feature?.enabled)}
+              disabled={toggleMut.isPending || !feature}
+              onCheckedChange={(enabled) => toggleMut.mutate(enabled)}
+            />
+          </div>
+        </CardHeader>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">配置</CardTitle>
+          <CardDescription>
+            配置 Codex API 的鉴权 Token、模型和超时时间。修改后 worker 会自动热加载，无需重启。
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
           <div className="space-y-1.5">
             <Label htmlFor="command">触发指令名</Label>
             <p className="text-xs text-muted-foreground">
-              在系统命令前缀后输入此指令触发图片生成。默认
+              在系统指令前缀后输入此指令触发图片生成。默认
               <CommandBadge className="mx-1">cximg</CommandBadge>
               ，支持中文，如 <CommandBadge>画图</CommandBadge>。
             </p>
             <Input
               id="command"
-              className="font-mono w-40"
+              className="w-full font-mono"
               value={command}
               onChange={(e) => {
                 setCommand(e.target.value.trim());
@@ -464,7 +529,7 @@ export function CodexImageConfigPage() {
             <Input
               id="max-wait"
               inputMode="numeric"
-              className="w-32"
+              className="w-full"
               value={maxWaitInput}
               onChange={(e) => {
                 setMaxWaitInput(e.target.value.replace(/[^0-9]/g, ""));
@@ -482,7 +547,7 @@ export function CodexImageConfigPage() {
             <Input
               id="status-interval"
               inputMode="numeric"
-              className="w-32"
+              className="w-full"
               value={statusIntervalInput}
               onChange={(e) => {
                 setStatusIntervalInput(e.target.value.replace(/[^0-9]/g, ""));
@@ -491,7 +556,9 @@ export function CodexImageConfigPage() {
             />
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-3">
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-3">
             <div className="space-y-1.5">
               <Label htmlFor="image-size">默认分辨率</Label>
               <Select
@@ -509,7 +576,7 @@ export function CodexImageConfigPage() {
                 <option value="from_reference">from_reference（参考图尺寸）</option>
               </Select>
               <p className="text-xs text-muted-foreground">
-                <code className="mx-0.5">from_reference</code> 使用参考图尺寸；命令可用 --size 覆盖。
+                <code className="mx-0.5">from_reference</code> 使用参考图尺寸；指令可用 --size 覆盖。
               </p>
             </div>
             <div className="space-y-1.5">
@@ -533,7 +600,7 @@ export function CodexImageConfigPage() {
                 <option value="from_reference">from_reference（参考图比例）</option>
               </Select>
               <p className="text-xs text-muted-foreground">
-                <code className="mx-0.5">from_reference</code> 使用参考图比例；命令可用 --比例 覆盖。
+                <code className="mx-0.5">from_reference</code> 使用参考图比例；指令可用 --比例 覆盖。
               </p>
             </div>
             <div className="space-y-1.5">
@@ -550,7 +617,7 @@ export function CodexImageConfigPage() {
                 <option value="jpeg">jpeg</option>
                 <option value="webp">webp</option>
               </Select>
-              <p className="text-xs text-muted-foreground">命令可用 --format 或 --格式 覆盖。</p>
+              <p className="text-xs text-muted-foreground">指令可用 --format 或 --格式 覆盖。</p>
             </div>
           </div>
 
@@ -614,7 +681,7 @@ export function CodexImageConfigPage() {
                   setDirty(true);
                 }}
               />
-              完成后删除命令消息
+              完成后删除指令消息
             </label>
             <label className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
               <input
@@ -662,46 +729,6 @@ export function CodexImageConfigPage() {
             />
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 pt-2">
-            <Button disabled={!dirty || saveMut.isPending} onClick={handleSave}>
-              {saveMut.isPending && (
-                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-              )}
-              保存
-            </Button>
-            {dirty && (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => {
-                  setCommand(currentConfig.command ?? DEFAULT_CONFIG.command);
-                  setAccessToken("");
-                  setHasToken(Boolean(currentConfig.access_token));
-                  setShowToken(false);
-                  setModel(normalizeMainModel(currentConfig.model));
-                  setImageModel(currentConfig.image_model ?? DEFAULT_CONFIG.image_model);
-                  setMaxWaitInput(String(currentConfig.max_wait_seconds ?? DEFAULT_CONFIG.max_wait_seconds));
-                  setStatusIntervalInput(
-                    String(
-                      currentConfig.status_interval_seconds ??
-                        DEFAULT_CONFIG.status_interval_seconds,
-                    ),
-                  );
-                  setMessageTemplate(currentConfig.message_template ?? DEFAULT_CONFIG.message_template);
-                  setImageSize(currentConfig.image_size ?? DEFAULT_CONFIG.image_size);
-                  setAspectRatio(currentConfig.aspect_ratio ?? DEFAULT_CONFIG.aspect_ratio);
-                  setImageFormat(currentConfig.image_format ?? DEFAULT_CONFIG.image_format);
-                  setDeleteCommandMessage(currentConfig.delete_command_message ?? DEFAULT_CONFIG.delete_command_message);
-                  setShowRevisedPrompt(currentConfig.show_revised_prompt ?? DEFAULT_CONFIG.show_revised_prompt);
-                  setReasoningEffort(currentConfig.reasoning_effort ?? DEFAULT_CONFIG.reasoning_effort);
-                  setCustomInstructions(currentConfig.custom_instructions ?? DEFAULT_CONFIG.custom_instructions);
-                  setDirty(false);
-                }}
-              >
-                撤销
-              </Button>
-            )}
-          </div>
         </CardContent>
       </Card>
     </div>

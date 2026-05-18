@@ -1,8 +1,9 @@
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowRight,
+  BookOpen,
   Bot,
   CheckCircle2,
   FileText,
@@ -23,6 +24,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/misc";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CommandBadge } from "@/components/CommandBadge";
@@ -57,10 +63,10 @@ function commandModeLabel(template: CommandTemplateOut) {
 }
 
 export function AIIndex() {
-  const [searchParams] = useSearchParams();
-  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const [accountPickerOpen, setAccountPickerOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(searchParams.get("help") === "1");
   const activeTab = normalizeTab(searchParams.get("tab"));
   const providersQ = useQuery({
     queryKey: ["llm-providers"],
@@ -76,7 +82,7 @@ export function AIIndex() {
   });
   const usageQ = useQuery({
     queryKey: ["llm-usage", "recent", "summary"],
-    queryFn: () => listRecentLLMUsage(20),
+    queryFn: () => listRecentLLMUsage(100),
     retry: false,
     enabled: (providersQ.data?.length ?? 0) > 0,
   });
@@ -91,6 +97,18 @@ export function AIIndex() {
     enabled: false,
     retry: false,
   });
+
+  useEffect(() => {
+    setHelpOpen(searchParams.get("help") === "1");
+  }, [searchParams]);
+
+  const setHelpMenuOpen = (open: boolean) => {
+    setHelpOpen(open);
+    const next = new URLSearchParams(searchParams);
+    if (open) next.set("help", "1");
+    else next.delete("help");
+    setSearchParams(next, { replace: true });
+  };
 
   const loading = providersQ.isLoading || templatesQ.isLoading;
   if (loading) {
@@ -122,7 +140,7 @@ export function AIIndex() {
     const result = await accountsQ.refetch();
     const accounts = result.data ?? [];
     if (accounts.length === 0) {
-      navigate("/accounts");
+      navigate("/accounts/new");
       return;
     }
     if (accounts.length === 1) {
@@ -136,7 +154,12 @@ export function AIIndex() {
     return (
       <div className="space-y-6">
         <AIHeader />
-        <Subnav activeTab={activeTab} />
+        <Subnav
+          activeTab={activeTab}
+          helpOpen={helpOpen}
+          onHelpOpenChange={setHelpMenuOpen}
+          cmdPrefix={cmdPrefix}
+        />
         <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
           已配置 {providerCount} 个模型提供商，其中 {readyCount} 个可调用。联网搜索需要 api_format=responses 的 OpenAI provider。
         </div>
@@ -149,7 +172,12 @@ export function AIIndex() {
     return (
       <div className="space-y-6">
         <AIHeader />
-        <Subnav activeTab={activeTab} />
+        <Subnav
+          activeTab={activeTab}
+          helpOpen={helpOpen}
+          onHelpOpenChange={setHelpMenuOpen}
+          cmdPrefix={cmdPrefix}
+        />
         <RecentUsageContent />
       </div>
     );
@@ -158,7 +186,12 @@ export function AIIndex() {
   return (
     <div className="space-y-6">
       <AIHeader />
-      <Subnav activeTab={activeTab} />
+      <Subnav
+        activeTab={activeTab}
+        helpOpen={helpOpen}
+        onHelpOpenChange={setHelpMenuOpen}
+        cmdPrefix={cmdPrefix}
+      />
 
       <div className="grid gap-3 md:grid-cols-3">
         <StatusCard
@@ -170,14 +203,14 @@ export function AIIndex() {
         />
         <StatusCard
           icon={Bot}
-          label="AI 命令数"
+          label="AI 指令数"
           value={aiTemplates.length}
-          hint={aiTemplates.length > 0 ? "type=ai 模板" : "创建第一条 AI 命令模板"}
+          hint={aiTemplates.length > 0 ? "type=ai 模板" : "创建第一条 AI 指令模板"}
           ready={aiTemplates.length > 0}
         />
         <StatusCard
           icon={History}
-          label="最近 20 次"
+          label="近期调用情况"
           value={usageSummary ? `${usageSummary.request_count} 次 / 失败 ${usageSummary.failed_count}` : "暂无"}
           hint={usageSummary ? `平均耗时 ${usageSummary.avg_latency_ms}ms` : usageQ.isError ? "调用摘要暂不可用" : "触发调用后展示摘要"}
           ready={(usageSummary?.request_count ?? 0) > 0}
@@ -187,7 +220,7 @@ export function AIIndex() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">三步走</CardTitle>
-          <CardDescription>按顺序完成后，你的 Telegram 账号就能用 AI 命令回复消息。</CardDescription>
+          <CardDescription>按顺序完成后，你的 Telegram 账号就能用 AI 指令回复消息。</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 lg:grid-cols-3">
           <SetupStep
@@ -200,7 +233,7 @@ export function AIIndex() {
           />
           <SetupStep
             no="2"
-            title="创建一条 AI 命令"
+            title="创建一条 AI 指令"
             desc={<>建议先建 <CommandBadge>{cmdPrefix}ai</CommandBadge>，绑定默认模型或开启 auto 路由。</>}
             done={aiTemplates.length > 0}
             action="去创建"
@@ -208,11 +241,11 @@ export function AIIndex() {
           />
           <SetupStep
             no="3"
-            title="在账号上启用命令"
+            title="在账号上启用指令"
             desc={
               totalAccountCount > 0
-                ? `已有 ${enabledAccountCount}/${totalAccountCount} 个账号启用了至少一条 AI 命令。`
-                : "还没有账号；创建账号后到账号详情的命令 tab 勾选模板。"
+                ? `已有 ${enabledAccountCount}/${totalAccountCount} 个账号启用了至少一条 AI 指令。`
+                : "还没有账号；创建账号后到账号详情的指令 tab 勾选模板。"
             }
             done={enabledAccountCount > 0}
             action="去启用"
@@ -225,9 +258,9 @@ export function AIIndex() {
       <Dialog open={accountPickerOpen} onOpenChange={setAccountPickerOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>选择要启用 AI 命令的账号</DialogTitle>
+            <DialogTitle>选择要启用 AI 指令的账号</DialogTitle>
             <DialogDescription>
-              将跳转到账号详情的命令 Tab，你可以在那里勾选要启用的 AI 命令模板。
+              将跳转到账号详情的指令 Tab，你可以在那里勾选要启用的 AI 指令模板。
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">
@@ -252,71 +285,67 @@ export function AIIndex() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">你的 AI 命令</CardTitle>
-          <CardDescription>展示 type=ai 的命令模板；编辑会带 returnTo=/ai 回到总览。</CardDescription>
+          <CardTitle className="text-base">你的 AI 指令</CardTitle>
+          <CardDescription>展示 type=ai 的指令模板；编辑会带 returnTo=/ai 回到总览。</CardDescription>
         </CardHeader>
         <CardContent>
           {aiTemplates.length === 0 ? (
             <div className="rounded-md border border-dashed py-8 text-center">
-              <p className="text-sm text-muted-foreground">还没有 AI 命令模板。</p>
+              <p className="text-sm text-muted-foreground">还没有 AI 指令模板。</p>
               <Button asChild className="mt-3" size="sm">
                 <Link to="/plugins/templates?new=ai&returnTo=/ai">
                   <PlusCircle className="mr-1 h-4 w-4" />
-                  创建 AI 命令
+                  创建 AI 指令
                 </Link>
               </Button>
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>命令</TableHead>
-                  <TableHead>模型</TableHead>
-                  <TableHead>模式</TableHead>
-                  <TableHead>说明</TableHead>
-                  <TableHead className="w-24">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {aiTemplates.map((template) => {
-                  const provider = providerById.get(Number(template.config?.provider_id));
-                  const modelText =
-                    template.config?.mode === "image" && template.config?.image_backend === "codex_image"
-                      ? "codex_image 插件"
-                      : providerLabel(provider, template.config?.model);
-                  return (
-                    <TableRow key={template.id}>
-                      <TableCell className="font-mono">{cmdPrefix}{template.name}</TableCell>
-                      <TableCell>{modelText}</TableCell>
-                      <TableCell>
-                        <Badge variant={template.config?.routing_mode === "auto" ? "success" : "secondary"}>
-                          {commandModeLabel(template)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="max-w-[22rem] truncate text-sm text-muted-foreground">
-                        {template.description || "未填写说明"}
-                      </TableCell>
-                      <TableCell>
-                        <Button asChild variant="outline" size="sm">
-                          <Link to={`/plugins/templates?edit=${template.id}&returnTo=${encodeURIComponent("/ai")}`}>
-                            编辑
-                          </Link>
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+            <div className="overflow-x-auto">
+              <Table className="min-w-[820px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>指令</TableHead>
+                    <TableHead>模型</TableHead>
+                    <TableHead>模式</TableHead>
+                    <TableHead>说明</TableHead>
+                    <TableHead className="w-24">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {aiTemplates.map((template) => {
+                    const provider = providerById.get(Number(template.config?.provider_id));
+                    const modelText =
+                      template.config?.mode === "image" && template.config?.image_backend === "codex_image"
+                        ? "codex_image 模块"
+                        : providerLabel(provider, template.config?.model);
+                    return (
+                      <TableRow key={template.id}>
+                        <TableCell className="whitespace-nowrap font-mono">{cmdPrefix}{template.name}</TableCell>
+                        <TableCell>{modelText}</TableCell>
+                        <TableCell>
+                          <Badge variant={template.config?.routing_mode === "auto" ? "success" : "secondary"}>
+                            {commandModeLabel(template)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="max-w-[22rem] truncate text-sm text-muted-foreground">
+                          {template.description || "未填写说明"}
+                        </TableCell>
+                        <TableCell>
+                          <Button asChild variant="outline" size="sm">
+                            <Link to={`/plugins/templates?edit=${template.id}&returnTo=${encodeURIComponent("/ai")}`}>
+                              编辑
+                            </Link>
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
           )}
         </CardContent>
       </Card>
-
-      <div className="space-y-3">
-        <HowItWorks cmdPrefix={cmdPrefix} defaultOpen={location.hash === "#how-it-works"} />
-        <RecommendedSetup cmdPrefix={cmdPrefix} />
-        <Glossary />
-      </div>
     </div>
   );
 }
@@ -325,16 +354,26 @@ function AIHeader() {
   return (
     <div>
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">AI 命令中心</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">AI 中心</h1>
         <p className="text-sm text-muted-foreground">
-          让你的 Telegram 账号回复变成 AI 助手。
+          把模型、指令模板、调用记录和帮助信息集中管理。
         </p>
       </div>
     </div>
   );
 }
 
-function Subnav({ activeTab }: { activeTab: AITab }) {
+function Subnav({
+  activeTab,
+  helpOpen,
+  onHelpOpenChange,
+  cmdPrefix,
+}: {
+  activeTab: AITab;
+  helpOpen: boolean;
+  onHelpOpenChange: (open: boolean) => void;
+  cmdPrefix: string;
+}) {
   const navigate = useNavigate();
   return (
     <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
@@ -356,17 +395,57 @@ function Subnav({ activeTab }: { activeTab: AITab }) {
           </TabsTrigger>
           <TabsTrigger value="usage" className="gap-1.5">
             <History className="h-4 w-4" />
-            最近调用
+            近期调用
           </TabsTrigger>
         </TabsList>
       </Tabs>
       <Button asChild variant="outline" size="sm">
         <Link to="/plugins/templates">
           <FileText className="mr-1 h-4 w-4" />
-          已配置的命令
+          查看已配置的指令
         </Link>
       </Button>
+      <AIHelpMenu open={helpOpen} onOpenChange={onHelpOpenChange} cmdPrefix={cmdPrefix} />
     </div>
+  );
+}
+
+function AIHelpMenu({
+  open,
+  onOpenChange,
+  cmdPrefix,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  cmdPrefix: string;
+}) {
+  return (
+    <DropdownMenu modal={false} open={open} onOpenChange={onOpenChange}>
+      <DropdownMenuTrigger asChild>
+        <Button type="button" variant="outline" size="sm">
+          <BookOpen className="mr-1 h-4 w-4" />
+          AI 帮助
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        sideOffset={10}
+        className="max-h-[min(76vh,44rem)] w-[min(52rem,calc(100vw-2rem))] p-0"
+        style={{ overflowY: "auto" }}
+      >
+        <div className="border-b px-4 py-3">
+          <div className="text-base font-semibold">AI 帮助</div>
+          <div className="mt-1 text-sm text-muted-foreground">
+            工作原理、配置示例和术语速查集中在这里，避免占用总览页纵向空间。
+          </div>
+        </div>
+        <div className="space-y-4 p-4">
+          <HowItWorks cmdPrefix={cmdPrefix} defaultOpen />
+          <RecommendedSetup cmdPrefix={cmdPrefix} defaultOpen />
+          <Glossary defaultOpen />
+        </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -385,14 +464,14 @@ function StatusCard({
 }) {
   return (
     <Card className={ready ? "border-emerald-500/40 bg-emerald-500/5" : undefined}>
-      <CardHeader className="pb-2">
+      <CardHeader className="p-4 pb-2">
         <CardDescription className="inline-flex items-center gap-2">
           <Icon className="h-4 w-4" />
           {label}
         </CardDescription>
-        <CardTitle className="text-2xl">{value}</CardTitle>
+        <CardTitle className="text-xl">{value}</CardTitle>
       </CardHeader>
-      <CardContent className="text-xs text-muted-foreground">{hint}</CardContent>
+      <CardContent className="px-4 pb-4 text-xs text-muted-foreground">{hint}</CardContent>
     </Card>
   );
 }
@@ -423,7 +502,7 @@ function SetupStep({
     </>
   );
   return (
-    <div className={done ? "rounded-md border border-emerald-500/40 bg-emerald-500/5 p-4" : "rounded-md border bg-background p-4"}>
+    <div className={done ? "rounded-xl border border-emerald-500/40 bg-emerald-500/5 p-3" : "rounded-xl border bg-background p-3"}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2 font-medium">
           <span className="flex h-7 w-7 items-center justify-center rounded-full border text-xs">{no}</span>
@@ -431,9 +510,9 @@ function SetupStep({
         </div>
         {done ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <Sparkles className="h-4 w-4 text-muted-foreground" />}
       </div>
-      <p className="mt-3 min-h-10 text-sm text-muted-foreground">{desc}</p>
+      <p className="mt-2 min-h-10 text-xs leading-5 text-muted-foreground">{desc}</p>
       {href ? (
-        <Button asChild variant={done ? "outline" : "default"} size="sm" className="mt-4">
+        <Button asChild variant={done ? "outline" : "default"} size="sm" className="mt-3">
           <Link to={href}>{actionContent}</Link>
         </Button>
       ) : (
@@ -441,7 +520,7 @@ function SetupStep({
           type="button"
           variant={done ? "outline" : "default"}
           size="sm"
-          className="mt-4"
+          className="mt-3"
           disabled={actionLoading}
           onClick={onAction}
         >

@@ -190,20 +190,22 @@ export function AutoReplyConfig() {
       />
 
       <RuleInfoBox>
-        <div>✅ 保存后立即生效，无需重启 worker。</div>
-        <div>
-          ⚠ <b>仅响应别人发来的消息</b>（incoming）。用绑定的 userbot 账号自己发关键词
+        <li>保存后立即生效，无需重启 worker。</li>
+        <li>
+          <b>仅响应别人发来的消息</b>（incoming）。用绑定的 userbot 账号自己发关键词
           <b>不会触发</b>——必须用其他账号在群里 / 私聊里发。
-        </div>
-        <div>
-          🔍 不命中时去「日志中心」筛 source=plugin/worker 的 info
+        </li>
+        <li>
+          不命中时去「日志中心」筛 source=plugin/worker 的 info
           条，会显示 <code>[event]</code> 收到了什么、<code>[auto_reply]</code> 跳过的具体原因。
-        </div>
+        </li>
       </RuleInfoBox>
 
       <RuleFeatureToggleCard
         enabled={crud.isFeatureEnabled}
         onToggle={crud.toggleFeature}
+        state={crud.featureItem?.state}
+        lastError={crud.featureItem?.last_error}
       />
 
       {/* 规则列表 */}

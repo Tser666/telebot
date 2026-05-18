@@ -208,20 +208,22 @@ export function ForwardConfig() {
       />
 
       <RuleInfoBox>
-        <div>✅ 保存后立即生效，无需重启 worker。</div>
-        <div>
-          ⚠ <b>仅响应别人发来的消息</b>（incoming）。本账号自己发的消息不会被转发。
-        </div>
-        <div>
-          🚦 每条转发都会过风控引擎；触发 FloodWait 会自动 sleep ≤60s
+        <li>保存后立即生效，无需重启 worker。</li>
+        <li>
+          <b>仅响应别人发来的消息</b>（incoming）。本账号自己发的消息不会被转发。
+        </li>
+        <li>
+          每条转发都会过风控引擎；触发 FloodWait 会自动 sleep ≤60s
           后重试一次，最终失败仅写日志，不会让 worker 崩溃。
-        </div>
+        </li>
       </RuleInfoBox>
 
       <RuleFeatureToggleCard
         enabled={crud.isFeatureEnabled}
         onToggle={crud.toggleFeature}
         description="关闭后所有转发规则都不会触发；启用即生效"
+        state={crud.featureItem?.state}
+        lastError={crud.featureItem?.last_error}
       />
 
       {/* 规则列表 */}

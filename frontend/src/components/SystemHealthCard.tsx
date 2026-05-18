@@ -50,8 +50,8 @@ function ToneText({ tone, text }: { tone: Tone; text: string }) {
   return <span className={`text-sm font-medium ${cls}`}>{text}</span>;
 }
 
-export function SystemHealthCard() {
-  const [open, setOpen] = useState(false);
+export function SystemHealthCard({ defaultOpen = false }: { defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
   const qc = useQueryClient();
   const q = useQuery({
     queryKey: ["system", "health-overview"],
@@ -159,7 +159,7 @@ function HealthGrid({ data }: { data: HealthOverview }) {
       : "ok";
 
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
       {/* PostgreSQL —— "数据存储" */}
       <HealthBlock
         title="数据存储"
@@ -291,7 +291,7 @@ function HealthGrid({ data }: { data: HealthOverview }) {
             AI 模型
           </Link>
         }
-        subtitle={<>供 <CommandBadge>{cmdPrefix}ai</CommandBadge> 命令调用的大语言模型供应商</>}
+        subtitle={<>供 <CommandBadge>{cmdPrefix}ai</CommandBadge> 指令调用的大语言模型供应商</>}
         tone={
           data.providers.total === 0
             ? "warn"
@@ -310,7 +310,7 @@ function HealthGrid({ data }: { data: HealthOverview }) {
           <>
             <ToneText tone="warn" text="⚠ 还没配 AI 模型" />
             <div className="mt-1 text-xs text-muted-foreground">
-              想用 <CommandBadge>{cmdPrefix}ai</CommandBadge> 命令？去{" "}
+              想用 <CommandBadge>{cmdPrefix}ai</CommandBadge> 指令？去{" "}
               <Link to="/ai?tab=providers" className="underline">
                 模型提供商
               </Link>{" "}
@@ -573,7 +573,7 @@ function HealthBlock({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-md border bg-card/50 p-3" title={techName}>
+    <div className="rounded-lg border border-border/70 bg-muted/35 p-3" title={techName}>
       <div className="mb-1 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-sm font-medium">
           <Dot tone={tone} />

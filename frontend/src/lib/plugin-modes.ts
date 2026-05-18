@@ -12,8 +12,8 @@ export const PLUGIN_MODE_META: Record<PluginMode, { label: string; plain: string
     plain: "像一个工具面板：每个账号只保存一份配置，直接用触发指令或固定入口运行。",
   },
   schema: {
-    label: "模式 C · Schema 弹窗",
-    plain: "像通用表单：插件声明字段，前端自动生成配置弹窗。",
+    label: "模式 B · 通用配置页",
+    plain: "像一个轻量工具面板：模块声明字段，前端在独立页面生成账号配置表单。",
   },
 };
 

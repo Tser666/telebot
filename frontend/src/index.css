@@ -5,33 +5,33 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --background: 240 5% 96%;
+    --foreground: 240 8% 8%;
 
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card-foreground: 240 8% 8%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover-foreground: 240 8% 8%;
 
-    --primary: 221.2 83.2% 53.3%;
+    --primary: 212 92% 55%;
     --primary-foreground: 210 40% 98%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 240 5% 92%;
+    --secondary-foreground: 240 8% 12%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted: 240 5% 91%;
+    --muted-foreground: 240 4% 45%;
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --accent: 240 5% 92%;
+    --accent-foreground: 240 8% 10%;
 
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 83.2% 53.3%;
+    --border: 240 6% 88%;
+    --input: 240 6% 87%;
+    --ring: 212 92% 55%;
 
     /* 圆角：参照 macOS / iOS 设计语言。
      * - 卡片 / 浮层 (rounded-lg = --radius)         = 12px
@@ -137,10 +137,13 @@
 }
 
 @layer utilities {
+  /* 跑马灯边框以真实控件圆角为准：本体 12px，外圈外扩 2px 后用 14px。 */
   .siri-glow {
+    --siri-ring-radius: calc(var(--radius) + 2px);
     position: relative;
     isolation: isolate;
     overflow: visible;
+    border-radius: var(--radius);
     box-shadow: 0 8px 20px hsl(var(--primary) / 0.10);
   }
 
@@ -149,7 +152,7 @@
     position: absolute;
     inset: -2px;
     z-index: -1;
-    border-radius: inherit;
+    border-radius: var(--siri-ring-radius);
     border: 1.5px solid transparent;
     background:
       linear-gradient(hsl(var(--background)), hsl(var(--background))) padding-box,
@@ -167,9 +170,11 @@
   }
 
   .siri-glow-soft {
+    --siri-ring-radius: calc(var(--radius) + 2px);
     position: relative;
     isolation: isolate;
     overflow: visible;
+    border-radius: var(--radius);
   }
 
   .siri-glow-soft::before {
@@ -177,7 +182,7 @@
     position: absolute;
     inset: -2px;
     z-index: -1;
-    border-radius: 1.15rem;
+    border-radius: var(--siri-ring-radius);
     border: 1.5px solid transparent;
     background:
       linear-gradient(hsl(var(--background)), hsl(var(--background))) padding-box,
@@ -214,6 +219,53 @@
   .safe-scrollbar {
     -webkit-overflow-scrolling: touch;
     scrollbar-width: thin;
+  }
+
+  .app-frame {
+    background:
+      linear-gradient(135deg, hsl(var(--background)) 0%, hsl(var(--muted) / 0.34) 52%, hsl(var(--background)) 100%);
+  }
+
+  .app-workspace {
+    position: relative;
+    background:
+      radial-gradient(circle at 0% 0%, hsl(var(--primary) / 0.055), transparent 34rem),
+      linear-gradient(180deg, hsl(var(--background) / 0.92), hsl(var(--background) / 0.98));
+  }
+
+  .app-workspace::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 2.5rem;
+    z-index: 0;
+    background:
+      linear-gradient(90deg, hsl(222 47% 8% / 0.08), transparent 70%),
+      linear-gradient(90deg, hsl(var(--background) / 0.36), transparent);
+    pointer-events: none;
+  }
+
+  .app-workspace > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  .app-main {
+    background:
+      radial-gradient(circle at 12% 10%, hsl(var(--primary) / 0.045), transparent 26rem),
+      radial-gradient(circle at 92% 0%, hsl(var(--foreground) / 0.035), transparent 24rem);
+  }
+
+  .app-topbar {
+    border-bottom: 1px solid hsl(var(--border) / 0.42);
+    background:
+      linear-gradient(180deg, hsl(var(--card) / 0.84), hsl(var(--card) / 0.62)),
+      linear-gradient(90deg, hsl(var(--background) / 0.18), transparent 32%);
+    box-shadow:
+      0 1px 0 hsl(var(--background) / 0.44),
+      0 14px 36px hsl(222 47% 8% / 0.045);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    backdrop-filter: blur(24px) saturate(180%);
   }
 
   .liquid-glass,
@@ -386,19 +438,19 @@
   }
 
   .liquid-tab-list {
-    border-color: hsl(var(--background) / 0.26);
+    border-color: hsl(var(--border) / 0.42);
     background:
-      linear-gradient(116deg, transparent 0 20%, hsl(var(--background) / 0.34) 32%, transparent 48%),
-      linear-gradient(135deg, hsl(var(--background) / 0.40), hsl(var(--background) / 0.12) 54%, hsl(var(--foreground) / 0.06)),
-      linear-gradient(180deg, hsl(var(--background) / 0.32), transparent 60%),
+      linear-gradient(116deg, transparent 0 22%, hsl(var(--background) / 0.26) 34%, transparent 50%),
+      linear-gradient(135deg, hsl(var(--background) / 0.34), hsl(var(--background) / 0.10) 56%, hsl(var(--foreground) / 0.045)),
+      linear-gradient(180deg, hsl(var(--background) / 0.24), transparent 62%),
       hsl(var(--muted) / 0.10);
     box-shadow:
-      inset 0 1px 0 hsl(var(--background) / 0.72),
-      inset 0 0 0 1px hsl(var(--background) / 0.14),
-      inset 0 -1px 0 hsl(var(--foreground) / 0.06),
-      0 10px 28px hsl(222 47% 8% / 0.10);
-    -webkit-backdrop-filter: blur(32px) saturate(230%) brightness(1.08);
-    backdrop-filter: blur(32px) saturate(230%) brightness(1.08);
+      inset 0 1px 0 hsl(var(--background) / 0.52),
+      inset 0 0 0 1px hsl(var(--background) / 0.10),
+      inset 0 -1px 0 hsl(var(--foreground) / 0.035),
+      0 8px 22px hsl(222 47% 8% / 0.055);
+    -webkit-backdrop-filter: blur(28px) saturate(190%) brightness(1.04);
+    backdrop-filter: blur(28px) saturate(190%) brightness(1.04);
   }
 
   .liquid-tab-trigger[data-state="active"] {
@@ -436,7 +488,7 @@
   .liquid-sidebar {
     border-radius: 0;
     border-width: 0 1px 0 0;
-    border-color: hsl(var(--background) / 0.26);
+    border-color: hsl(var(--border) / 0.30);
     outline-width: 0;
     background:
       linear-gradient(118deg, transparent 0 14%, hsl(var(--background) / 0.38) 30%, transparent 48%),
@@ -444,9 +496,9 @@
       linear-gradient(300deg, transparent 0 54%, hsl(var(--primary) / 0.12) 78%, transparent 100%),
       hsl(var(--card) / 0.14);
     box-shadow:
-      16px 0 48px hsl(222 47% 8% / 0.14),
-      3px 0 14px hsl(222 47% 8% / 0.08),
-      inset -1px 0 0 hsl(var(--background) / 0.28),
+      18px 0 46px hsl(222 47% 8% / 0.10),
+      3px 0 12px hsl(222 47% 8% / 0.055),
+      inset -1px 0 0 hsl(var(--background) / 0.20),
       inset 1px 0 0 hsl(var(--background) / 0.22),
       inset -18px 0 36px hsl(var(--foreground) / 0.04);
     -webkit-backdrop-filter: blur(40px) saturate(240%) brightness(1.10);
@@ -480,9 +532,9 @@
     inset: 0;
     border-width: 0 1px 0 0;
     box-shadow:
-      inset -1px 0 0 hsl(var(--background) / 0.28),
-      inset -16px 0 30px hsl(var(--foreground) / 0.04),
-      1px 0 0 hsl(var(--background) / 0.18);
+      inset -1px 0 0 hsl(var(--background) / 0.18),
+      inset -18px 0 34px hsl(var(--foreground) / 0.035),
+      1px 0 0 hsl(var(--background) / 0.12);
   }
 
   .liquid-sidebar-header,
@@ -556,6 +608,183 @@
       inset 8px 0 16px hsl(var(--background) / 0.10),
       inset -8px -10px 16px hsl(var(--foreground) / 0.04);
     pointer-events: none;
+  }
+
+  .app-frame,
+  .app-workspace,
+  .app-main {
+    background: hsl(var(--background));
+  }
+
+  .app-workspace::before,
+  .liquid-glass::before,
+  .liquid-glass::after,
+  .liquid-tab-list::before,
+  .liquid-tab-list::after,
+  .liquid-bottom-nav::before,
+  .liquid-bottom-nav::after,
+  .liquid-nav-item::before,
+  .liquid-nav-item-active::after,
+  .liquid-tab-trigger[data-state="active"]::after,
+  .liquid-sidebar::before,
+  .liquid-sidebar::after,
+  .liquid-sidebar-link::before,
+  .liquid-sidebar-link-active::after {
+    content: none;
+    display: none;
+  }
+
+  .app-topbar {
+    border-bottom: 0;
+    background: hsl(var(--background) / 0.92);
+    box-shadow: none;
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
+  }
+
+  .hero-icon-button {
+    height: 2.5rem;
+    width: 2.5rem;
+    border-radius: 0.75rem;
+    color: hsl(var(--foreground));
+  }
+
+  .hero-icon-button:hover {
+    background: hsl(var(--card));
+    box-shadow: 0 8px 24px hsl(220 18% 20% / 0.08);
+  }
+
+  .liquid-glass,
+  .liquid-tab-list {
+    position: relative;
+    isolation: auto;
+    overflow: hidden;
+    transform: none;
+    border: 1px solid hsl(var(--border) / 0.72);
+    background: hsl(var(--card));
+    background-blend-mode: normal;
+    box-shadow: 0 1px 2px hsl(220 20% 20% / 0.04), 0 18px 44px hsl(220 20% 20% / 0.06);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .liquid-sidebar {
+    border-width: 0 1px 0 0;
+    border-color: hsl(var(--border));
+    background: hsl(var(--background));
+    box-shadow: none;
+    transition: width 180ms ease;
+  }
+
+  .liquid-sidebar-header,
+  .liquid-sidebar-footer {
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .liquid-sidebar-header {
+    border-bottom: 0;
+  }
+
+  .liquid-sidebar-footer {
+    border-top: 0;
+  }
+
+  .liquid-sidebar-link,
+  .liquid-nav-item,
+  .liquid-tab-trigger {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid transparent;
+  }
+
+  .liquid-sidebar-link {
+    font-weight: 650;
+  }
+
+  .liquid-sidebar-link:hover {
+    background: hsl(var(--card) / 0.72);
+    color: hsl(var(--foreground));
+  }
+
+  .liquid-sidebar-link-active {
+    border-color: hsl(var(--border) / 0.64);
+    background: hsl(var(--card));
+    color: hsl(var(--foreground));
+    box-shadow: 0 1px 1px hsl(220 20% 20% / 0.04), 0 8px 18px hsl(220 20% 20% / 0.08);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    transform: none;
+  }
+
+  .liquid-bottom-nav {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .liquid-nav-item {
+    border: 0;
+    border-radius: 1rem;
+    background: transparent;
+    box-shadow: none;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
+
+  .liquid-nav-item:hover {
+    background: transparent;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .liquid-nav-item:hover {
+      background: hsl(var(--accent) / 0.56);
+    }
+  }
+
+  .liquid-nav-item[data-active="true"],
+  .liquid-nav-item-active {
+    border-color: transparent;
+    background: hsl(var(--foreground)) !important;
+    color: hsl(var(--background)) !important;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    transform: none;
+    transition: none;
+  }
+
+  .liquid-nav-item[data-active="true"]:hover,
+  .liquid-nav-item-active:hover {
+    background: hsl(var(--foreground)) !important;
+    color: hsl(var(--background)) !important;
+  }
+
+  .liquid-tab-list {
+    border-color: transparent;
+    background: hsl(var(--muted));
+    box-shadow: inset 0 0 0 1px hsl(var(--border) / 0.66);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .liquid-tab-trigger[data-state="active"] {
+    border-color: hsl(var(--border) / 0.7);
+    background: hsl(var(--card));
+    box-shadow: 0 1px 1px hsl(220 20% 20% / 0.04), 0 8px 18px hsl(220 20% 20% / 0.08);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    transform: none;
+  }
+
+  .siri-glow,
+  .siri-glow-soft {
+    box-shadow: 0 0 0 2px hsl(var(--primary) / 0.18), 0 12px 28px hsl(var(--primary) / 0.14);
   }
 
   .prose-pwa-safe {

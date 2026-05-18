@@ -130,7 +130,7 @@ function ProviderSelect({
   if (!providers || providers.length === 0) {
     return (
       <div className="rounded-md border px-3 py-2 text-xs alert-warning">
-        尚未配置模型提供商。先到「AI 模块 → 模型提供商」新建一个
+        尚未配置模型提供商。先到「AI → 模型提供商」新建一个
       </div>
     );
   }

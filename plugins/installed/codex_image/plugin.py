@@ -7,7 +7,7 @@
 
 配置存储：
   - command / access_token / model / max_wait_seconds 等存储在 account_feature.config
-  - 前端可通过 ConfigDialog（模式 C）或专属页面（模式 B）管理
+  - 前端通过独立配置页管理，保留 schema 字段用于表单和校验
 
 技术要点：
   - 流式 SSE 读取 Codex 响应，支持 partial_image_b64 逐步获取

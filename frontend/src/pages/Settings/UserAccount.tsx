@@ -1,4 +1,4 @@
-// 系统设置 → 当前用户账号管理：修改密码 + (可选) 禁用 TOTP
+// 系统设置 → 当前用户管理：修改密码 + (可选) 禁用 TOTP
 //
 // 不提供"用户列表"——本系统是单租户的超管模型，只有一个 web 用户；
 // 真正需要换人时走数据库手动改 username + 密码即可。
@@ -89,7 +89,7 @@ export function UserAccount() {
     <Card>
       <CardHeader>
         <CardTitle className="text-base flex items-center gap-2">
-          <KeyRound className="h-4 w-4" /> 当前账号
+          <KeyRound className="h-4 w-4" /> 当前用户
         </CardTitle>
         <CardDescription>
           {meQ.data ? (

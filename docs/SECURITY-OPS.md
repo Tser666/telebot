@@ -191,7 +191,7 @@ psql "$DATABASE_URL" -c "UPDATE web_user SET password_hash='!INVALIDATED';"
 
 # 2. 紧急轮换 JWT_SECRET（让现存 cookie 全失效）
 sed -i.bak 's/^JWT_SECRET=.*/JWT_SECRET=<新值>/' .env
-docker compose restart backend
+docker compose restart web
 
 # 3. 立刻确认 MASTER_KEY 没在同一个泄露包里；若同泄 → 走 §3.3
 ```

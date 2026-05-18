@@ -12,11 +12,12 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { listAccountFeatures } from "@/api/accounts";
+import { listAccountFeatures, toggleAccountFeature } from "@/api/accounts";
 import { getEffectiveConfig, updateAccountFeatureConfig } from "@/api/features";
 import { getSystemSettings } from "@/api/system";
 import { CommandBadge } from "@/components/CommandBadge";
 import { TelegramHtmlPreview } from "@/components/TelegramHtmlPreview";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -107,9 +108,9 @@ const TEMPLATE_PLACEHOLDERS = [
   { key: "{image_format}", label: "格式" },
   { key: "{output_mode}", label: "发送方式" },
   { key: "{elapsed}", label: "耗时" },
-  { key: "{command}", label: "文生图命令" },
-  { key: "{edit_command}", label: "编辑命令" },
-  { key: "{admin_command}", label: "管理命令" },
+  { key: "{command}", label: "文生图指令" },
+  { key: "{edit_command}", label: "编辑指令" },
+  { key: "{admin_command}", label: "管理指令" },
   { key: "{has_reference}", label: "参考图" },
   { key: "{reference_count}", label: "参考图数" },
   { key: "{proxy}", label: "代理" },
@@ -381,6 +382,15 @@ export function ChatGPTImageConfigPage() {
     onError: (err) => toast.error(getErrMsg(err)),
   });
 
+  const toggleMut = useMutation({
+    mutationFn: (enabled: boolean) => toggleAccountFeature(aid, "chatgpt_image", enabled),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["account", aid, "features"] });
+      qc.invalidateQueries({ queryKey: ["matrix"] });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
   function markDirty() {
     setDirty(true);
   }
@@ -496,7 +506,7 @@ export function ChatGPTImageConfigPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-3">
           <Button
             variant="ghost"
@@ -512,20 +522,29 @@ export function ChatGPTImageConfigPage() {
             </p>
           </div>
         </div>
-        <Button onClick={handleSave} disabled={saveMut.isPending}>
-          {saveMut.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-          保存配置{dirty ? "（有修改）" : ""}
-        </Button>
+      </div>
+
+      <div className="sticky top-0 z-30 -mx-2 rounded-b-lg border bg-background/95 px-2 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="text-sm">
+            <div className="font-medium">配置操作</div>
+            <div className="text-xs text-muted-foreground">
+              {dirty ? "有未保存修改，保存后 worker 会热加载。" : "当前配置已同步。"}
+            </div>
+          </div>
+          <Button onClick={handleSave} disabled={saveMut.isPending || !dirty}>
+            {saveMut.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+            保存配置
+          </Button>
+        </div>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">基础配置</CardTitle>
-          <CardDescription>
-            命令、模型、输出格式和 ChatGPT 访问参数。所有命令名都不需要填写系统前缀。
-          </CardDescription>
+          <CardTitle className="text-base">使用说明</CardTitle>
+          <CardDescription>通过 ChatGPT2API 生成和编辑图片，命令名不需要填写系统前缀。</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-5">
+        <CardContent className="space-y-4">
           <div className="flex items-start gap-2 rounded-md border px-3 py-2 text-xs alert-warning">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <div>
@@ -537,47 +556,72 @@ export function ChatGPTImageConfigPage() {
           </div>
 
           <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
-            <div className="font-medium text-foreground">支持的命令格式</div>
             <ul className="mt-1.5 list-inside list-disc space-y-0.5">
-              <li>
-                文生图：<CommandBadge>{cmdPrefix}{effectiveCommand} 提示词</CommandBadge>
-              </li>
+              <li>文生图：<CommandBadge>{cmdPrefix}{effectiveCommand} 提示词</CommandBadge></li>
               <li>
                 指定模型/数量/风格：{" "}
                 <CommandBadge>{cmdPrefix}{effectiveCommand} -m gpt-image-2 -n 1 -s 二次元 云海里的未来城市</CommandBadge>
               </li>
+              <li>指定画幅：<CommandBadge>{cmdPrefix}{effectiveCommand} --size 16:9 赛博朋克街景</CommandBadge></li>
+              <li>回复图片编辑：<CommandBadge>{cmdPrefix}{effectiveEditCommand} 给这张图加上雨夜霓虹</CommandBadge></li>
+              <li>续改最近图片：<CommandBadge>{cmdPrefix}{effectiveEditCommand} last 改成二次元头像</CommandBadge></li>
               <li>
-                指定画幅：{" "}
-                <CommandBadge>{cmdPrefix}{effectiveCommand} --size 16:9 赛博朋克街景</CommandBadge>
-              </li>
-              <li>
-                回复图片编辑：<CommandBadge>{cmdPrefix}{effectiveEditCommand} 给这张图加上雨夜霓虹</CommandBadge>
-              </li>
-              <li>
-                续改最近图片：<CommandBadge>{cmdPrefix}{effectiveEditCommand} last 改成二次元头像</CommandBadge>
-              </li>
-              <li>
-                管理命令：{" "}
+                管理指令：{" "}
                 <CommandBadge>{cmdPrefix}{effectiveAdminCommand} ping</CommandBadge>{" "}
                 <CommandBadge>{cmdPrefix}{effectiveAdminCommand} status</CommandBadge>{" "}
                 <CommandBadge>{cmdPrefix}{effectiveAdminCommand} token list</CommandBadge>
               </li>
             </ul>
           </div>
+        </CardContent>
+      </Card>
 
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle className="text-base">功能总开关</CardTitle>
+              <CardDescription>关闭后 ChatGPT2API 图片生成不会响应当前账号的触发指令。</CardDescription>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <Badge variant={feature?.enabled ? "default" : "outline"}>
+                  {feature?.enabled ? "已启用" : "未启用"}
+                </Badge>
+                {feature?.state ? <span>状态：{feature.state}</span> : null}
+                {feature?.last_error ? (
+                  <span className="text-destructive">最近错误：{feature.last_error}</span>
+                ) : null}
+              </div>
+            </div>
+            <Switch
+              checked={Boolean(feature?.enabled)}
+              disabled={toggleMut.isPending || !feature}
+              onCheckedChange={(enabled) => toggleMut.mutate(enabled)}
+            />
+          </div>
+        </CardHeader>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">基础配置</CardTitle>
+          <CardDescription>
+            指令、模型、输出格式和 ChatGPT 访问参数。所有指令名都不需要填写系统前缀。
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
           <div className="grid gap-4 md:grid-cols-3">
             <div className="space-y-1.5">
-              <Label>文生图命令</Label>
+              <Label>文生图指令</Label>
               <Input value={command} onChange={(e) => { setCommand(e.target.value); markDirty(); }} />
               <p className="text-xs text-muted-foreground">例如 draw，实际使用为 ,draw 提示词。</p>
             </div>
             <div className="space-y-1.5">
-              <Label>图片编辑命令</Label>
+              <Label>图片编辑指令</Label>
               <Input value={editCommand} onChange={(e) => { setEditCommand(e.target.value); markDirty(); }} />
               <p className="text-xs text-muted-foreground">回复图片后使用，也支持 edit last 续改最近图片。</p>
             </div>
             <div className="space-y-1.5">
-              <Label>管理命令</Label>
+              <Label>管理指令</Label>
               <Input value={adminCommand} onChange={(e) => { setAdminCommand(e.target.value); markDirty(); }} />
               <p className="text-xs text-muted-foreground">用于 ping、models、status、refresh、token、import、proxy。</p>
             </div>
@@ -591,7 +635,7 @@ export function ChatGPTImageConfigPage() {
                   <option key={model} value={model}>{model}</option>
                 ))}
               </Select>
-              <p className="text-xs text-muted-foreground">命令没有 -m 参数时使用此模型。</p>
+              <p className="text-xs text-muted-foreground">指令没有 -m 参数时使用此模型。</p>
             </div>
             <div className="space-y-1.5">
               <Label>默认生成张数</Label>
@@ -601,7 +645,7 @@ export function ChatGPTImageConfigPage() {
             <div className="space-y-1.5">
               <Label>单次最多张数</Label>
               <Input value={maxCount} onChange={(e) => { setMaxCount(e.target.value); markDirty(); }} />
-              <p className="text-xs text-muted-foreground">限制单次命令最多图片数，范围 1-4。</p>
+              <p className="text-xs text-muted-foreground">限制单次指令最多图片数，范围 1-4。</p>
             </div>
           </div>
 
@@ -686,7 +730,7 @@ export function ChatGPTImageConfigPage() {
             <div className="space-y-1.5 md:col-span-2">
               <Label>可选模型列表</Label>
               <Textarea rows={6} value={availableModels} onChange={(e) => { setAvailableModels(e.target.value); markDirty(); }} />
-              <p className="text-xs text-muted-foreground">每行一个模型名；命令 -m 会按这里校验。</p>
+              <p className="text-xs text-muted-foreground">每行一个模型名；指令 -m 会按这里校验。</p>
             </div>
             <div className="space-y-3 rounded-md border bg-muted/20 p-4">
               <div className="flex items-center justify-between gap-3">
@@ -699,7 +743,7 @@ export function ChatGPTImageConfigPage() {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <Label>记录提示词摘要</Label>
-                  <p className="text-xs text-muted-foreground">插件日志只记录截断后的提示词摘要。</p>
+                  <p className="text-xs text-muted-foreground">模块日志只记录截断后的提示词摘要。</p>
                 </div>
                 <Switch checked={logPromptPreview} onCheckedChange={(v) => { setLogPromptPreview(v); markDirty(); }} />
               </div>
@@ -712,7 +756,7 @@ export function ChatGPTImageConfigPage() {
         <CardHeader>
           <CardTitle className="text-base">网络与 Token 池</CardTitle>
           <CardDescription>
-            插件网络出口跟随当前账号代理；这里逐条管理 ChatGPT access token。
+            模块网络出口跟随当前账号代理；这里逐条管理 ChatGPT access token。
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
@@ -809,7 +853,7 @@ export function ChatGPTImageConfigPage() {
             <div className="space-y-1.5">
               <Label>默认风格</Label>
               <Input value={defaultStyle} onChange={(e) => { setDefaultStyle(e.target.value); markDirty(); }} />
-              <p className="text-xs text-muted-foreground">留空表示默认不套模板；命令可用 -s 覆盖。</p>
+              <p className="text-xs text-muted-foreground">留空表示默认不套模板；指令可用 -s 覆盖。</p>
             </div>
           </div>
 
@@ -868,7 +912,7 @@ export function ChatGPTImageConfigPage() {
               <div className="flex items-center justify-between gap-3 rounded-md border p-3">
                 <div>
                   <Label>启用健康检测</Label>
-                  <p className="text-xs text-muted-foreground">定时刷新 token 额度与代理可用性，只写插件日志。</p>
+                  <p className="text-xs text-muted-foreground">定时刷新 token 额度与代理可用性，只写模块日志。</p>
                 </div>
                 <Switch checked={healthCheckEnabled} onCheckedChange={(v) => { setHealthCheckEnabled(v); markDirty(); }} />
               </div>

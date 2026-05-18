@@ -101,7 +101,7 @@ export function Logs() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">运行日志过滤</CardTitle>
-              <CardDescription>账号 / 级别 / 插件 / 关键词 / 自动刷新</CardDescription>
+              <CardDescription>账号 / 级别 / 模块 / 关键词 / 自动刷新</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5 lg:items-end">
@@ -133,7 +133,7 @@ export function Logs() {
                   </Select>
                 </div>
                 <div className="space-y-1.5">
-                  <Label>插件</Label>
+                  <Label>模块</Label>
                   <PluginSelect value={runtimePluginKey} onChange={setRuntimePluginKey} />
                 </div>
                 <div className="space-y-1.5">
@@ -165,7 +165,7 @@ export function Logs() {
                 <MessageSquareText className="h-4 w-4" /> 消息日志
               </TabsTrigger>
               <TabsTrigger value="plugin" className="gap-1.5">
-                <Puzzle className="h-4 w-4" /> 插件日志
+                <Puzzle className="h-4 w-4" /> 模块日志
               </TabsTrigger>
               <TabsTrigger value="system" className="gap-1.5">
                 <ServerCog className="h-4 w-4" /> 系统日志
@@ -181,7 +181,7 @@ export function Logs() {
                 search={runtimeSearch}
                 autoRefresh={runtimeAutoRefresh && mainTab === "runtime" && runtimeTab === "event"}
                 timezone={timezone}
-                description="收到消息、命令分发等入口事件。"
+                description="收到消息、指令分发等入口事件。"
               />
             </TabsContent>
 
@@ -194,7 +194,7 @@ export function Logs() {
                 search={runtimeSearch}
                 autoRefresh={runtimeAutoRefresh && mainTab === "runtime" && runtimeTab === "plugin"}
                 timezone={timezone}
-                description="插件运行记录和异常。"
+                description="模块运行记录和异常。"
               />
             </TabsContent>
 
@@ -288,7 +288,7 @@ function RuntimeLogTable({
     <Card>
       <CardHeader>
         <CardTitle className="text-base">
-          {source === "event" ? "消息日志" : source === "plugin" ? "插件日志" : "系统日志"}
+          {source === "event" ? "消息日志" : source === "plugin" ? "模块日志" : "系统日志"}
         </CardTitle>
         <CardDescription className="flex items-center justify-between gap-2">
           <span>{description}</span>
@@ -558,7 +558,7 @@ function PluginSelect({
 
   return (
     <Select value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="">全部插件</option>
+      <option value="">全部模块</option>
       {keys.map((key) => (
         <option key={key} value={key}>
           {key}

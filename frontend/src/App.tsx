@@ -6,7 +6,6 @@ import { RequireAuth } from "@/components/layout/RequireAuth";
 
 import { Login } from "@/pages/Login";
 import { Dashboard } from "@/pages/Dashboard";
-import { AccountList } from "@/pages/Accounts/List";
 import { Spinner } from "@/components/ui/misc";
 
 // 把不影响首屏的页面拆成 lazy chunk：
@@ -24,6 +23,7 @@ const ChatGPTImageConfigPage = lazy(() => import("@/pages/Plugins/configs/ChatGP
 const ForwardConfig = lazy(() => import("@/pages/Plugins/configs/Forward").then(m => ({ default: m.ForwardConfig })));
 const SchedulerConfig = lazy(() => import("@/pages/Plugins/configs/Scheduler").then(m => ({ default: m.SchedulerConfig })));
 const Game24ConfigPage = lazy(() => import("@/pages/Plugins/configs/Game24Config").then(m => ({ default: m.Game24ConfigPage })));
+const GenericPluginConfigPage = lazy(() => import("@/pages/Plugins/configs/GenericPluginConfig").then(m => ({ default: m.GenericPluginConfigPage })));
 const Logs = lazy(() => import("@/pages/Logs").then(m => ({ default: m.Logs })));
 const SettingsIndex = lazy(() => import("@/pages/Settings/Index").then(m => ({ default: m.SettingsIndex })));
 const PluginsHome = lazy(() => import("@/pages/Plugins").then(m => ({ default: m.PluginsHome })));
@@ -101,7 +101,7 @@ export default function App() {
         <Route element={<AppShell />}>
           <Route index element={<Dashboard />} />
           <Route path="accounts">
-            <Route index element={<AccountList />} />
+            <Route index element={<Navigate to="/?accounts=1" replace />} />
             <Route
               path="new"
               element={
@@ -171,6 +171,14 @@ export default function App() {
               element={
                 <Suspense fallback={<PageFallback />}>
                   <Game24ConfigPage />
+                </Suspense>
+              }
+            />
+            <Route
+              path=":aid/features/:featureKey"
+              element={
+                <Suspense fallback={<PageFallback />}>
+                  <GenericPluginConfigPage />
                 </Suspense>
               }
             />
@@ -277,7 +285,7 @@ export default function App() {
           />
           <Route
             path="ai/help"
-            element={<Navigate to="/ai#how-it-works" replace />}
+            element={<Navigate to="/ai?help=1" replace />}
           />
           <Route
             path="ai/usage"

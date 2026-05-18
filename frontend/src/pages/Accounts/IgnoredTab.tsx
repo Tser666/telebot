@@ -317,7 +317,7 @@ function IgnoredCard({
       <CardHeader>
         <CardTitle className="text-base">已忽略会话</CardTitle>
         <CardDescription>
-          这些会话的所有 incoming 消息将被丢弃，不触发任何插件 / 命令、不消耗风控配额
+          这些会话的所有 incoming 消息将被丢弃，不触发任何模块 / 指令、不消耗风控配额
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">

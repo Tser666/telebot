@@ -61,7 +61,7 @@ export function AliasManagement() {
         account_id: form.account_id ? Number(form.account_id) : undefined,
       }),
     onSuccess: () => {
-      toast.success("已创建命令别名");
+      toast.success("已创建指令别名");
       setForm(EMPTY_FORM);
       qc.invalidateQueries({ queryKey: QK });
     },
@@ -108,7 +108,7 @@ export function AliasManagement() {
   };
 
   const handleDelete = (id: number) => {
-    if (!window.confirm("确定要删除这个命令别名吗？此操作不可撤销。")) return;
+    if (!window.confirm("确定要删除这个指令别名吗？此操作不可撤销。")) return;
     deleteMut.mutate(id);
   };
 
@@ -129,16 +129,16 @@ export function AliasManagement() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">命令别名管理</CardTitle>
+        <CardTitle className="text-base">指令别名管理</CardTitle>
         <CardDescription>
-          创建命令别名，支持多词别名和参数透传。留空账号表示全局别名。
+          创建指令别名，支持多词别名和参数透传。留空账号表示全局别名。
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         {/* 创建/编辑表单 */}
         <div className="space-y-4 rounded-lg border p-4">
           <h3 className="text-sm font-semibold">
-            {editingId ? "编辑命令别名" : "添加命令别名"}
+            {editingId ? "编辑指令别名" : "添加指令别名"}
           </h3>
 
           <div className="grid gap-4 sm:grid-cols-3">
@@ -155,7 +155,7 @@ export function AliasManagement() {
             </div>
 
             <div className="space-y-1.5">
-              <Label>目标命令 *</Label>
+              <Label>目标指令 *</Label>
               <Input
                 value={form.target}
                 onChange={(e) =>
@@ -207,9 +207,9 @@ export function AliasManagement() {
 
         {/* 列表 */}
         <div className="space-y-2">
-          <h3 className="text-sm font-semibold">命令别名列表</h3>
+          <h3 className="text-sm font-semibold">指令别名列表</h3>
           {!listQ.data || listQ.data.length === 0 ? (
-            <p className="text-sm text-muted-foreground">暂无命令别名</p>
+            <p className="text-sm text-muted-foreground">暂无指令别名</p>
           ) : (
             <div className="space-y-2">
               {listQ.data.map((alias) => (

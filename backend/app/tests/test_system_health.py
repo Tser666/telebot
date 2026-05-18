@@ -316,7 +316,7 @@ def test_probe_alembic_db_connect_failure() -> None:
 
 
 def test_read_process_stats_prefers_psutil(monkeypatch) -> None:
-    """资源面板优先用 psutil 读取进程 CPU/RSS，避免 Linux/Oracle 上 ps 输出差异。
+    """资源面板优先用 psutil 读取进程 CPU/RSS/USS，避免 Linux/Oracle 上 ps 输出差异。
 
     首次调用会初始化 ``cpu_percent`` 采样窗口，按 psutil 语义返回 None；
     第二次调用复用缓存的 Process 实例，给出真实差分 CPU%。这样跨 Dashboard
@@ -332,6 +332,9 @@ def test_read_process_stats_prefers_psutil(monkeypatch) -> None:
         def memory_info(self):
             return SimpleNamespace(rss=128 * 1024 * 1024)
 
+        def memory_full_info(self):
+            return SimpleNamespace(uss=96 * 1024 * 1024)
+
         def is_running(self):
             return True
 
@@ -340,15 +343,15 @@ def test_read_process_stats_prefers_psutil(monkeypatch) -> None:
 
     fake_psutil = SimpleNamespace(Process=lambda pid: _FakeProcess())
     monkeypatch.setitem(sys.modules, "psutil", fake_psutil)
-    monkeypatch.setattr(sh, "_read_process_stats_with_ps", lambda _pids: {123: (0.0, 0.0)})
+    monkeypatch.setattr(sh, "_read_process_stats_with_ps", lambda _pids: {123: (0.0, 0.0, None)})
     # 避免本测试受其他用例的进程缓存污染
     sh._PROC_CACHE.clear()
 
     first = sh._read_process_stats([123])
     second = sh._read_process_stats([123])
 
-    assert first == {123: (None, 128.0)}
-    assert second == {123: (7.5, 128.0)}
+    assert first == {123: (None, 128.0, 96.0)}
+    assert second == {123: (7.5, 128.0, 96.0)}
     sh._PROC_CACHE.clear()
 
 
@@ -356,17 +359,17 @@ def test_read_process_stats_falls_back_to_ps(monkeypatch) -> None:
     """psutil 不可用时仍保留原 ps fallback。"""
 
     monkeypatch.setattr(sh, "_read_process_stats_with_psutil", lambda _pids: None)
-    monkeypatch.setattr(sh, "_read_process_stats_with_ps", lambda _pids: {456: (1.25, 64.0)})
+    monkeypatch.setattr(sh, "_read_process_stats_with_ps", lambda _pids: {456: (1.25, 64.0, None)})
 
     out = sh._read_process_stats([456])
 
-    assert out == {456: (1.25, 64.0)}
+    assert out == {456: (1.25, 64.0, None)}
 
 
-def test_sum_project_resource_includes_main_and_workers() -> None:
-    """资源面板的项目占用应是主进程 + 全部账号 worker 的合计。"""
+def test_sum_project_resource_includes_main_workers_and_children() -> None:
+    """资源面板的应用占用应是主进程 + worker + 派生子进程的合计。"""
 
-    main = sh.ProcessResource(pid=1, cpu_percent=2.5, rss_mb=100.0)
+    main = sh.ProcessResource(pid=1, cpu_percent=2.5, rss_mb=100.0, uss_mb=80.0)
     workers = [
         sh.WorkerRuntimeResource(
             account_id=1,
@@ -376,6 +379,7 @@ def test_sum_project_resource_includes_main_and_workers() -> None:
             fail_count=0,
             cpu_percent=3.0,
             rss_mb=64.5,
+            uss_mb=50.0,
         ),
         sh.WorkerRuntimeResource(
             account_id=2,
@@ -385,14 +389,50 @@ def test_sum_project_resource_includes_main_and_workers() -> None:
             fail_count=0,
             cpu_percent=None,
             rss_mb=32.0,
+            uss_mb=25.0,
         ),
     ]
+    extras = [sh.ProcessResource(pid=99, cpu_percent=1.0, rss_mb=10.0, uss_mb=5.0)]
 
-    out = sh._sum_project_resource(main, workers)
+    out = sh._sum_project_resource(main, workers, extras)
 
     assert out.pid is None
-    assert out.cpu_percent == 5.5
-    assert out.rss_mb == 196.5
+    assert out.cpu_percent == 6.5
+    assert out.rss_mb == 206.5
+    assert out.uss_mb == 160.0
+
+
+def test_merge_project_resource_includes_infra_containers() -> None:
+    """应用总占用应把数据库/Redis/前端容器并入合计，避免只看 Python 进程。"""
+
+    process_total = sh.ProcessResource(
+        pid=None,
+        cpu_percent=5.0,
+        rss_mb=180.0,
+        uss_mb=130.0,
+    )
+    container_total = sh.ProcessResource(
+        pid=None,
+        cpu_percent=1.5,
+        rss_mb=70.0,
+        uss_mb=None,
+    )
+
+    out = sh._merge_project_and_container_resource(process_total, container_total)
+
+    assert out.pid is None
+    assert out.cpu_percent == 6.5
+    assert out.rss_mb == 250.0
+    assert out.uss_mb == 200.0
+
+
+def test_parse_docker_memory_usage() -> None:
+    """Docker stats 的 MiB/GiB 字符串要转成 MB，供前端统一展示。"""
+
+    used, limit = sh._parse_docker_memory_usage("96MiB / 1GiB")
+
+    assert used == 96.0
+    assert limit == 1024.0
 
 
 # ════════════════════════════════════════════════════════════

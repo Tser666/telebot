@@ -2,16 +2,24 @@
 //  - <Sidebar> 桌面端（≥md）常驻显示
 //  - <MobileSidebar> 移动端通过抽屉模式呈现（Radix Dialog 实现，左侧滑入）
 // 两者共享 NavList，移动端点击导航后自动关闭抽屉。
+import { useState } from "react";
 import { NavLink } from "react-router-dom";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import {
   Boxes,
   Cog,
+  Github,
   Home,
   ScrollText,
   Sparkles,
   X,
 } from "lucide-react";
+import { BrandLogo } from "@/components/BrandLogo";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { APP_VERSION_LABEL } from "@/lib/version";
 
@@ -25,7 +33,7 @@ interface NavItem {
 // 顶层导航条目；
 // 首页承载概览 + 账号操作，AI 能力收敛到模块中心。
 const NAV: NavItem[] = [
-  { to: "/", label: "首页", icon: Home, end: true },
+  { to: "/", label: "概览", icon: Home, end: true },
   { to: "/plugins", label: "模块", icon: Boxes },
   { to: "/ai", label: "AI", icon: Sparkles },
   { to: "/logs", label: "日志", icon: ScrollText },
@@ -36,49 +44,174 @@ export const MOBILE_PRIMARY_NAV: NavItem[] = NAV.filter(
   (item) => item.to === "/" || item.to === "/plugins" || item.to === "/ai" || item.to === "/logs" || item.to === "/settings",
 );
 
-function NavList({ onNavigate }: { onNavigate?: () => void }) {
+function NavList({
+  collapsed = false,
+  onNavigate,
+}: {
+  collapsed?: boolean;
+  onNavigate?: () => void;
+}) {
   return (
-    <nav className="flex-1 space-y-1 overflow-y-auto p-3 text-sm">
+    <nav className="flex-1 space-y-1.5 overflow-y-auto px-4 py-3 text-sm">
       {NAV.map((item) => (
         <NavLink
           key={item.to}
           to={item.to}
           end={item.end}
           onClick={onNavigate}
+          aria-label={collapsed ? item.label : undefined}
+          title={collapsed ? item.label : undefined}
           className={({ isActive }) =>
             cn(
-              "liquid-sidebar-link flex items-center gap-2 rounded-md px-3 py-2 text-muted-foreground transition-all hover:text-accent-foreground",
+              "liquid-sidebar-link flex h-11 items-center gap-3 rounded-lg px-3 text-muted-foreground transition-all hover:text-accent-foreground",
+              collapsed && "justify-center px-0",
               isActive && "liquid-sidebar-link-active text-accent-foreground",
             )
           }
         >
-          <item.icon className="h-4 w-4" />
-          {item.label}
+          <item.icon className="h-5 w-5 shrink-0" />
+          <span className={cn("truncate", collapsed && "sr-only")}>{item.label}</span>
         </NavLink>
       ))}
     </nav>
   );
 }
 
-function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
+function SidebarBody({
+  collapsed = false,
+  onNavigate,
+}: {
+  collapsed?: boolean;
+  onNavigate?: () => void;
+}) {
+  const [changelogOpen, setChangelogOpen] = useState(false);
+
   return (
     <>
-      <div className="liquid-sidebar-header flex h-14 shrink-0 items-center px-4 text-base font-semibold">
-        TelePilot
+      <div
+        className={cn(
+          "liquid-sidebar-header flex h-24 shrink-0 items-center px-5",
+          collapsed && "justify-center px-3",
+        )}
+      >
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="grid h-10 w-10 shrink-0 place-items-center">
+            <BrandLogo className="h-10 w-10 shadow-sm" />
+          </div>
+          <div className={cn("min-w-0", collapsed && "sr-only")}>
+            <div className="truncate text-[1.55rem] font-bold leading-none tracking-tight">
+              TelePilot
+            </div>
+            <div className="mt-1 text-xs font-medium text-muted-foreground">
+              Telegram 控制台
+            </div>
+          </div>
+        </div>
       </div>
-      <NavList onNavigate={onNavigate} />
-      <div className="liquid-sidebar-footer shrink-0 p-3 text-xs text-muted-foreground">
-        {APP_VERSION_LABEL}
+      <NavList collapsed={collapsed} onNavigate={onNavigate} />
+      <div
+        className={cn(
+          "liquid-sidebar-footer shrink-0 space-y-2 px-4 py-5 text-sm text-muted-foreground",
+          collapsed && "px-3",
+        )}
+      >
+        <a
+          href="https://github.com/Anoyou/Telebot"
+          target="_blank"
+          rel="noreferrer"
+          className={cn(
+            "liquid-sidebar-link flex h-11 items-center gap-3 rounded-lg px-3 transition-all hover:text-accent-foreground",
+            collapsed && "justify-center px-0",
+          )}
+          aria-label="TelePilot GitHub"
+          title="TelePilot GitHub"
+        >
+          <Github className="h-5 w-5 shrink-0" />
+          <span className={cn("truncate", collapsed && "sr-only")}>TelePilot</span>
+        </a>
+        <DropdownMenu modal={false} open={changelogOpen} onOpenChange={setChangelogOpen}>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className={cn(
+                "truncate rounded-lg px-3 py-2 text-left text-xs font-medium text-muted-foreground/80 transition hover:bg-accent hover:text-foreground",
+                collapsed && "px-0 text-center",
+              )}
+            >
+              {collapsed ? APP_VERSION_LABEL.replace(/^v/i, "") : APP_VERSION_LABEL}
+            </button>
+          </DropdownMenuTrigger>
+          <ChangelogMenu />
+        </DropdownMenu>
       </div>
     </>
   );
 }
 
-// 桌面常驻侧栏：< md 隐藏，由 MobileSidebar 接管
-export function Sidebar() {
+function ChangelogMenu() {
   return (
-    <aside className="liquid-glass liquid-sidebar hidden w-56 shrink-0 flex-col md:flex">
-      <SidebarBody />
+    <DropdownMenuContent
+      side="right"
+      align="end"
+      sideOffset={10}
+      className="max-h-[min(72vh,34rem)] w-[min(28rem,calc(100vw-2rem))] p-0"
+      style={{ overflowY: "auto" }}
+    >
+      <div className="border-b px-4 py-3">
+        <div className="text-base font-semibold">更新日志</div>
+        <div className="mt-1 text-sm text-muted-foreground">
+          最近版本的主要变化，完整记录见仓库 CHANGELOG.md。
+        </div>
+      </div>
+      <div className="space-y-5 p-4">
+        <div>
+          <div className="text-sm font-semibold">v0.18.0 · 前端信息架构与资源占用面板重构</div>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+            <li>概览页重构账号 Worker、系统状态、新手指引和资源占用入口。</li>
+            <li>PWA 顶栏、底栏、Logo、紧急停用确认和小屏浮层体验统一优化。</li>
+            <li>资源占用新增进程、worker、子进程和项目容器内存明细。</li>
+            <li>新增服务器开箱部署脚本，SSH 后可一条命令安装并启动生产栈。</li>
+          </ul>
+        </div>
+        <div>
+          <div className="text-sm font-semibold">v0.17.1 · PWA 导航与 ChatGPT2API 配置体验</div>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+            <li>ChatGPT2API 配置页新增消息模板、占位符快捷插入和 Telegram HTML 预览。</li>
+            <li>PWA 底栏、选项卡、侧边栏和导航选中态统一为更柔和的视觉。</li>
+            <li>修复 PWA 模式下移动侧边栏只出现遮罩、不显示抽屉的问题。</li>
+          </ul>
+        </div>
+        <div>
+          <div className="text-sm font-semibold">v0.17.0 · ChatGPT2API 实验性模块</div>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+            <li>新增实验性内置模块 ChatGPT2API，支持图片生成、图片编辑和额度管理。</li>
+            <li>Token 池改为逐条管理，并支持从 session JSON 自动提取 accessToken。</li>
+            <li>PWA 名称与图标统一为 TelePilot。</li>
+          </ul>
+        </div>
+        <div>
+          <div className="text-sm font-semibold">v0.16.10 · AI 模板与 Codex 生图稳定性</div>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+            <li>AI 自定义指令模板新增协议、来源和运行信息占位符。</li>
+            <li>敏感输入框改用黑点占位展示，留空保存保留现有密钥。</li>
+            <li>Codex 图片生成在连接早断时会自动重试并返回更准确的中文错误。</li>
+          </ul>
+        </div>
+      </div>
+    </DropdownMenuContent>
+  );
+}
+
+// 桌面常驻侧栏：< md 隐藏，由 MobileSidebar 接管
+export function Sidebar({ collapsed = false }: { collapsed?: boolean }) {
+  return (
+    <aside
+      className={cn(
+        "liquid-glass liquid-sidebar hidden shrink-0 flex-col md:flex",
+        collapsed ? "w-[5.5rem]" : "w-[18rem]",
+      )}
+    >
+      <SidebarBody collapsed={collapsed} />
     </aside>
   );
 }
@@ -112,7 +245,7 @@ export function MobileSidebar({ open, onOpenChange }: MobileSidebarProps) {
         >
           <DialogPrimitive.Title className="sr-only">导航菜单</DialogPrimitive.Title>
           <DialogPrimitive.Close
-            className="absolute right-2 top-[calc(env(safe-area-inset-top)+0.5rem)] rounded-sm p-1 text-muted-foreground hover:text-foreground"
+            className="absolute right-3 top-[calc(env(safe-area-inset-top)+0.75rem)] rounded-lg p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
             aria-label="关闭菜单"
           >
             <X className="h-4 w-4" />

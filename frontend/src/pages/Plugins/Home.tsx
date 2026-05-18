@@ -1,12 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
   BookOpen,
   FlaskConical,
   History,
-  LayoutDashboard,
   Package2,
   Package,
   SatelliteDish,
@@ -14,16 +13,9 @@ import {
   Sparkles,
 } from "lucide-react";
 
-import {
-  getFeatureMatrix,
-  getPluginGlobalConfig,
-  setPluginGlobalConfig,
-  updateAccountFeatureConfig,
-} from "@/api/features";
+import { getFeatureMatrix } from "@/api/features";
 import { getSystemSettings } from "@/api/system";
-import { listAccountFeatures } from "@/api/accounts";
 import type { FeatureInfo } from "@/api/types";
-import { ConfigDialog, type ConfigSchema } from "@/components/plugin/ConfigDialog";
 import { CommandBadge } from "@/components/CommandBadge";
 import { Spinner } from "@/components/ui/misc";
 import { Badge } from "@/components/ui/badge";
@@ -36,7 +28,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { isPlatformFeature } from "@/lib/plugin-modes";
 
 import { featureConfigPath } from "./_shared/featureConfig";
@@ -46,21 +37,10 @@ const DANGEROUS_CMD_BANNER_KEY = "telebot.plugins_home.banner.v0_13_dangerous_cm
 
 export function PluginsHome() {
   const nav = useNavigate();
-  const qc = useQueryClient();
   const [searchParams] = useSearchParams();
-  const codexImageCardRef = useRef<HTMLDivElement | null>(null);
   const [selectedAid, setSelectedAid] = useState<number | null>(null);
-  const [codexImageHighlighted, setCodexImageHighlighted] = useState(false);
   const [guideExpanded, setGuideExpanded] = useState(false);
-  const [configDialog, setConfigDialog] = useState<{
-    key: string;
-    name: string;
-    schema: Record<string, unknown> | null;
-    globalConfig: Record<string, unknown>;
-    accountConfig: Record<string, unknown>;
-  } | null>(null);
   const guideActive = searchParams.get("guide") === "1";
-  const highlightCodexImage = searchParams.get("highlight") === "codex_image";
   const [bannerVisible, setBannerVisible] = useState(() => {
     if (typeof window === "undefined") return false;
     return localStorage.getItem(DANGEROUS_CMD_BANNER_KEY) !== "1";
@@ -76,12 +56,6 @@ export function PluginsHome() {
 
   const accounts = matrixQ.data?.accounts ?? [];
   const features = matrixQ.data?.features ?? [];
-  const accountFeaturesQ = useQuery({
-    queryKey: ["account", selectedAid, "features"],
-    queryFn: () => listAccountFeatures(selectedAid as number),
-    enabled: selectedAid != null,
-  });
-
   useEffect(() => {
     if (accounts.length === 0) return;
 
@@ -130,37 +104,6 @@ export function PluginsHome() {
     return zones;
   }, [features]);
 
-  useEffect(() => {
-    if (!highlightCodexImage || !codexImageFeature) return;
-    const node = codexImageCardRef.current;
-    if (!node) return;
-
-    node.scrollIntoView({ behavior: "smooth", block: "center" });
-    setCodexImageHighlighted(true);
-    const timer = window.setTimeout(() => setCodexImageHighlighted(false), 2000);
-    return () => window.clearTimeout(timer);
-  }, [highlightCodexImage, codexImageFeature]);
-
-  async function openGenericConfig(feature: FeatureInfo) {
-    if (!selectedAccount) return;
-    const accountFeatureData =
-      accountFeaturesQ.data ?? (await accountFeaturesQ.refetch()).data ?? [];
-    const item = accountFeatureData.find((x) => x.feature_key === feature.key);
-    let globalConfig: Record<string, unknown> = {};
-    try {
-      globalConfig = await getPluginGlobalConfig(feature.key);
-    } catch {
-      globalConfig = {};
-    }
-    setConfigDialog({
-      key: feature.key,
-      name: feature.display_name,
-      schema: feature.config_schema ?? null,
-      globalConfig,
-      accountConfig: item?.config ?? {},
-    });
-  }
-
   if (matrixQ.isLoading) {
     return (
       <div className="flex h-[40vh] items-center justify-center">
@@ -176,7 +119,7 @@ export function PluginsHome() {
           <CardHeader className="pb-2">
             <CardTitle className="text-base">0.13 安全变更提醒</CardTitle>
             <CardDescription className="text-amber-900/90">
-              Telegram 内高危命令（如 <CommandBadge>{cmdPrefix}reboot</CommandBadge>、<CommandBadge>{cmdPrefix}plugin install</CommandBadge>）已移除，请改为在 Web 控制台或账号 Bot 内执行。
+              Telegram 内高危指令（如 <CommandBadge>{cmdPrefix}reboot</CommandBadge>、<CommandBadge>{cmdPrefix}plugin install</CommandBadge>）已移除，请改为在 Web 控制台或账号 Bot 内执行。
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-wrap items-center gap-2">
@@ -202,14 +145,16 @@ export function PluginsHome() {
           </CardContent>
         </Card>
       ) : null}
+
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">模块中心</h1>
+        <p className="mt-1 text-base text-muted-foreground">
+          先在这里沉淀一套好用的指令、消息和 AI 模板，再按账号启用复用；新账号不用从零重配。
+        </p>
+      </div>
+
       <Card>
-        <CardHeader>
-          <CardTitle>模块中心</CardTitle>
-          <CardDescription>
-            先在这里沉淀一套好用的命令、消息和 AI 模板，再按账号启用复用；新账号不用从零重配。
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-4 !pt-5">
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
             <Button
               variant="outline"
@@ -219,9 +164,9 @@ export function PluginsHome() {
               onClick={() => nav("/plugins/templates")}
             >
               <span>
-                <span className="block font-medium">命令模板</span>
+                <span className="block font-medium">指令模板</span>
                 <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                  先把常用回复、转发、AI 命令整理成一套模板，再按账号开启复用。
+                  先把常用回复、转发、AI 指令整理成一套模板，再按账号开启复用。
                 </span>
               </span>
             </Button>
@@ -231,9 +176,9 @@ export function PluginsHome() {
               onClick={() => nav("/plugins/aliases")}
             >
               <span>
-                <span className="block font-medium">命令别名</span>
+                <span className="block font-medium">指令别名</span>
                 <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                  给常用命令起短名字，减少不同账号之间重复记命令。
+                  给常用指令起短名字，减少不同账号之间重复记忆。
                 </span>
               </span>
             </Button>
@@ -245,7 +190,7 @@ export function PluginsHome() {
               <span>
                 <span className="block font-medium">定时任务</span>
                 <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                  按账号定时发消息、跑命令或调用 AI，适合固定周期的自动动作。
+                  按账号定时发消息、跑指令或调用 AI 模型，适合固定周期的自动动作。
                 </span>
               </span>
             </Button>
@@ -255,9 +200,9 @@ export function PluginsHome() {
               onClick={() => nav("/plugins/auto-command-whitelist")}
             >
               <span>
-                <span className="block font-medium">自动命令白名单</span>
+                <span className="block font-medium">自动指令白名单</span>
                 <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                  控制定时任务和自动动作能触发哪些命令，避免误执行高风险操作。
+                  控制定时任务和自动动作能触发哪些指令，避免误执行高风险操作。
                 </span>
               </span>
             </Button>
@@ -279,85 +224,51 @@ export function PluginsHome() {
           <div className="rounded-lg border px-4 py-3">
             <div className="text-sm font-medium">AI 模块入口</div>
             <p className="mt-1 text-xs leading-5 text-muted-foreground">
-              AI 能力属于模块配置：先在模型提供商里配置凭据，再按账号在模块里调用；调用记录与排障在 AI 用量查看。
+              AI 属于模块配置：先配置模型凭据，再创建指令模板，最后按账号启用；调用记录与排障集中在同一个工作台。
             </p>
-            <Tabs
-              value="overview"
-              onValueChange={(value) => {
-                if (value === "overview") nav("/ai");
-                if (value === "providers") nav("/ai?tab=providers");
-                if (value === "usage") nav("/ai?tab=usage");
-                if (value === "help") nav("/ai#how-it-works");
-              }}
-              className="mt-3"
-            >
-              <TabsList>
-                <TabsTrigger value="overview" className="gap-1.5">
-                  <LayoutDashboard className="h-4 w-4" /> AI 总览
-                </TabsTrigger>
-                <TabsTrigger value="providers" className="gap-1.5">
-                  <Package className="h-4 w-4" /> 模型提供商
-                </TabsTrigger>
-                <TabsTrigger value="usage" className="gap-1.5">
-                  <History className="h-4 w-4" /> AI 用量
-                </TabsTrigger>
-                <TabsTrigger value="help" className="gap-1.5">
-                  <BookOpen className="h-4 w-4" /> AI 帮助
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
-          </div>
-          {codexImageFeature ? (
-            <div
-              ref={codexImageCardRef}
-              className={`rounded-lg border px-4 py-3 transition ${
-                codexImageHighlighted ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""
-              }`}
-            >
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    <Sparkles className="h-4 w-4 text-primary" />
-                    图片生成 (codex_image)
-                    <Badge variant={codexImageState === "active" ? "default" : "outline"}>
-                      {codexImageState === "active" ? "已启用" : "未启用"}
-                    </Badge>
-                  </div>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    图片生成归属插件中心：选择一个账号后进入 codex_image 配置，设置生图能力与发送方式。
-                  </p>
-                </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={!selectedAid}
-                  onClick={() => {
-                    if (!selectedAid) return;
-                    nav(`/accounts/${selectedAid}/features/codex_image`);
-                  }}
-                >
-                  配置
-                </Button>
-              </div>
+            <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+              <ModuleAction
+                icon={<Sparkles className="h-4 w-4" />}
+                title="AI 工作台"
+                desc="总览模型、指令模板和启用状态"
+                onClick={() => nav("/ai")}
+              />
+              <ModuleAction
+                icon={<Package className="h-4 w-4" />}
+                title="模型提供商"
+                desc="配置 OpenAI、Anthropic、Ollama 等"
+                onClick={() => nav("/ai?tab=providers")}
+              />
+              <ModuleAction
+                icon={<History className="h-4 w-4" />}
+                title="近期调用"
+                desc="查看成功率、耗时和错误原因"
+                onClick={() => nav("/ai?tab=usage")}
+              />
+              <ModuleAction
+                icon={<BookOpen className="h-4 w-4" />}
+                title="帮助与示例"
+                desc="浮层查看原理、示例和术语"
+                onClick={() => nav("/ai?help=1")}
+              />
             </div>
-          ) : null}
+          </div>
           {guideActive ? (
-          <GuideContextCard
-            expanded={guideExpanded}
-            onToggle={() => setGuideExpanded((v) => !v)}
-            onInstall={() => nav("/plugins/manage?tab=plugins&guide=1")}
-            onDone={() => {
-              if (typeof window !== "undefined") {
-                localStorage.setItem("telebot.accounts.new_account_guide_seen.v4", "1");
-              }
-              const next = new URLSearchParams(searchParams);
-              next.delete("guide");
-              nav(`/plugins${next.toString() ? `?${next.toString()}` : ""}`, { replace: true });
-              setGuideExpanded(false);
-            }}
-          />
+            <GuideContextCard
+              expanded={guideExpanded}
+              onToggle={() => setGuideExpanded((v) => !v)}
+              onInstall={() => nav("/plugins/manage?tab=plugins&guide=1")}
+              onDone={() => {
+                if (typeof window !== "undefined") {
+                  localStorage.setItem("telebot.accounts.new_account_guide_seen.v4", "1");
+                }
+                const next = new URLSearchParams(searchParams);
+                next.delete("guide");
+                nav(`/plugins${next.toString() ? `?${next.toString()}` : ""}`, { replace: true });
+                setGuideExpanded(false);
+              }}
+            />
           ) : null}
-
         </CardContent>
       </Card>
 
@@ -370,7 +281,7 @@ export function PluginsHome() {
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-0 text-sm text-amber-900">
-            如需恢复，请确认目标节点是否已安装 codex_image 对应插件包，或先在该账号关闭此功能开关。
+            如需恢复，请确认目标节点是否已安装 codex_image 对应模块包，或先在该账号关闭此功能开关。
           </CardContent>
         </Card>
       ) : null}
@@ -409,7 +320,6 @@ export function PluginsHome() {
               features={grouped.platform}
               selectedAccountId={selectedAccount?.id}
               selectedFeatures={selectedAccount?.features ?? {}}
-              onConfigure={openGenericConfig}
             />
             <FeatureZone
               title="内置模块"
@@ -418,7 +328,6 @@ export function PluginsHome() {
               features={grouped.builtin}
               selectedAccountId={selectedAccount?.id}
               selectedFeatures={selectedAccount?.features ?? {}}
-              onConfigure={openGenericConfig}
             />
             <FeatureZone
               title="远程模块"
@@ -427,7 +336,6 @@ export function PluginsHome() {
               features={grouped.remote}
               selectedAccountId={selectedAccount?.id}
               selectedFeatures={selectedAccount?.features ?? {}}
-              onConfigure={openGenericConfig}
             />
             <FeatureZone
               title="实验性"
@@ -436,47 +344,10 @@ export function PluginsHome() {
               features={grouped.experimental}
               selectedAccountId={selectedAccount?.id}
               selectedFeatures={selectedAccount?.features ?? {}}
-              onConfigure={openGenericConfig}
             />
           </div>
         </CardContent>
       </Card>
-      <ConfigDialog
-        open={!!configDialog}
-        onOpenChange={(v) => !v && setConfigDialog(null)}
-        pluginKey={configDialog?.key ?? ""}
-        pluginName={configDialog?.name ?? ""}
-        schema={(configDialog?.schema as unknown as ConfigSchema) ?? null}
-        accountName={selectedAccount?.name}
-        accountId={selectedAccount?.id}
-        globalConfig={configDialog?.globalConfig ?? {}}
-        accountConfig={configDialog?.accountConfig ?? {}}
-        onSave={async (globalVals, accountVals) => {
-          if (!configDialog || !selectedAccount) return;
-          const schema = configDialog.schema as unknown as ConfigSchema | null;
-          if (schema?.properties) {
-            const globalFields = Object.entries(schema.properties)
-              .filter(([, f]) => f.level === "global")
-              .map(([k]) => k);
-            const hasGlobalChanges = globalFields.some(
-              (k) => globalVals[k] !== configDialog.globalConfig[k],
-            );
-            if (hasGlobalChanges) {
-              const globalOnlyVals: Record<string, unknown> = {};
-              for (const k of globalFields) {
-                globalOnlyVals[k] = globalVals[k];
-              }
-              await setPluginGlobalConfig(configDialog.key, globalOnlyVals);
-            }
-          }
-          if (Object.keys(accountVals).length > 0) {
-            await updateAccountFeatureConfig(selectedAccount.id, configDialog.key, accountVals);
-          }
-          qc.invalidateQueries({ queryKey: ["account", selectedAccount.id, "features"] });
-          qc.invalidateQueries({ queryKey: ["matrix"] });
-          qc.invalidateQueries({ queryKey: ["plugin", "global", configDialog.key] });
-        }}
-      />
     </div>
   );
 }
@@ -518,12 +389,12 @@ function GuideContextCard({
           收起
         </button>
       </div>
-      <div className="mb-2 text-sm font-semibold">3. 启用命令模板或调用模块</div>
+      <div className="mb-2 text-sm font-semibold">3. 启用指令模板或调用模块</div>
       <p className="text-xs leading-relaxed text-muted-foreground">
-        这一页主要看三处：先用“命令模板”复用命令；再看下方模块卡片，按账号启用和配置；需要外部能力时点“安装模块”添加远程模块。
+        这一页主要看三处：先用“指令模板”复用指令；再看下方模块卡片，按账号启用和配置；需要外部能力时点“安装模块”添加远程模块。
       </p>
       <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
-        <div className="rounded-lg border bg-muted/30 p-2">A. 命令模板</div>
+        <div className="rounded-lg border bg-muted/30 p-2">A. 指令模板</div>
         <div className="rounded-lg border bg-muted/30 p-2">B. 模块启用状态</div>
         <div className="rounded-lg border bg-muted/30 p-2">C. 安装模块</div>
       </div>
@@ -545,6 +416,35 @@ function GuideContextCard({
   );
 }
 
+function ModuleAction({
+  icon,
+  title,
+  desc,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  desc: string;
+  onClick: () => void;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      className="h-full min-h-[76px] justify-start whitespace-normal px-3 py-2 text-left"
+      onClick={onClick}
+    >
+      <span className="flex min-w-0 items-start gap-2">
+        <span className="mt-0.5 shrink-0 text-primary">{icon}</span>
+        <span className="min-w-0">
+          <span className="block text-sm font-medium">{title}</span>
+          <span className="mt-1 block text-xs leading-5 text-muted-foreground">{desc}</span>
+        </span>
+      </span>
+    </Button>
+  );
+}
+
 function FeatureZone({
   title,
   hint,
@@ -552,7 +452,6 @@ function FeatureZone({
   features,
   selectedAccountId,
   selectedFeatures,
-  onConfigure,
 }: {
   title: string;
   hint: string;
@@ -560,7 +459,6 @@ function FeatureZone({
   features: FeatureInfo[];
   selectedAccountId?: number;
   selectedFeatures: Record<string, string>;
-  onConfigure: (feature: FeatureInfo) => void;
 }) {
   const nav = useNavigate();
 
@@ -582,7 +480,7 @@ function FeatureZone({
             {features.map((f) => {
               const status = selectedFeatures[f.key] ?? "disabled";
               const path = featureConfigPath(selectedAccountId, f.key);
-              const canConfigure = Boolean(path || f.config_schema);
+              const canConfigure = Boolean(path);
               return (
                 <div key={f.key} className="flex items-center justify-between rounded-md border p-2">
                   <div>
@@ -600,9 +498,7 @@ function FeatureZone({
                         onClick={() => {
                           if (path) {
                             nav(path);
-                            return;
                           }
-                          onConfigure(f);
                         }}
                       >
                         配置

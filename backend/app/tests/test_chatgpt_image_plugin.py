@@ -86,6 +86,15 @@ def test_message_template_renders_placeholders_and_conditionals() -> None:
     assert rendered == "已完成 gpt-image-2 ref=1"
 
 
+def test_message_template_escapes_placeholder_values_for_html() -> None:
+    rendered = _render_message_template(
+        "<b>{prompt}</b>",
+        {"prompt": "松鼠 <i>自画像</i> & iPad"},
+    )
+
+    assert rendered == "<b>松鼠 &lt;i&gt;自画像&lt;/i&gt; &amp; iPad</b>"
+
+
 def test_token_pool_round_robin_and_failure_skip() -> None:
     pool = TokenPool()
     pool.sync([TokenEntry(token="tok-a", note="一号"), TokenEntry(token="tok-b", note="二号")])
@@ -187,8 +196,58 @@ async def test_generate_command_sends_image_result(monkeypatch) -> None:
 
     assert ctx.client.send_file.await_count == 1
     sent = ctx.client.send_file.await_args.args[1]
+    kwargs = ctx.client.send_file.await_args.kwargs
     assert sent.name.endswith(".png")
+    assert kwargs["parse_mode"] == "html"
+    assert "<b>ChatGPT2API</b>" in kwargs["caption"]
+    assert "<b>提示词:</b> 一只 猫" in kwargs["caption"]
     assert event.edit.await_args_list[-1].args[0].startswith("已完成")
+
+
+@pytest.mark.asyncio
+async def test_generate_command_retries_plain_caption_when_html_parse_fails(monkeypatch) -> None:
+    plugin = ChatGPTImagePlugin()
+    send_file = AsyncMock(side_effect=[RuntimeError("bad html"), None])
+    ctx = PluginContext(
+        account_id=1,
+        feature_key="chatgpt_image",
+        config={"tokens": [{"token": "tok-a", "note": "测试"}], "command": "draw"},
+        client=SimpleNamespace(send_file=send_file),
+        log=AsyncMock(),
+    )
+    await plugin.on_startup(ctx)
+
+    async def fake_run_with_token(*args, **kwargs):
+        return [
+            ImageResult(
+                data=b"\x89PNG\r\n\x1a\n" + b"\x00" * 32,
+                mime_type="image/png",
+                width=1,
+                height=1,
+                extension=".png",
+            )
+        ]
+
+    monkeypatch.setattr(plugin, "_run_with_token", fake_run_with_token)
+    event = SimpleNamespace(
+        chat_id=123,
+        id=456,
+        message=SimpleNamespace(id=456, chat_id=123),
+        edit=AsyncMock(),
+        respond=AsyncMock(),
+    )
+
+    await plugin._cmd_generate(ctx.client, event, ["松鼠", "<i>自画像</i>"], 1, ctx)
+
+    assert send_file.await_count == 2
+    first_kwargs = send_file.await_args_list[0].kwargs
+    second_kwargs = send_file.await_args_list[1].kwargs
+    assert first_kwargs["parse_mode"] == "html"
+    assert "&lt;i&gt;自画像&lt;/i&gt;" in first_kwargs["caption"]
+    assert "parse_mode" not in second_kwargs
+    assert "<b>" not in second_kwargs["caption"]
+    assert "ChatGPT2API" in second_kwargs["caption"]
+    assert "松鼠 <i>自画像</i>" in second_kwargs["caption"]
 
 
 @pytest.mark.asyncio

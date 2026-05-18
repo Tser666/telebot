@@ -43,24 +43,24 @@ interface CategoryDef {
 }
 
 const CATEGORIES: CategoryDef[] = [
-  { key: "system_settings", label: "系统设置", desc: "命令前缀等全局配置" },
-  { key: "command_templates", label: "自定义命令模板", desc: "所有回复/转发/AI 命令模板" },
-  { key: "account_commands", label: "账号-命令绑定", desc: "每个账号启用了哪些命令" },
+  { key: "system_settings", label: "系统设置", desc: "指令前缀等全局配置" },
+  { key: "command_templates", label: "自定义指令模板", desc: "所有回复/转发/AI 指令模板" },
+  { key: "account_commands", label: "账号-指令绑定", desc: "每个账号启用了哪些指令" },
   { key: "llm_providers", label: "模型提供商", desc: "AI 模型提供商配置", sensitive: ["api_key"] },
   { key: "forward_rules", label: "消息转发规则", desc: "自动转发配置" },
   { key: "auto_reply_rules", label: "自动回复规则", desc: "自动回复配置" },
   { key: "rate_limit_templates", label: "风控模板", desc: "限速规则模板" },
   { key: "rate_limit_rules", label: "风控规则", desc: "账号级限速配置" },
-  { key: "feature_config", label: "插件功能配置", desc: "各账号的插件开关和配置" },
+  { key: "feature_config", label: "模块功能配置", desc: "各账号的模块开关和配置" },
   { key: "account_settings", label: "账号设置", desc: "拟人化、标签等（不含登录信息）", sensitive: ["session", "api_id", "api_hash", "phone"] },
   { key: "ignored_peers", label: "忽略列表", desc: "自动回复/转发忽略的 peer" },
   { key: "notify_bots", label: "通知 Bot", desc: "通知机器人配置", sensitive: ["bot_token"] },
 ];
 
 const BUNDLE_ENTITY_LABEL: Record<string, string> = {
-  feature: "插件配置",
-  rule: "插件规则",
-  command_link: "命令绑定",
+  feature: "模块配置",
+  rule: "模块规则",
+  command_link: "指令绑定",
   ignored_peer: "忽略列表",
 };
 
@@ -388,7 +388,7 @@ export function ConfigBackup() {
       <CardHeader>
         <CardTitle className="text-base">账号配置包（Config Bundle）</CardTitle>
         <CardDescription>
-          大白话：把 A 账号的规则、插件配置、自定义命令绑定、忽略列表打包成一个 JSON 文件，再拿去给 B 账号套用。
+          大白话：把 A 账号的规则、模块配置、自定义指令绑定、忽略列表打包成一个 JSON 文件，再拿去给 B 账号套用。
           上传后会先演练对比，不会立刻改数据；只有点“确认写入”才会真正保存到目标账号。
         </CardDescription>
       </CardHeader>

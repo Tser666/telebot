@@ -13,7 +13,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -154,6 +156,7 @@ class ProcessResource(BaseModel):
     pid: int | None = None
     cpu_percent: float | None = None
     rss_mb: float | None = None
+    uss_mb: float | None = None
 
 
 class WorkerRuntimeResource(BaseModel):
@@ -164,6 +167,17 @@ class WorkerRuntimeResource(BaseModel):
     fail_count: int
     cpu_percent: float | None = None
     rss_mb: float | None = None
+    uss_mb: float | None = None
+
+
+class ContainerResource(BaseModel):
+    id: str | None = None
+    name: str
+    service: str | None = None
+    cpu_percent: float | None = None
+    memory_mb: float | None = None
+    memory_limit_mb: float | None = None
+    memory_percent: float | None = None
 
 
 class RuntimeLogStats(BaseModel):
@@ -176,6 +190,10 @@ class ResourceDashboard(BaseModel):
     host: HostResource
     main_process: ProcessResource
     project_total: ProcessResource
+    other_processes: list[ProcessResource] = Field(default_factory=list)
+    containers: list[ContainerResource] = Field(default_factory=list)
+    container_total: ProcessResource = Field(default_factory=ProcessResource)
+    container_probe_error: str | None = None
     workers: list[WorkerRuntimeResource] = Field(default_factory=list)
     worker_alive: int = 0
     worker_desired_running: int = 0
@@ -362,7 +380,20 @@ async def _probe_workers() -> WorkersStatus:
 
 
 def _read_memory_percent() -> tuple[float | None, int | None]:
-    """读取系统内存占用百分比与总内存（MB），优先 Linux /proc，macOS 回退 vm_stat。"""
+    """读取系统内存占用百分比与总内存（MB）。
+
+    优先用 psutil，避免 macOS ``vm_stat`` 里累计 pageins/pageouts 这类计数被误当
+    成物理页总数；没有 psutil 时再按平台做轻量 fallback。
+    """
+
+    try:
+        import psutil  # type: ignore[import-not-found]
+
+        mem = psutil.virtual_memory()
+        total_mb = int(float(mem.total) / (1024 * 1024))
+        return round(float(mem.percent), 2), total_mb
+    except Exception:
+        pass
 
     meminfo = Path("/proc/meminfo")
     if meminfo.exists():
@@ -383,6 +414,14 @@ def _read_memory_percent() -> tuple[float | None, int | None]:
             pass
 
     try:
+        total_bytes = int(
+            subprocess.check_output(
+                ["sysctl", "-n", "hw.memsize"],
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=1.5,
+            ).strip()
+        )
         out = subprocess.check_output(
             ["vm_stat"],
             stderr=subprocess.DEVNULL,
@@ -390,7 +429,6 @@ def _read_memory_percent() -> tuple[float | None, int | None]:
             timeout=1.5,
         )
         page_size = 4096
-        total_pages = 0
         free_pages = 0
         for line in out.splitlines():
             if "page size of" in line:
@@ -399,11 +437,13 @@ def _read_memory_percent() -> tuple[float | None, int | None]:
             elif ":" in line:
                 k, v = line.split(":", 1)
                 num = int(v.strip().rstrip(".").replace(".", ""))
-                if k.startswith("Pages free") or k.startswith("Pages inactive"):
+                if (
+                    k.startswith("Pages free")
+                    or k.startswith("Pages inactive")
+                    or k.startswith("Pages speculative")
+                ):
                     free_pages += num
-                total_pages += num
-        if total_pages > 0:
-            total_bytes = total_pages * page_size
+        if total_bytes > 0:
             free_bytes = free_pages * page_size
             used_percent = (1.0 - (free_bytes / total_bytes)) * 100.0
             return round(max(0.0, min(100.0, used_percent)), 2), int(total_bytes // (1024 * 1024))
@@ -435,8 +475,10 @@ def _purge_stale_process_cache(active_pids: set[int]) -> None:
             _PROC_CACHE.pop(pid, None)
 
 
-def _read_process_stats_with_psutil(pids: list[int]) -> dict[int, tuple[float | None, float | None]] | None:
-    """用 psutil 读取 PID -> (cpu%, rssMB)。
+def _read_process_stats_with_psutil(
+    pids: list[int],
+) -> dict[int, tuple[float | None, float | None, float | None]] | None:
+    """用 psutil 读取 PID -> (cpu%, rssMB, ussMB)。
 
     Oracle / Linux 服务环境里 ``ps`` 的输出、权限与容器视图差异比较多；psutil 直接读
     procfs，稳定性更好。未安装或被系统限制时返回 None，让调用方走 ``ps`` fallback。
@@ -447,7 +489,7 @@ def _read_process_stats_with_psutil(pids: list[int]) -> dict[int, tuple[float | 
     except Exception:
         return None
 
-    rows: dict[int, tuple[float | None, float | None]] = {}
+    rows: dict[int, tuple[float | None, float | None, float | None]] = {}
     for pid in pids:
         try:
             proc = None
@@ -467,20 +509,44 @@ def _read_process_stats_with_psutil(pids: list[int]) -> dict[int, tuple[float | 
                 proc.cpu_percent(interval=None)
                 _PROC_CACHE[pid] = (proc, proc.create_time())
                 # 首次见到该 PID：rss 现在就能读，但 cpu% 此时无差分可言
-                rss_mb = float(proc.memory_info().rss) / (1024 * 1024)
-                rows[pid] = (None, round(max(0.0, rss_mb), 2))
+                rss_mb, uss_mb = _read_process_memory_mb(proc)
+                rows[pid] = (None, rss_mb, uss_mb)
                 continue
             cpu = float(proc.cpu_percent(interval=None))
-            rss_mb = float(proc.memory_info().rss) / (1024 * 1024)
-            rows[pid] = (round(max(0.0, cpu), 2), round(max(0.0, rss_mb), 2))
+            rss_mb, uss_mb = _read_process_memory_mb(proc)
+            rows[pid] = (round(max(0.0, cpu), 2), rss_mb, uss_mb)
         except Exception:
             _PROC_CACHE.pop(pid, None)
             continue
     return rows
 
 
-def _read_process_stats_with_ps(pids: list[int]) -> dict[int, tuple[float | None, float | None]]:
-    """用系统 ``ps`` 读取 PID -> (cpu%, rssMB)，作为 psutil fallback。"""
+def _read_process_memory_mb(proc: Any) -> tuple[float | None, float | None]:
+    """读取进程 RSS/USS MB。USS 更接近进程独占内存；取不到时返回 None。"""
+
+    rss_mb: float | None = None
+    uss_mb: float | None = None
+    try:
+        rss_mb = float(proc.memory_info().rss) / (1024 * 1024)
+    except Exception:
+        rss_mb = None
+    try:
+        full = proc.memory_full_info()
+        uss = getattr(full, "uss", None)
+        if uss is not None:
+            uss_mb = float(uss) / (1024 * 1024)
+    except Exception:
+        uss_mb = None
+    return (
+        round(max(0.0, rss_mb), 2) if rss_mb is not None else None,
+        round(max(0.0, uss_mb), 2) if uss_mb is not None else None,
+    )
+
+
+def _read_process_stats_with_ps(
+    pids: list[int],
+) -> dict[int, tuple[float | None, float | None, float | None]]:
+    """用系统 ``ps`` 读取 PID -> (cpu%, rssMB, ussMB)，作为 psutil fallback。"""
 
     if not pids:
         return {}
@@ -489,7 +555,7 @@ def _read_process_stats_with_ps(pids: list[int]) -> dict[int, tuple[float | None
         out = subprocess.check_output(args, stderr=subprocess.DEVNULL, text=True, timeout=2.0)
     except Exception:
         return {}
-    rows: dict[int, tuple[float | None, float | None]] = {}
+    rows: dict[int, tuple[float | None, float | None, float | None]] = {}
     for line in out.splitlines():
         parts = line.strip().split()
         if len(parts) < 3:
@@ -498,14 +564,14 @@ def _read_process_stats_with_ps(pids: list[int]) -> dict[int, tuple[float | None
             pid = int(parts[0])
             cpu = float(parts[1])
             rss_mb = float(parts[2]) / 1024.0
-            rows[pid] = (round(cpu, 2), round(rss_mb, 2))
+            rows[pid] = (round(cpu, 2), round(rss_mb, 2), None)
         except Exception:
             continue
     return rows
 
 
-def _read_process_stats(pids: list[int]) -> dict[int, tuple[float | None, float | None]]:
-    """读取 PID -> (cpu%, rssMB)。优先 psutil，失败再 fallback 到 ps。"""
+def _read_process_stats(pids: list[int]) -> dict[int, tuple[float | None, float | None, float | None]]:
+    """读取 PID -> (cpu%, rssMB, ussMB)。优先 psutil，失败再 fallback 到 ps。"""
 
     if not pids:
         return {}
@@ -516,28 +582,39 @@ def _read_process_stats(pids: list[int]) -> dict[int, tuple[float | None, float 
 
 
 def _snapshot_dashboard_host() -> HostResource:
-    cpu_percent: float | None = None
-    try:
-        if hasattr(os, "getloadavg"):
-            load1, _, _ = os.getloadavg()
-            cpus = os.cpu_count() or 1
-            cpu_percent = round(max(0.0, min(100.0, (load1 / cpus) * 100.0)), 2)
-    except Exception:
-        cpu_percent = None
-
     mem_percent, mem_total_mb = _read_memory_percent()
     du = shutil.disk_usage("/")
     disk_used_percent = round((du.used / du.total) * 100.0, 2) if du.total > 0 else None
     disk_free_gb = round(du.free / (1024 ** 3), 2)
 
     return HostResource(
-        cpu_percent=cpu_percent,
+        cpu_percent=_read_host_cpu_percent(),
         memory_used_percent=mem_percent,
         memory_total_mb=mem_total_mb,
         disk_used_percent=disk_used_percent,
         disk_free_gb=disk_free_gb,
         sampled_at=int(time.time()),
     )
+
+
+def _read_host_cpu_percent() -> float | None:
+    """读取整机 CPU 利用率。psutil 可用时读真实 CPU%，否则回退 load average 压力值。"""
+
+    try:
+        import psutil  # type: ignore[import-not-found]
+
+        return round(max(0.0, min(100.0, float(psutil.cpu_percent(interval=None)))), 2)
+    except Exception:
+        pass
+
+    try:
+        if hasattr(os, "getloadavg"):
+            load1, _, _ = os.getloadavg()
+            cpus = os.cpu_count() or 1
+            return round(max(0.0, min(100.0, (load1 / cpus) * 100.0)), 2)
+    except Exception:
+        return None
+    return None
 
 
 def _sum_resource_values(values: list[float | None]) -> float | None:
@@ -547,15 +624,289 @@ def _sum_resource_values(values: list[float | None]) -> float | None:
     return round(sum(known), 2)
 
 
-def _sum_project_resource(main: ProcessResource, workers: list[WorkerRuntimeResource]) -> ProcessResource:
+def _sum_project_resource(
+    main: ProcessResource,
+    workers: list[WorkerRuntimeResource],
+    other_processes: list[ProcessResource] | None = None,
+) -> ProcessResource:
+    extras = other_processes or []
     return ProcessResource(
         pid=None,
-        cpu_percent=_sum_resource_values([main.cpu_percent, *(w.cpu_percent for w in workers)]),
-        rss_mb=_sum_resource_values([main.rss_mb, *(w.rss_mb for w in workers)]),
+        cpu_percent=_sum_resource_values(
+            [
+                main.cpu_percent,
+                *(w.cpu_percent for w in workers),
+                *(p.cpu_percent for p in extras),
+            ]
+        ),
+        rss_mb=_sum_resource_values(
+            [main.rss_mb, *(w.rss_mb for w in workers), *(p.rss_mb for p in extras)]
+        ),
+        uss_mb=_sum_resource_values(
+            [main.uss_mb, *(w.uss_mb for w in workers), *(p.uss_mb for p in extras)]
+        ),
     )
 
 
-async def _snapshot_dashboard_workers() -> tuple[list[WorkerRuntimeResource], ProcessResource, ProcessResource]:
+_DOCKER_RESOURCE_CACHE: tuple[float, list[ContainerResource], str | None] = (0.0, [], None)
+_DOCKER_RESOURCE_TTL = 12.0
+_PROJECT_CONTAINER_SERVICES = {"postgres", "redis", "frontend"}
+_WEB_CONTAINER_SERVICES = {"web", "backend"}
+
+
+def _repo_root_for_container_match() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+def _parse_docker_labels(raw: str | None) -> dict[str, str]:
+    labels: dict[str, str] = {}
+    if not raw:
+        return labels
+    for item in raw.split(","):
+        if "=" not in item:
+            continue
+        key, value = item.split("=", 1)
+        labels[key.strip()] = value.strip()
+    return labels
+
+
+def _project_container_names() -> set[str]:
+    root_name = _repo_root_for_container_match().name.lower()
+    names = {root_name, "telepilot", "telebot"}
+    env_name = os.getenv("COMPOSE_PROJECT_NAME")
+    if env_name:
+        names.add(env_name.lower())
+    return {name for name in names if name}
+
+
+def _looks_like_project_container(
+    name: str,
+    service: str | None,
+    labels: dict[str, str],
+) -> bool:
+    service_l = (service or "").lower()
+    name_l = name.lower()
+    root = str(_repo_root_for_container_match())
+    working_dir = labels.get("com.docker.compose.project.working_dir")
+    config_files = labels.get("com.docker.compose.project.config_files", "")
+    if service_l in _WEB_CONTAINER_SERVICES:
+        return False
+    if service_l in _PROJECT_CONTAINER_SERVICES and (
+        working_dir == root or root in config_files
+    ):
+        return True
+    project = (labels.get("com.docker.compose.project") or "").lower()
+    if service_l in _PROJECT_CONTAINER_SERVICES and project in _project_container_names():
+        return True
+    if name_l in {"telebot-postgres", "telebot-redis"}:
+        return True
+    for project_name in _project_container_names():
+        for sep in ("-", "_"):
+            for service_name in _PROJECT_CONTAINER_SERVICES:
+                if name_l in {
+                    f"{project_name}{sep}{service_name}",
+                    f"{project_name}{sep}{service_name}{sep}1",
+                }:
+                    return True
+    return False
+
+
+def _docker_container_meta() -> tuple[dict[str, dict[str, str | None]], str | None]:
+    """读取当前项目相关容器的 Docker 元数据。Docker 不可用时返回空。"""
+
+    try:
+        out = subprocess.check_output(
+            ["docker", "ps", "--format", "{{json .}}"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=1.5,
+        )
+    except FileNotFoundError:
+        return {}, "Docker CLI 不可用，未计入数据库/Redis/前端容器"
+    except Exception:
+        return {}, "Docker 不可用或无权限，未计入数据库/Redis/前端容器"
+
+    meta: dict[str, dict[str, str | None]] = {}
+    for line in out.splitlines():
+        try:
+            row = json.loads(line)
+        except Exception:
+            continue
+        cid = str(row.get("ID") or "").strip()
+        name = str(row.get("Names") or row.get("Name") or "").strip()
+        labels = _parse_docker_labels(row.get("Labels"))
+        service = labels.get("com.docker.compose.service")
+        if not name or not _looks_like_project_container(name, service, labels):
+            continue
+        item = {"id": cid or None, "name": name, "service": service}
+        meta[name] = item
+        if cid:
+            meta[cid] = item
+    return meta, None
+
+
+def _parse_percent_value(raw: Any) -> float | None:
+    try:
+        text = str(raw).strip().rstrip("%")
+        if not text:
+            return None
+        return round(float(text), 2)
+    except Exception:
+        return None
+
+
+def _parse_size_to_mb(raw: str | None) -> float | None:
+    if not raw:
+        return None
+    text = raw.strip()
+    match = re.match(r"^([0-9]+(?:\.[0-9]+)?)\s*([kmgt]?i?b|b)$", text, re.I)
+    if not match:
+        return None
+    value = float(match.group(1))
+    unit = match.group(2).lower()
+    factors = {
+        "b": 1 / (1024 * 1024),
+        "kb": 1000 / (1024 * 1024),
+        "kib": 1 / 1024,
+        "mb": (1000 * 1000) / (1024 * 1024),
+        "mib": 1,
+        "gb": (1000 * 1000 * 1000) / (1024 * 1024),
+        "gib": 1024,
+        "tb": (1000 * 1000 * 1000 * 1000) / (1024 * 1024),
+        "tib": 1024 * 1024,
+    }
+    factor = factors.get(unit)
+    if factor is None:
+        return None
+    return round(max(0.0, value * factor), 2)
+
+
+def _parse_docker_memory_usage(raw: str | None) -> tuple[float | None, float | None]:
+    if not raw or "/" not in raw:
+        return None, None
+    used_raw, limit_raw = raw.split("/", 1)
+    return _parse_size_to_mb(used_raw), _parse_size_to_mb(limit_raw)
+
+
+def _snapshot_project_containers() -> tuple[list[ContainerResource], str | None]:
+    """读取数据库、Redis、前端等项目容器的资源占用。
+
+    Web 容器内的主进程和 worker 已由进程明细覆盖，这里刻意不把 web 容器计入，
+    避免把同一份 Python 进程内存重复统计。
+    """
+
+    global _DOCKER_RESOURCE_CACHE
+    now = time.monotonic()
+    cached_at, cached, cached_error = _DOCKER_RESOURCE_CACHE
+    if now - cached_at < _DOCKER_RESOURCE_TTL:
+        return cached, cached_error
+
+    meta, meta_error = _docker_container_meta()
+    if not meta:
+        _DOCKER_RESOURCE_CACHE = (now, [], meta_error)
+        return [], meta_error
+
+    try:
+        out = subprocess.check_output(
+            ["docker", "stats", "--no-stream", "--format", "{{json .}}"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=2.5,
+        )
+    except Exception:
+        error = "Docker stats 不可用或超时，未计入数据库/Redis/前端容器"
+        _DOCKER_RESOURCE_CACHE = (now, [], error)
+        return [], error
+
+    containers: list[ContainerResource] = []
+    seen: set[str] = set()
+    for line in out.splitlines():
+        try:
+            row = json.loads(line)
+        except Exception:
+            continue
+        lookup_keys = [
+            str(row.get("Name") or "").strip(),
+            str(row.get("Container") or "").strip(),
+            str(row.get("ID") or "").strip(),
+        ]
+        item = next((meta[key] for key in lookup_keys if key in meta), None)
+        if item is None:
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        memory_mb, memory_limit_mb = _parse_docker_memory_usage(row.get("MemUsage"))
+        containers.append(
+            ContainerResource(
+                id=item.get("id"),
+                name=name,
+                service=item.get("service"),
+                cpu_percent=_parse_percent_value(row.get("CPUPerc")),
+                memory_mb=memory_mb,
+                memory_limit_mb=memory_limit_mb,
+                memory_percent=_parse_percent_value(row.get("MemPerc")),
+            )
+        )
+
+    containers.sort(key=lambda c: c.memory_mb or 0.0, reverse=True)
+    _DOCKER_RESOURCE_CACHE = (now, containers, None)
+    return containers, None
+
+
+def _sum_container_resource(containers: list[ContainerResource]) -> ProcessResource:
+    return ProcessResource(
+        pid=None,
+        cpu_percent=_sum_resource_values([c.cpu_percent for c in containers]),
+        rss_mb=_sum_resource_values([c.memory_mb for c in containers]),
+        uss_mb=None,
+    )
+
+
+def _merge_project_and_container_resource(
+    process_total: ProcessResource,
+    container_total: ProcessResource,
+) -> ProcessResource:
+    container_memory = container_total.rss_mb
+    return ProcessResource(
+        pid=None,
+        cpu_percent=_sum_resource_values(
+            [process_total.cpu_percent, container_total.cpu_percent]
+        ),
+        rss_mb=_sum_resource_values([process_total.rss_mb, container_memory]),
+        uss_mb=_sum_resource_values([process_total.uss_mb, container_memory]),
+    )
+
+
+def _discover_descendant_pids(root_pids: list[int]) -> list[int]:
+    """发现 Web/worker 派生的额外子进程 PID，覆盖短期插件/安装任务等。"""
+
+    try:
+        import psutil  # type: ignore[import-not-found]
+    except Exception:
+        return []
+
+    roots = {int(pid) for pid in root_pids}
+    found: set[int] = set()
+    for pid in roots:
+        try:
+            proc = psutil.Process(pid)
+            for child in proc.children(recursive=True):
+                child_pid = int(child.pid)
+                if child_pid not in roots:
+                    found.add(child_pid)
+        except Exception:
+            continue
+    return sorted(found)
+
+
+async def _snapshot_dashboard_workers() -> tuple[
+    list[WorkerRuntimeResource],
+    ProcessResource,
+    ProcessResource,
+    list[ProcessResource],
+]:
     try:
         from ..worker.supervisor import get_worker_runtime_snapshot
 
@@ -565,16 +916,27 @@ async def _snapshot_dashboard_workers() -> tuple[list[WorkerRuntimeResource], Pr
 
     main_pid = os.getpid()
     worker_pids = [int(r["pid"]) for r in runtime if isinstance(r.get("pid"), int)]
-    stats = _read_process_stats([main_pid, *worker_pids])
-    _purge_stale_process_cache({main_pid, *worker_pids})
+    other_pids = _discover_descendant_pids([main_pid, *worker_pids])
+    all_pids = [main_pid, *worker_pids, *other_pids]
+    stats = _read_process_stats(all_pids)
+    _purge_stale_process_cache(set(all_pids))
 
-    main_cpu, main_rss = stats.get(main_pid, (None, None))
-    main = ProcessResource(pid=main_pid, cpu_percent=main_cpu, rss_mb=main_rss)
+    main_cpu, main_rss, main_uss = stats.get(main_pid, (None, None, None))
+    main = ProcessResource(
+        pid=main_pid,
+        cpu_percent=main_cpu,
+        rss_mb=main_rss,
+        uss_mb=main_uss,
+    )
 
     workers: list[WorkerRuntimeResource] = []
     for row in runtime:
         pid = int(row["pid"]) if isinstance(row.get("pid"), int) else None
-        cpu, rss = stats.get(pid, (None, None)) if pid is not None else (None, None)
+        cpu, rss, uss = (
+            stats.get(pid, (None, None, None))
+            if pid is not None
+            else (None, None, None)
+        )
         workers.append(
             WorkerRuntimeResource(
                 account_id=int(row.get("account_id") or 0),
@@ -584,6 +946,7 @@ async def _snapshot_dashboard_workers() -> tuple[list[WorkerRuntimeResource], Pr
                 fail_count=int(row.get("fail_count") or 0),
                 cpu_percent=cpu,
                 rss_mb=rss,
+                uss_mb=uss,
             )
         )
 
@@ -591,7 +954,13 @@ async def _snapshot_dashboard_workers() -> tuple[list[WorkerRuntimeResource], Pr
         key=lambda w: (0.0 if w.rss_mb is None else w.rss_mb),
         reverse=True,
     )
-    return workers, main, _sum_project_resource(main, workers)
+    other_processes: list[ProcessResource] = []
+    for pid in other_pids:
+        cpu, rss, uss = stats.get(pid, (None, None, None))
+        other_processes.append(
+            ProcessResource(pid=pid, cpu_percent=cpu, rss_mb=rss, uss_mb=uss)
+        )
+    return workers, main, _sum_project_resource(main, workers, other_processes), other_processes
 
 
 _RUNTIME_LOG_STATS_CACHE: tuple[float, RuntimeLogStats] = (0.0, RuntimeLogStats())
@@ -670,15 +1039,22 @@ async def get_health_overview(_user: CurrentUser) -> HealthOverview:
 
 @router.get("/resource-dashboard", response_model=ResourceDashboard)
 async def get_resource_dashboard(_user: CurrentUser) -> ResourceDashboard:
-    """V1 资源占用概览：主机 + 进程 + worker + 5 分钟日志量。"""
+    """V1 资源占用概览：主机 + Web 主进程 + worker + 项目容器 + 5 分钟日志量。"""
 
     host = _snapshot_dashboard_host()
-    workers, main, project_total = await _snapshot_dashboard_workers()
+    workers, main, process_total, other_processes = await _snapshot_dashboard_workers()
+    containers, container_probe_error = _snapshot_project_containers()
+    container_total = _sum_container_resource(containers)
+    project_total = _merge_project_and_container_resource(process_total, container_total)
     logs = await _snapshot_runtime_log_stats()
     return ResourceDashboard(
         host=host,
         main_process=main,
         project_total=project_total,
+        other_processes=other_processes[:8],
+        containers=containers[:8],
+        container_total=container_total,
+        container_probe_error=container_probe_error,
         workers=workers[:8],
         worker_alive=sum(1 for w in workers if w.alive),
         worker_desired_running=sum(1 for w in workers if w.desired == "running"),

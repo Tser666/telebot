@@ -1,4 +1,4 @@
-// 系统设置 → 自定义命令模板（4 种类型：reply_text / forward_to / run_plugin / ai）
+// 系统设置 → 自定义指令模板（4 种类型：reply_text / forward_to / run_plugin / ai）
 //
 // 设计：
 //   列表页：全表展示模板，name 徽章 type，编辑/删除按钮
@@ -62,14 +62,14 @@ import type {
 } from "@/api/types";
 import { getErrMsg } from "@/lib/api";
 
-// 命令指令仅允许 [a-zA-Z0-9_]，与后端正则对齐
+// 指令名仅允许 [a-zA-Z0-9_]，与后端正则对齐
 const NAME_RE = /^[a-zA-Z0-9_]{1,64}$/;
 const ALIAS_RE = /^[a-zA-Z0-9_]{1,16}$/;
 
 const TYPE_LABELS: Record<CommandTemplateType, string> = {
   reply_text: "回复文本",
   forward_to: "转发到",
-  run_plugin: "调插件",
+  run_plugin: "调模块",
   ai: "AI",
 };
 
@@ -104,9 +104,9 @@ interface FormState {
   // 各 type 的 config 字段散开存，按 type 切表单时拼回
   text: string;
   target_chat_id: string;
-  /** forward_to：触发命令后多少秒删命令消息（空 / 0 = 不删） */
+  /** forward_to：触发指令后多少秒删指令消息（空 / 0 = 不删） */
   forward_delete_after: string;
-  /** forward_to：成功后立即删除命令消息（不等待） */
+  /** forward_to：成功后立即删除指令消息（不等待） */
   forward_delete_immediately: boolean;
   /** forward_to：转发方式（forward_native/copy_text/quote/link_only） */
   forward_mode: string;
@@ -134,8 +134,8 @@ interface FormState {
   ai_web_search_context_size: "low" | "medium" | "high";
   ai_image_backend: "codex_image" | "llm";
   // ── 发送方式 ──
-  // edit:    原地编辑 ,ai 命令消息（默认；保留 reply 链）
-  // send_new: 删命令、发新消息（不带 reply_to）——避免在被回复方那里留下"你回复了我"痕迹
+  // edit:    原地编辑 ,ai 指令消息（默认；保留 reply 链）
+  // send_new: 删指令、发新消息（不带 reply_to）——避免在被回复方那里留下"你回复了我"痕迹
   ai_send_mode: "edit" | "send_new";
 }
 
@@ -431,7 +431,7 @@ export function CommandTemplates() {
     queryKey: ["llm-providers"],
     queryFn: listLLMProviders,
   });
-  // 实时拉系统命令前缀，用在编辑器的"`,name` 触发"那行提示——避免硬编码逗号
+  // 实时拉系统指令前缀，用在编辑器的"`,name` 触发"那行提示——避免硬编码逗号
   // 跟系统设置改了不一致
   const settingsQ = useQuery({
     queryKey: ["system", "settings"],
@@ -594,7 +594,7 @@ export function CommandTemplates() {
         command_echo_guard_previous_messages: limit,
       }),
     onSuccess: () => {
-      toast.success("命令防误触设置已保存，worker 将热加载");
+      toast.success("指令防误触设置已保存，worker 将热加载");
       qc.invalidateQueries({ queryKey: ["system", "settings"] });
     },
     onError: (err) => toast.error(getErrMsg(err)),
@@ -607,9 +607,9 @@ export function CommandTemplates() {
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="max-w-3xl">
-              <CardTitle className="text-base">命令防误触</CardTitle>
+              <CardTitle className="text-base">指令防误触</CardTitle>
               <CardDescription>
-                群聊里自己发送纯命令时，如果前 N 条消息内有人发过完全相同内容，会视为抽奖、接龙或复读场景并静默跳过，避免误触模板命令。设为 0 表示关闭。
+                群聊里自己发送纯指令时，如果前 N 条消息内有人发过完全相同内容，会视为抽奖、接龙或复读场景并静默跳过，避免误触模板指令。设为 0 表示关闭。
               </CardDescription>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-3">
@@ -656,9 +656,9 @@ export function CommandTemplates() {
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <CardTitle className="text-base">自定义命令模板</CardTitle>
+              <CardTitle className="text-base">自定义指令模板</CardTitle>
               <CardDescription>
-                全局模板库，每条 = 一个 <CommandBadge>{cmdPrefix}name</CommandBadge> 命令的"配方"。账号详情 → 自定义命令页签选择是否启用
+                全局模板库，每条 = 一个 <CommandBadge>{cmdPrefix}name</CommandBadge> 指令的"配方"。账号详情 → 自定义指令页签选择是否启用
               </CardDescription>
             </div>
             <Button
@@ -676,7 +676,7 @@ export function CommandTemplates() {
         <CardContent>
           {providerUnavailable ? (
             <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-              chat/search/video 类 AI 命令需要先添加模型提供商；image + codex_image 可先使用插件配置。
+              chat/search/video 类 AI 指令需要先添加模型提供商；image + codex_image 可先使用模块配置。
               <Button
                 type="button"
                 variant="link"
@@ -714,9 +714,9 @@ export function CommandTemplates() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>命令指令</TableHead>
-                  <TableHead>命令类型</TableHead>
-                  <TableHead>别名（短命令）</TableHead>
+                  <TableHead>指令</TableHead>
+                  <TableHead>指令类型</TableHead>
+                  <TableHead>别名（短指令）</TableHead>
                   <TableHead>说明</TableHead>
                   <TableHead className="text-right">操作</TableHead>
                 </TableRow>
@@ -771,7 +771,7 @@ export function CommandTemplates() {
                         onClick={() => {
                           if (
                             confirm(
-                              `确认删除模板「${t.name}」？所有启用此模板的账号都会失去这个命令`,
+                              `确认删除模板「${t.name}」？所有启用此模板的账号都会失去这个指令`,
                             )
                           ) {
                             deleteMut.mutate(t.id);
@@ -803,7 +803,7 @@ export function CommandTemplates() {
             onSave={() => {
               const trimName = editing.name.trim();
               if (!NAME_RE.test(trimName)) {
-                toast.error("命令名只能包含字母 / 数字 / 下划线，1-64 字符");
+                toast.error("指令名只能包含字母 / 数字 / 下划线，1-64 字符");
                 return;
               }
               if (
@@ -831,7 +831,7 @@ export function CommandTemplates() {
   );
 }
 
-// ── 内置命令面板（只读） ──────────────────────────────────────────
+// ── 内置指令面板（只读） ──────────────────────────────────────────
 // 让用户起自定义模板名时知道哪些已被占用；防撞名（API 校验也会拒）。
 function BuiltinCommandsPanel({ cmdPrefix }: { cmdPrefix: string }) {
   const builtinQ = useQuery({
@@ -842,9 +842,9 @@ function BuiltinCommandsPanel({ cmdPrefix }: { cmdPrefix: string }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">内置命令（只读）</CardTitle>
+        <CardTitle className="text-base">内置指令（只读）</CardTitle>
         <CardDescription>
-          系统注册在 worker 里的命令；自定义模板的 name/aliases 不能与此重复
+          系统注册在 worker 里的指令；自定义模板的 name/aliases 不能与此重复
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -876,7 +876,7 @@ function BuiltinCommandsPanel({ cmdPrefix }: { cmdPrefix: string }) {
             ))}
           </div>
         ) : (
-          <p className="text-xs text-muted-foreground">未读取到内置命令</p>
+          <p className="text-xs text-muted-foreground">未读取到内置指令</p>
         )}
       </CardContent>
     </Card>
@@ -976,7 +976,7 @@ function CommandEditDialog({
     <Dialog open onOpenChange={(o) => !o && onCancel()}>
       <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{isEdit ? "编辑" : "新建"} 自定义命令</DialogTitle>
+          <DialogTitle>{isEdit ? "编辑" : "新建"} 自定义指令</DialogTitle>
           <DialogDescription>
             根据类型不同，下方表单会切到对应字段，*为必填项
           </DialogDescription>
@@ -985,7 +985,7 @@ function CommandEditDialog({
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>命令指令 *</Label>
+              <Label>指令 *</Label>
               <Input
                 value={form.name}
                 maxLength={64}
@@ -1012,7 +1012,7 @@ function CommandEditDialog({
               </Select>
               {providerUnavailable ? (
                 <p className="text-xs text-amber-700">
-                  chat/search/video 需要模型提供商；image 模式可先桥接 codex_image 插件。
+                  chat/search/video 需要模型提供商；image 模式可先桥接 codex_image 模块。
                   <Button
                     type="button"
                     variant="link"
@@ -1036,7 +1036,7 @@ function CommandEditDialog({
             />
           </div>
           <div className="space-y-1.5">
-            <Label>别名 / 短命令（可选）</Label>
+            <Label>别名 / 短指令（可选）</Label>
             <Input
               value={form.aliases_text}
               maxLength={255}
@@ -1044,7 +1044,7 @@ function CommandEditDialog({
               onChange={(e) => setField("aliases_text", e.target.value)}
             />
             <p className="text-xs text-muted-foreground">
-              用逗号或空格分隔，规则同命令指令；例如 <code>t, trans</code>
+              用逗号或空格分隔，规则同指令名；例如 <code>t, trans</code>
             </p>
           </div>
 
@@ -1059,7 +1059,7 @@ function CommandEditDialog({
                 onChange={(e) => setField("text", e.target.value)}
               />
               <p className="text-xs text-muted-foreground">
-                支持 `{"{args}"}` 占位符，会被命令后跟的参数替换
+                支持 `{"{args}"}` 占位符，会被指令后跟的参数替换
               </p>
             </div>
           )}
@@ -1080,7 +1080,7 @@ function CommandEditDialog({
                   placeholder="留空 = 转到当前会话；填如 -1001234567890"
                 />
                 <p className="text-xs text-muted-foreground">
-                  留空 = 触发命令时<strong>默认转发到命令消息所在的 chat</strong>。
+                  留空 = 触发指令时<strong>默认转发到指令消息所在的 chat</strong>。
                   填了就强制转到这个 chat_id；在该群里执行 <CommandBadge>{cmdPrefix}id</CommandBadge> 可获得 chat_id（超级群以 -100 开头）。
                 </p>
               </div>
@@ -1098,7 +1098,7 @@ function CommandEditDialog({
               </div>
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <Label>成功后立即删除命令消息</Label>
+                  <Label>成功后立即删除指令消息</Label>
                   <Switch
                     checked={form.forward_delete_immediately}
                     onCheckedChange={(v) =>
@@ -1107,12 +1107,12 @@ function CommandEditDialog({
                   />
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  开启后，命令触发成功后立即删除你发的 <CommandBadge>{cmdPrefix}{form.name || "name"}</CommandBadge> 命令消息（不影响转发/回复的内容）。
+                  开启后，指令触发成功后立即删除你发的 <CommandBadge>{cmdPrefix}{form.name || "name"}</CommandBadge> 指令消息（不影响转发/回复的内容）。
                 </p>
               </div>
               {!form.forward_delete_immediately && (
                 <div className="space-y-1.5">
-                  <Label>触发后自动删除命令消息（秒，可选）</Label>
+                  <Label>触发后自动删除指令消息（秒，可选）</Label>
                   <Input
                     inputMode="numeric"
                     value={form.forward_delete_after}
@@ -1123,10 +1123,10 @@ function CommandEditDialog({
                         e.target.value.replace(/[^\d]/g, ""),
                       )
                     }
-                    placeholder="留空或 0 = 不删；如 5 = 5 秒后删命令消息"
+                    placeholder="留空或 0 = 不删；如 5 = 5 秒后删指令消息"
                   />
                   <p className="text-xs text-muted-foreground">
-                    转发成功后等待 N 秒，删除你刚发的 <CommandBadge>{cmdPrefix}{form.name || "name"}</CommandBadge> 命令消息（不影响转过去的内容）。范围 0–3600；不删保留 ✓ 提示。
+                    转发成功后等待 N 秒，删除你刚发的 <CommandBadge>{cmdPrefix}{form.name || "name"}</CommandBadge> 指令消息（不影响转过去的内容）。范围 0–3600；不删保留 ✓ 提示。
                   </p>
                 </div>
               )}
@@ -1136,7 +1136,7 @@ function CommandEditDialog({
           {form.type === "run_plugin" && (
             <div className="space-y-3">
               <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-                调用已加载插件注册的命令；method 留空时默认使用 plugin_key 同名命令。
+                调用已加载模块注册的指令；method 留空时默认使用 plugin_key 同名指令。
               </div>
               <div className="space-y-1.5">
                 <Label>plugin_key *</Label>
@@ -1188,17 +1188,17 @@ function CommandEditDialog({
                 </Select>
                 <p className="text-xs text-muted-foreground">
                   可创建 <CommandBadge>{cmdPrefix}ai image 提示词</CommandBadge> 这类二级指令，也可新建名为
-                  <CommandBadge className="mx-1">image</CommandBadge> 的 AI 模板作为直接命令。
+                  <CommandBadge className="mx-1">image</CommandBadge> 的 AI 模板作为直接指令。
                 </p>
                 <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
                   <p>
                     <span className="font-medium text-foreground">chat</span>：普通问答、总结、翻译；若打开“允许联网搜索”，后端会把搜索工具交给模型，是否实际搜索由模型/provider 决定。
                   </p>
                   <p className="mt-1">
-                    <span className="font-medium text-foreground">search</span>：专门搜索命令，保存时固定启用联网搜索；需要支持 OpenAI Responses API（api_format=responses）的 Provider，适合 <CommandBadge>{cmdPrefix}search</CommandBadge> 或 <CommandBadge>{cmdPrefix}ai search</CommandBadge>。
+                    <span className="font-medium text-foreground">search</span>：专门搜索指令，保存时固定启用联网搜索；需要支持 OpenAI Responses API（api_format=responses）的 Provider，适合 <CommandBadge>{cmdPrefix}search</CommandBadge> 或 <CommandBadge>{cmdPrefix}ai search</CommandBadge>。
                   </p>
                   <p className="mt-1">
-                    <span className="font-medium text-foreground">image</span>：图片生成；当前推荐桥接 codex_image 插件，可直接做 <CommandBadge>{cmdPrefix}image</CommandBadge>。
+                    <span className="font-medium text-foreground">image</span>：图片生成；当前推荐桥接 codex_image 模块，可直接做 <CommandBadge>{cmdPrefix}image</CommandBadge>。
                   </p>
                   <p className="mt-1">
                     <span className="font-medium text-foreground">video</span>：视频生成预留入口，运行时会提示下一阶段接入。
@@ -1218,13 +1218,13 @@ function CommandEditDialog({
                       )
                     }
                   >
-                    <option value="codex_image">codex_image 插件（当前推荐）</option>
+                    <option value="codex_image">codex_image 模块（当前推荐）</option>
                     <option value="llm">LLM Provider 原生生图（预留）</option>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    codex_image 使用账号插件里的 Codex Access Token、尺寸和发送配置；本模板只负责把
+                    codex_image 使用账号模块里的 Codex Access Token、尺寸和发送配置；本模板只负责把
                     <CommandBadge className="mx-1">{cmdPrefix}{form.name || "image"}</CommandBadge>
-                    转到该插件。
+                    转到该模块。
                   </p>
                 </div>
               )}
@@ -1262,7 +1262,7 @@ function CommandEditDialog({
                   />
                   <p className="text-xs text-muted-foreground">
                     下拉里每条 = 一个已启用的 (提供商 × 模型) 组合。要新增/启用模型去
-                    <span className="mx-1 font-medium">AI 模块 → 模型提供商</span>编辑。
+                    <span className="mx-1 font-medium">AI → 模型提供商</span>编辑。
                     {form.ai_routing_mode === "auto"
                       ? " auto 模式下，规则未命中且未设独立兜底时走这条"
                       : ""}
@@ -1318,20 +1318,20 @@ function CommandEditDialog({
                     )
                   }
                 >
-                  <option value="edit">原地编辑命令消息（默认）</option>
-                  <option value="send_new">删命令、发新消息（不带 reply_to）</option>
+                  <option value="edit">原地编辑指令消息（默认）</option>
+                  <option value="send_new">删指令、发新消息（不带 reply_to）</option>
                 </Select>
                 <p className="text-xs text-muted-foreground">
                   {form.ai_send_mode === "send_new" ? (
                     <>
                       用于"我回复某人后用 <CommandBadge>{cmdPrefix}{form.name || "ai"}</CommandBadge> 提问"的场景：
                       被回复消息**只作为模型上下文**，发出去的回答**不再是 reply**，
-                      也不会在被回复方那里留下"你回复了我"的痕迹（首次发命令的 ping 仍无法避免）。
+                      也不会在被回复方那里留下"你回复了我"的痕迹（首次发指令的 ping 仍无法避免）。
                       此模式下 <code>{"{display_input}"}</code> 自动回退为你打的字（不复读对方原文）。
                     </>
                   ) : (
                     <>
-                      原地把命令消息编辑成 AI 回答，保留 reply 链 — 在群里能让上下文清晰可追溯。
+                      原地把指令消息编辑成 AI 回答，保留 reply 链 — 在群里能让上下文清晰可追溯。
                     </>
                   )}
                 </p>
@@ -1583,7 +1583,7 @@ function ProviderModelSelect({
   if (!providers || providers.length === 0) {
     return (
       <div className="rounded-md border px-3 py-2 text-xs alert-warning">
-        尚未配置模型提供商。先到「AI 模块 → 模型提供商」新建一个，并在编辑里拉取并启用至少一个模型
+        尚未配置模型提供商。先到「AI → 模型提供商」新建一个，并在编辑里拉取并启用至少一个模型
       </div>
     );
   }
