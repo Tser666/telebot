@@ -135,6 +135,13 @@ class Settings(BaseSettings):
         """把相对路径固定解析到仓库根目录，避免主进程/worker cwd 不同导致分裂。"""
         path = Path(raw)
         if path.is_absolute():
+            if PROJECT_ROOT == Path("/app"):
+                legacy_container_paths = {
+                    Path("/plugins/installed"): PROJECT_ROOT / "plugins" / "installed",
+                    Path("/data/plugin_repos"): PROJECT_ROOT / "data" / "plugin_repos",
+                }
+                if path in legacy_container_paths:
+                    return legacy_container_paths[path].resolve()
             return path.resolve()
         return (PROJECT_ROOT / path).resolve()
 

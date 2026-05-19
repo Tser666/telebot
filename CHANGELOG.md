@@ -18,6 +18,21 @@
 
 ---
 
+## [0.18.13] — 2026-05-19 · fixed · 前端 Docker 构建修复
+
+### Fixed
+- 前端 Docker 构建阶段补充拷贝根目录 `CHANGELOG.md`，修复 `Sidebar.tsx` 通过 `?raw` 引用更新日志时在干净镜像构建中找不到文件的问题。
+- 新增仓库根目录 `.dockerignore`，避免 `docker compose build frontend` 把本机 `frontend/node_modules`、缓存或运行数据带入构建上下文，导致干净 VPS 与本地环境表现不一致。
+- 后端在 Docker 容器内会把旧配置残留的 `/plugins/installed` 自动纠正为 `/app/plugins/installed`，把 `/data/plugin_repos` 自动纠正为 `/app/data/plugin_repos`，避免远程模块落到非持久化根目录后丢失。
+
+### Verification
+- `npm run build`（frontend）
+- `backend/.venv/bin/ruff check backend/app/settings.py backend/app/tests/test_settings_paths.py`
+- `backend/.venv/bin/python -m pytest backend/app/tests/test_settings_paths.py -q`
+- `git diff --check`
+
+---
+
 ## [0.18.12] — 2026-05-19 · fixed · 远程模块目录与全局配置保存修复
 
 ### Fixed

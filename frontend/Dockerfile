@@ -13,9 +13,10 @@ WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm install
 
-# 拷贝其余源码与 docs 目录（Extensions.tsx 需要引用 docs/PLUGIN-DEV-GUIDE.md）
+# 拷贝其余源码、docs 与根更新日志（Sidebar 会通过 ?raw 读取 CHANGELOG.md）
 COPY frontend/ .
 COPY docs/ /docs/
+COPY CHANGELOG.md /CHANGELOG.md
 RUN npx vite build
 
 
