@@ -18,6 +18,19 @@
 
 ---
 
+## [0.18.12] — 2026-05-19 · fixed · 远程模块目录与全局配置保存修复
+
+### Fixed
+- 生产 compose 显式固定远程模块安装目录为 `/app/plugins/installed`，插件仓库缓存为 `/app/data/plugin_repos`，避免 Oracle / VPS 旧 `.env` 把容器写到 `/plugins/installed` 后重建丢失。
+- 修复远程模块全局配置保存时原地修改 `Feature.manifest` 导致 SQLAlchemy 未识别 JSON 字段变更的问题；现在保存会替换 manifest dict，确保配置真实落库。
+
+### Verification
+- `backend/.venv/bin/ruff check backend/app/services/feature_service.py backend/app/tests/test_feature_service.py`
+- `backend/.venv/bin/python -m pytest backend/app/tests/test_feature_service.py -q`
+- `git diff --check`
+
+---
+
 ## [0.18.11] — 2026-05-19 · fixed · 运行日志与 24 点发奖排障修复
 
 ### Changed

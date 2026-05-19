@@ -412,7 +412,7 @@ async def set_plugin_global_config(
         global_config = {}
 
     # 更新 manifest
-    manifest = feature.manifest or {}
+    manifest = dict(feature.manifest or {})
     manifest["global_config"] = global_config
     feature.manifest = manifest
     await db.commit()

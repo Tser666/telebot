@@ -9,6 +9,7 @@ import pytest
 from app.schemas.feature import FeatureInfo
 from app.services.feature_service import (
     get_plugin_global_config,
+    set_plugin_global_config,
     validate_config_against_schema,
 )
 
@@ -318,6 +319,43 @@ class TestSetPluginGlobalConfig:
         result = validate_config_against_schema(config, schema)
         assert result.valid is False
         assert len(result.errors) == 1
+
+    @pytest.mark.asyncio
+    async def test_replaces_manifest_dict_when_saving_global_config(self) -> None:
+        """保存 global_config 时要替换 JSON dict，确保 SQLAlchemy 能识别变更。"""
+        original_manifest = {
+            "config_schema": {
+                "type": "object",
+                "properties": {
+                    "global_field": {"type": "integer", "level": "global"},
+                    "account_field": {"type": "integer"},
+                },
+            },
+            "permissions": ["send_message"],
+        }
+        feature = MagicMock()
+        feature.manifest = original_manifest
+
+        db = AsyncMock()
+        db.get = AsyncMock(return_value=feature)
+        db.commit = AsyncMock()
+
+        with (
+            pytest.mock.patch("app.services.feature_service.seed_builtin_features", AsyncMock()),
+            pytest.mock.patch("app.services.feature_service._notify_all_accounts_using_feature", AsyncMock()),
+        ):
+            result = await set_plugin_global_config(
+                db,
+                "demo",
+                {"global_field": 42, "account_field": 99},
+            )
+
+        assert result == {"global_field": 42}
+        assert feature.manifest is not original_manifest
+        assert feature.manifest["permissions"] == ["send_message"]
+        assert feature.manifest["global_config"] == {"global_field": 42}
+        assert "global_config" not in original_manifest
+        db.commit.assert_awaited_once()
 
 
 if __name__ == "__main__":
