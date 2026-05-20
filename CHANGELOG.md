@@ -18,6 +18,25 @@
 
 ---
 
+## [0.19.2] — 2026-05-20 · fixed · 模块开发指南合并与 Bot 状态显示修复
+
+### Changed
+- 合并内置模块与远程模块开发指南，统一在 `docs/PLUGIN-DEV-GUIDE.md` 维护 Plugin API、远程安装、沙箱权限、模块分类与交互 Bot 声明规范。
+- 将 `docs/REMOTE-PLUGIN-GUIDE.md` 改为兼容跳转页，避免旧链接失效，同时更新 README、前端开发指南说明与远程模块安装错误提示。
+- 明确远程模块 `plugin.json` 与 `manifest.py` 需要同步声明 `category`，且只有互动娱乐型模块才声明 `interaction_entries`。
+
+### Fixed
+- 修复管理 Bot 已禁用或 token 已清空时仍显示旧 polling 冲突错误的问题。
+- 补充回归测试，确保图片生成类内置模块保持工具能力分类，不会误作为交互 Bot 启动模块。
+
+### Verification
+- `backend/.venv/bin/ruff check backend/app/services/account_bot_service.py backend/app/services/remote_plugin_service.py backend/app/tests/test_account_bot.py backend/app/tests/test_plugin_security_regression.py`
+- `backend/.venv/bin/python -m pytest backend/app/tests/test_account_bot.py backend/app/tests/test_plugin_security_regression.py -q`
+- `pnpm --dir frontend exec tsc --noEmit`
+- `git diff --check`
+
+---
+
 ## [0.19.1] — 2026-05-20 · fixed · 后端 CI lint 修复
 
 ### Fixed

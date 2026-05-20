@@ -450,7 +450,7 @@ def _validate_runtime_plugin_shape(plugin_dir: Path, meta: PluginMetadata) -> No
     if "/" in entry or "\\" in entry or not entry.endswith(".py"):
         raise InvalidPluginMetadata(
             "BAD_PLUGIN_ENTRY",
-            f"plugin.json entry 必须是当前插件目录下的 .py 文件，得到 {entry!r}。请按 docs/REMOTE-PLUGIN-GUIDE.md 更新插件结构。",
+            f"plugin.json entry 必须是当前插件目录下的 .py 文件，得到 {entry!r}。请按 docs/PLUGIN-DEV-GUIDE.md#10-远程模块 更新插件结构。",
         )
     if not (plugin_dir / entry).is_file():
         missing.append(entry)
@@ -461,7 +461,7 @@ def _validate_runtime_plugin_shape(plugin_dir: Path, meta: PluginMetadata) -> No
             "PLUGIN_RUNTIME_FILES_MISSING",
             "远程插件缺少运行期文件："
             + ", ".join(unique)
-            + "。新版远程插件必须包含 plugin.json、manifest.py、plugin.py、__init__.py；请按 docs/REMOTE-PLUGIN-GUIDE.md 更新插件后再安装。",
+            + "。新版远程插件必须包含 plugin.json、manifest.py、plugin.py、__init__.py；请按 docs/PLUGIN-DEV-GUIDE.md#10-远程模块 更新插件后再安装。",
         )
 
 

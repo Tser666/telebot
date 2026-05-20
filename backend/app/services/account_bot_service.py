@@ -532,15 +532,17 @@ async def get_transfer_bot_token(db: AsyncSession, aid: int) -> str | None:
 
 def config_to_response(row: AccountBot, *, account_id: int | None = None) -> AccountBotConfigResponse:
     remote_plugin_policy = normalize_remote_plugin_policy(row.remote_plugin_policy)
+    has_token = bool(row.bot_token_enc)
+    last_error = row.last_error if row.enabled and has_token else None
     return AccountBotConfigResponse(
         account_id=int(account_id or row.account_id),
         enabled=bool(row.enabled),
         status=row.status or ACCOUNT_BOT_STATUS_DISABLED,
-        has_token=bool(row.bot_token_enc),
+        has_token=has_token,
         username=row.username,
         remote_plugin_policy=AccountBotRemotePluginPolicy(**remote_plugin_policy),
         last_update_id=row.last_update_id,
-        last_error=label_bot_polling_error(row.last_error, role="management") if row.last_error else None,
+        last_error=label_bot_polling_error(last_error, role="management") if last_error else None,
         created_at=row.created_at,
         updated_at=row.updated_at,
     )

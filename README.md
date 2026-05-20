@@ -280,8 +280,7 @@ TelePilot 用户界面统一称“模块”，代码层仍使用 `Plugin` / `fea
 
 开发文档：
 
-- [模块开发指南（Plugin API）](docs/PLUGIN-DEV-GUIDE.md)
-- [远程模块开发与安装](docs/REMOTE-PLUGIN-GUIDE.md)
+- [模块开发指南（Plugin API，含内置模块与远程模块）](docs/PLUGIN-DEV-GUIDE.md)
 
 ## 安全边界
 
@@ -317,8 +316,7 @@ pnpm -C frontend build
 - [变更日志](CHANGELOG.md)
 - [公网部署](docs/DEPLOY-PUBLIC.md)
 - [安全运维](docs/SECURITY-OPS.md)
-- [模块开发指南（Plugin API）](docs/PLUGIN-DEV-GUIDE.md)
-- [远程模块开发与安装](docs/REMOTE-PLUGIN-GUIDE.md)
+- [模块开发指南（Plugin API，含内置模块与远程模块）](docs/PLUGIN-DEV-GUIDE.md)
 - [贡献指南](CONTRIBUTING.md)
 
 ## 项目状态

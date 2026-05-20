@@ -723,8 +723,7 @@ function DevGuideTab() {
       <CardHeader>
         <CardTitle className="text-base">模块开发指南</CardTitle>
         <CardDescription>
-          源文件：<code>docs/PLUGIN-DEV-GUIDE.md</code>（远程安装与沙箱规则见
-          <code className="ml-1">docs/REMOTE-PLUGIN-GUIDE.md</code>）
+          源文件：<code>docs/PLUGIN-DEV-GUIDE.md</code>（已合并内置模块、远程模块、沙箱与交互 Bot 声明规范）
         </CardDescription>
       </CardHeader>
       <CardContent className="min-w-0 overflow-hidden">

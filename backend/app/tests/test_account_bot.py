@@ -12,6 +12,8 @@ from app.db.models.account_bot import AccountBot
 from app.db.models.log import RuntimeLog
 from app.schemas.account_bot import AccountBotConfigUpdate
 from app.services import account_bot_runtime, account_bot_service
+from app.worker.plugins.builtin.chatgpt_image.manifest import MANIFEST as CHATGPT_IMAGE_MANIFEST
+from app.worker.plugins.builtin.codex_image.manifest import MANIFEST as CODEX_IMAGE_MANIFEST
 
 
 class _MemoryRedis:
@@ -38,6 +40,22 @@ def test_account_bot_config_response_hides_plain_token() -> None:
     assert "token" not in out.model_dump()
     assert out.remote_plugin_policy.enabled is False
     assert out.remote_plugin_policy.install is False
+
+
+def test_disabled_or_cleared_management_bot_hides_stale_conflict_error() -> None:
+    row = AccountBot(
+        account_id=1,
+        enabled=False,
+        status="disabled",
+        bot_token_enc=None,
+        last_error="Conflict: terminated by other getUpdates request",
+    )
+
+    out = account_bot_service.config_to_response(row)
+
+    assert out.enabled is False
+    assert out.has_token is False
+    assert out.last_error is None
 
 
 def test_account_bot_role_matrix() -> None:
@@ -894,6 +912,13 @@ async def test_transfer_notice_module_rule_starts_game24_with_interaction_bot(mo
     assert send.await_args.args[1] == -100123
     assert "24 点开始" in send.await_args.args[2]
     assert "奖金：888" in send.await_args.args[2]
+
+
+def test_builtin_image_modules_stay_utility_without_interaction_entries() -> None:
+    assert CODEX_IMAGE_MANIFEST.category == "utility"
+    assert CODEX_IMAGE_MANIFEST.interaction_entries == []
+    assert CHATGPT_IMAGE_MANIFEST.category == "utility"
+    assert CHATGPT_IMAGE_MANIFEST.interaction_entries == []
 
 
 @pytest.mark.asyncio
