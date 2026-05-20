@@ -43,6 +43,7 @@ from ..worker.ipc import (
     make_cmd,
     publish_cmd_with_ack,
 )
+from ..worker.plugins.builtin.game24.plugin import check_answer_detailed, generate_24_puzzle
 from . import (
     account_bot_service,
     account_service,
@@ -51,7 +52,6 @@ from . import (
     feature_service,
     remote_plugin_service,
 )
-from ..worker.plugins.builtin.game24.plugin import check_answer_detailed, generate_24_puzzle
 
 log = logging.getLogger(__name__)
 

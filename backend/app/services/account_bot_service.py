@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import logging
 import re
-from html import escape
 from hmac import compare_digest
+from html import escape
 from typing import Any
 
 import httpx

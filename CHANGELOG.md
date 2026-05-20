@@ -18,6 +18,19 @@
 
 ---
 
+## [0.19.1] — 2026-05-20 · fixed · 后端 CI lint 修复
+
+### Fixed
+- 修复 0.19.0 合并后后端 CI lint 中 `account_bot_runtime.py` 与 `account_bot_service.py` 的 import 排序问题。
+
+### Verification
+- `backend/.venv/bin/ruff check backend/app/services/account_bot_runtime.py backend/app/services/account_bot_service.py`
+- `backend/.venv/bin/python -m pytest backend/app/tests/test_account_bot.py -q`
+- `pnpm exec tsc --noEmit`（frontend）
+- `git diff --check`
+
+---
+
 ## [0.19.0] — 2026-05-20 · added · 交互 Bot 与转账联动发布
 
 ### Added
