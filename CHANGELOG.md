@@ -18,6 +18,23 @@
 
 ---
 
+## [0.21.2] — 2026-05-21 · fixed · 定时任务 cron 秒字段解析
+
+### Fixed
+- 修复定时任务 6 字段 cron 表达式按错误字段顺序解析的问题；现在 `0 5 11 * * *` 会按“秒 分 时 日 月 周”解析为每天 11:05:00。
+- 定时任务试运行日志补充 cron 字段解释，便于区分 5 字段与 6/7 字段表达式。
+
+### Added
+- 定时任务编辑页的 cron 输入框下方新增实时预览，展示字段解释、触发含义和未来几次触发时间。
+
+### Verification
+- `backend/.venv/bin/python -m pytest backend/app/tests/test_scheduler_runtime.py backend/app/tests/test_scheduler_plugin.py`
+- `backend/.venv/bin/ruff check backend/app/worker/scheduler_runtime.py backend/app/api/rules.py backend/app/tests/test_scheduler_runtime.py`
+- `pnpm --dir frontend exec tsc --noEmit`
+- `git diff --check`
+
+---
+
 ## [0.21.1] — 2026-05-21 · fixed · 配置枚举选项汉化
 
 ### Fixed

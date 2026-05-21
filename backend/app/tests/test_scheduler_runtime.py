@@ -10,7 +10,7 @@ import pytest
 from app.services.llm_client import LLMResult
 from app.services.llm_dto import LLMProviderDTO
 from app.worker.command import CommandContext, set_command_context
-from app.worker.scheduler_runtime import PlatformScheduler, SchedulerRuleExecutor
+from app.worker.scheduler_runtime import PlatformScheduler, SchedulerRuleExecutor, _croniter_next
 
 
 async def _noop_log(*args, **kwargs) -> None:  # noqa: ANN002, ANN003
@@ -27,6 +27,40 @@ def _runtime() -> PlatformScheduler:
         paused=paused,
         log_writer=_noop_log,
     )
+
+
+def test_six_field_cron_uses_leading_seconds() -> None:
+    base = datetime(2026, 5, 21, 2, 54, 20, tzinfo=UTC)
+
+    next_fire = _croniter_next("0 5 11 * * *", base, None)
+
+    assert next_fire == datetime(2026, 5, 21, 11, 5, 0, tzinfo=UTC)
+
+
+def test_five_field_cron_keeps_classic_order() -> None:
+    base = datetime(2026, 5, 21, 2, 54, 20, tzinfo=UTC)
+
+    next_fire = _croniter_next("0 5 11 * *", base, None)
+
+    assert next_fire == datetime(2026, 6, 11, 5, 0, 0, tzinfo=UTC)
+
+
+def test_cron_resolves_stale_six_field_next_fire_after_parser_upgrade() -> None:
+    executor = SchedulerRuleExecutor()
+    now = datetime(2026, 5, 21, 2, 54, 20, tzinfo=UTC)
+    cfg = {
+        "kind": "cron",
+        "cron": "0 5 11 * * *",
+        "_last_cron": "0 5 11 * * *",
+        "next_fire": "2026-06-11T05:00:00+00:00",
+    }
+
+    due, next_fire = executor.resolve_cron(cfg, now)
+
+    assert due is False
+    assert next_fire == datetime(2026, 5, 21, 11, 5, 0, tzinfo=UTC)
+    assert cfg["_cron_seconds_mode"] is True
+    assert cfg["_config_dirty"] is True
 
 
 @pytest.mark.asyncio

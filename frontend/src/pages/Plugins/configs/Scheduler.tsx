@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Pencil, Play, Plus, Trash2, Zap } from "lucide-react";
@@ -122,6 +122,10 @@ export function SchedulerConfig() {
   const [editOpen, setEditOpen] = useState(false);
   const [editing, setEditing] = useState<RuleOut | null>(null);
   const [form, setForm] = useState<FormState>(() => emptyForm(cmdPrefix));
+  const cronPreview = useMemo(
+    () => buildCronPreview(form.config.cron || "", tz),
+    [form.config.cron, tz],
+  );
 
   function openCreate() {
     setEditing(null);
@@ -492,9 +496,11 @@ export function SchedulerConfig() {
                 }
                 placeholder="*/5 * * * *"
               />
+              <CronPreview preview={cronPreview} />
               <p className="text-xs text-muted-foreground">
                 示例：<code className="rounded bg-muted px-1">*/5 * * * *</code> 每5分钟
                 <code className="rounded bg-muted px-1">0 9 * * 1-5</code> 工作日9点
+                <code className="rounded bg-muted px-1">0 5 11 * * *</code> 每天11:05:00
                 <code className="rounded bg-muted px-1">0 0 1 * *</code> 每月1号零点
                 <code className="rounded bg-muted px-1">*/30 * * * *</code> 每30分钟
               </p>
@@ -812,6 +818,42 @@ export function SchedulerConfig() {
   );
 }
 
+interface CronPreviewResult {
+  ok: boolean;
+  error?: string;
+  fieldHint: string;
+  summary: string;
+  next: Date[];
+}
+
+function CronPreview({ preview }: { preview: CronPreviewResult }) {
+  return (
+    <div
+      className={[
+        "mt-2 rounded-md border px-3 py-2 text-xs",
+        preview.ok
+          ? "border-emerald-200 bg-emerald-50/60 text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-200"
+          : "border-destructive/30 bg-destructive/5 text-destructive",
+      ].join(" ")}
+    >
+      <div className="font-medium">{preview.ok ? preview.summary : "cron 表达式无效"}</div>
+      <div className="mt-1 text-muted-foreground">{preview.fieldHint}</div>
+      {preview.ok ? (
+        <div className="mt-2 space-y-1">
+          {preview.next.map((item, idx) => (
+            <div key={`${item.getTime()}-${idx}`} className="font-mono">
+              {idx === 0 ? "下一次：" : `第 ${idx + 1} 次：`}
+              {formatCronPreviewDate(item)}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="mt-1">{preview.error || "请检查字段数量或范围。"}</div>
+      )}
+    </div>
+  );
+}
+
 function triggerLabel(cfg: SchedulerRuleConfig): string {
   if (cfg.kind === "once") return `单次 @ ${cfg.fire_at || "-"}`;
   if (cfg.kind === "interval") return `每 ${cfg.interval_sec || 0} 秒`;
@@ -823,3 +865,277 @@ const ACTION_TYPE_LABELS: Record<string, string> = {
   run_command: "执行指令",
   call_llm: "调用 LLM",
 };
+
+function buildCronPreview(expr: string, _timezone: string): CronPreviewResult {
+  const raw = expr.trim();
+  if (!raw) {
+    return {
+      ok: false,
+      fieldHint: "支持 5 字段：分 时 日 月 周；6/7 字段：秒 分 时 日 月 周 [年]",
+      summary: "",
+      next: [],
+      error: "cron 表达式不能为空。",
+    };
+  }
+
+  const parts = raw.split(/\s+/);
+  const fieldHint =
+    parts.length === 5
+      ? "字段解释：分 时 日 月 周"
+      : parts.length === 6
+        ? "字段解释：秒 分 时 日 月 周"
+        : parts.length === 7
+          ? "字段解释：秒 分 时 日 月 周 年"
+          : "支持 5 字段或 6/7 字段 cron";
+  if (![5, 6, 7].includes(parts.length)) {
+    return {
+      ok: false,
+      fieldHint,
+      summary: "",
+      next: [],
+      error: `当前是 ${parts.length} 个字段；请输入 5、6 或 7 个字段。`,
+    };
+  }
+
+  const offset = parts.length === 5 ? 0 : 1;
+  const second = parts.length === 5 ? parseCronField("0", 0, 59) : parseCronField(parts[0], 0, 59);
+  const minute = parseCronField(parts[offset], 0, 59);
+  const hour = parseCronField(parts[offset + 1], 0, 23);
+  const day = parseCronField(parts[offset + 2], 1, 31, { allowQuestion: true });
+  const month = parseCronField(parts[offset + 3], 1, 12, { names: MONTH_NAMES });
+  const weekday = parseCronField(parts[offset + 4], 0, 7, { allowQuestion: true, names: WEEKDAY_NAMES, mapSevenToZero: true });
+  const year = parts.length === 7 ? parseCronField(parts[6], 1970, 2099) : null;
+  const fields = [second, minute, hour, day, month, weekday, year].filter(Boolean) as ParsedCronField[];
+  const invalid = fields.find((f) => f.error);
+  if (invalid) {
+    return {
+      ok: false,
+      fieldHint,
+      summary: "",
+      next: [],
+      error: invalid.error,
+    };
+  }
+
+  const next = computeNextCronDates({
+    second,
+    minute,
+    hour,
+    day,
+    month,
+    weekday,
+    year,
+  });
+  if (!next.length) {
+    return {
+      ok: false,
+      fieldHint,
+      summary: "",
+      next: [],
+      error: "未来一年内没有匹配时间，请检查日期、星期或年份限制。",
+    };
+  }
+
+  return {
+    ok: true,
+    fieldHint,
+    summary: describeCron(parts),
+    next,
+  };
+}
+
+interface ParsedCronField {
+  raw: string;
+  values: number[];
+  restricted: boolean;
+  error?: string;
+}
+
+const MONTH_NAMES: Record<string, number> = {
+  JAN: 1,
+  FEB: 2,
+  MAR: 3,
+  APR: 4,
+  MAY: 5,
+  JUN: 6,
+  JUL: 7,
+  AUG: 8,
+  SEP: 9,
+  OCT: 10,
+  NOV: 11,
+  DEC: 12,
+};
+
+const WEEKDAY_NAMES: Record<string, number> = {
+  SUN: 0,
+  MON: 1,
+  TUE: 2,
+  WED: 3,
+  THU: 4,
+  FRI: 5,
+  SAT: 6,
+};
+
+function parseCronField(
+  rawField: string,
+  min: number,
+  max: number,
+  options: {
+    allowQuestion?: boolean;
+    names?: Record<string, number>;
+    mapSevenToZero?: boolean;
+  } = {},
+): ParsedCronField {
+  const raw = rawField.trim().toUpperCase();
+  const allValues = range(min, options.mapSevenToZero ? max - 1 : max);
+  if (raw === "*" || (options.allowQuestion && raw === "?")) {
+    return { raw, values: allValues, restricted: false };
+  }
+
+  const values = new Set<number>();
+  for (const piece of raw.split(",")) {
+    const parsed = parseCronPiece(piece, min, max, options);
+    if (typeof parsed === "string") {
+      return { raw, values: [], restricted: true, error: parsed };
+    }
+    parsed.forEach((value) => values.add(value));
+  }
+
+  return {
+    raw,
+    values: [...values].sort((a, b) => a - b),
+    restricted: true,
+  };
+}
+
+function parseCronPiece(
+  piece: string,
+  min: number,
+  max: number,
+  options: {
+    names?: Record<string, number>;
+    mapSevenToZero?: boolean;
+  },
+): number[] | string {
+  const [base, stepRaw] = piece.split("/");
+  const step = stepRaw ? Number(stepRaw) : 1;
+  if (!Number.isInteger(step) || step <= 0) return `步长无效：${piece}`;
+
+  let start: number;
+  let end: number;
+  if (base === "*") {
+    start = min;
+    end = max;
+  } else if (base.includes("-")) {
+    const [left, right] = base.split("-");
+    start = parseCronNumber(left, options);
+    end = parseCronNumber(right, options);
+  } else {
+    start = parseCronNumber(base, options);
+    end = stepRaw ? max : start;
+  }
+
+  if (options.mapSevenToZero) {
+    if (start === 7) start = 0;
+    if (end === 7 && base !== "*") end = 6;
+  }
+  if (!Number.isInteger(start) || !Number.isInteger(end)) return `字段无效：${piece}`;
+  if (start < min || end > max || start > end) return `字段超出范围：${piece}`;
+
+  const out: number[] = [];
+  for (let value = start; value <= end; value += step) {
+    out.push(options.mapSevenToZero && value === 7 ? 0 : value);
+  }
+  return out;
+}
+
+function parseCronNumber(raw: string, options: { names?: Record<string, number> }): number {
+  const named = options.names?.[raw.toUpperCase()];
+  if (named !== undefined) return named;
+  return Number(raw);
+}
+
+function range(min: number, max: number): number[] {
+  return Array.from({ length: max - min + 1 }, (_, idx) => min + idx);
+}
+
+function computeNextCronDates(fields: {
+  second: ParsedCronField;
+  minute: ParsedCronField;
+  hour: ParsedCronField;
+  day: ParsedCronField;
+  month: ParsedCronField;
+  weekday: ParsedCronField;
+  year: ParsedCronField | null;
+}): Date[] {
+  const out: Date[] = [];
+  const cursor = new Date(Date.now() + 1000);
+  cursor.setMilliseconds(0);
+  const maxDays = 366;
+
+  for (let dayOffset = 0; dayOffset <= maxDays && out.length < 5; dayOffset += 1) {
+    const date = new Date(cursor);
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() + dayOffset);
+    const year = date.getFullYear();
+    const month = date.getMonth() + 1;
+    const dom = date.getDate();
+    const dow = date.getDay();
+
+    if (fields.year && !fields.year.values.includes(year)) continue;
+    if (!fields.month.values.includes(month)) continue;
+    if (!dayMatches(fields.day, fields.weekday, dom, dow)) continue;
+
+    for (const hour of fields.hour.values) {
+      for (const minute of fields.minute.values) {
+        for (const second of fields.second.values) {
+          const candidate = new Date(date);
+          candidate.setHours(hour, minute, second, 0);
+          if (candidate <= cursor) continue;
+          out.push(candidate);
+          if (out.length >= 5) return out;
+        }
+      }
+    }
+  }
+  return out;
+}
+
+function dayMatches(day: ParsedCronField, weekday: ParsedCronField, dom: number, dow: number): boolean {
+  const dayOk = day.values.includes(dom);
+  const weekOk = weekday.values.includes(dow);
+  if (day.restricted && weekday.restricted) return dayOk || weekOk;
+  return dayOk && weekOk;
+}
+
+function describeCron(parts: string[]): string {
+  if (parts.length === 5) {
+    const [minute, hour, day, month, weekday] = parts;
+    if (minute.startsWith("*/") && hour === "*" && day === "*" && month === "*" && weekday === "*") {
+      return `每 ${minute.slice(2)} 分钟触发`;
+    }
+    if (day === "*" && month === "*" && weekday === "*") return `每天 ${padCron(hour)}:${padCron(minute)} 触发`;
+    return "已解析为 5 字段 cron";
+  }
+  const [second, minute, hour, day, month, weekday] = parts;
+  if (day === "*" && month === "*" && weekday === "*") {
+    return `每天 ${padCron(hour)}:${padCron(minute)}:${padCron(second)} 触发`;
+  }
+  return "已解析为 6/7 字段 cron";
+}
+
+function padCron(raw: string): string {
+  return /^\d+$/.test(raw) ? raw.padStart(2, "0") : raw;
+}
+
+function formatCronPreviewDate(date: Date): string {
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(date);
+}

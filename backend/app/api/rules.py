@@ -148,11 +148,17 @@ def _croniter_next_dryrun(
     try:
         if tz is not None:
             local_now = start_utc.astimezone(tz)
-            next_local: datetime = croniter(expr, local_now).get_next(datetime)
+            next_local: datetime = _croniter_for_scheduler(expr, local_now).get_next(datetime)
             return next_local.astimezone(UTC)
-        return croniter(expr, start_utc).get_next(datetime)
+        return _croniter_for_scheduler(expr, start_utc).get_next(datetime)
     except (CroniterBadCronError, ValueError):
         return None
+
+
+def _croniter_for_scheduler(expr: str, start: datetime) -> croniter:
+    parts = str(expr or "").split()
+    kwargs = {"second_at_beginning": True} if len(parts) in (6, 7) else {}
+    return croniter(expr, start, **kwargs)
 
 
 # ─────────────────────────────────────────────────────
@@ -419,6 +425,11 @@ async def dry_run_rule(
             else:
                 expr = str(cfg.get("cron") or "").strip()
                 logs.append({"step": "cron", "msg": f"cron 表达式：{expr or '(空)'}"})
+                part_count = len(expr.split()) if expr else 0
+                if part_count == 5:
+                    logs.append({"step": "cron", "msg": "字段解释：分 时 日 月 周"})
+                elif part_count in (6, 7):
+                    logs.append({"step": "cron", "msg": "字段解释：秒 分 时 日 月 周 [年]"})
                 logs.append({"step": "cron", "msg": f"已存 next_fire：{cfg.get('next_fire') or '(无，首次将只计算不触发)'}"})
                 if expr:
                     next_fire = _croniter_next_dryrun(expr, now, tz)

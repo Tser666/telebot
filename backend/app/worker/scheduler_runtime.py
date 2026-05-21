@@ -99,9 +99,9 @@ def _croniter_next(
     try:
         if tz is not None:
             local_now = start_utc.astimezone(tz)
-            next_local: datetime = croniter(expr, local_now).get_next(datetime)
+            next_local: datetime = _croniter(expr, local_now).get_next(datetime)
             return next_local.astimezone(UTC)
-        return croniter(expr, start_utc).get_next(datetime)
+        return _croniter(expr, start_utc).get_next(datetime)
     except (CroniterBadCronError, ValueError):
         return None
 
@@ -113,11 +113,26 @@ def _croniter_prev(
     try:
         if tz is not None:
             local_now = start_utc.astimezone(tz)
-            prev_local: datetime = croniter(expr, local_now).get_prev(datetime)
+            prev_local: datetime = _croniter(expr, local_now).get_prev(datetime)
             return prev_local.astimezone(UTC)
-        return croniter(expr, start_utc).get_prev(datetime)
+        return _croniter(expr, start_utc).get_prev(datetime)
     except (CroniterBadCronError, ValueError):
         return None
+
+
+def _croniter(expr: str, start: datetime) -> croniter:
+    """Create croniter with explicit 6-field support.
+
+    TelePilot accepts classic 5-field cron as ``minute hour day month weekday``.
+    For 6/7 fields, use Quartz-style leading seconds:
+    ``second minute hour day month weekday [year]``.
+    """
+    kwargs = {"second_at_beginning": True} if _cron_uses_leading_seconds(expr) else {}
+    return croniter(expr, start, **kwargs)
+
+
+def _cron_uses_leading_seconds(expr: str) -> bool:
+    return len(str(expr or "").split()) in (6, 7)
 
 
 def _parse_dt(raw: Any) -> datetime | None:
@@ -233,12 +248,19 @@ class SchedulerRuleExecutor:
         next_fire = _parse_dt(cfg.get("next_fire"))
         last_cron = cfg.get("_last_cron")
         cron_changed = (last_cron is not None) and (last_cron != expr)
+        seconds_mode = _cron_uses_leading_seconds(expr)
+        previous_seconds_mode = cfg.get("_cron_seconds_mode")
+        cron_mode_changed = previous_seconds_mode is not None and bool(previous_seconds_mode) != seconds_mode
+        missing_mode_marker = previous_seconds_mode is None
 
         if last_cron != expr:
             cfg["_last_cron"] = expr
             cfg["_config_dirty"] = True
+        if previous_seconds_mode != seconds_mode:
+            cfg["_cron_seconds_mode"] = seconds_mode
+            cfg["_config_dirty"] = True
 
-        if cron_changed:
+        if cron_changed or cron_mode_changed or (missing_mode_marker and next_fire is not None):
             nf = _croniter_next(expr, now, tz)
             if nf is None:
                 return False, None
