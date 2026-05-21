@@ -24,6 +24,7 @@
 - ``send_file``       : ``send_file``
 - ``join_chat``       : ``join_chat``
 - ``delete_message``  : ``delete_messages``
+- ``moderate_chat``   : ``ban_user`` / ``kick_user`` / ``mute_user`` / ``unban_user``
 
 约束：
 - 仅拦截顶层 ``getattr``；插件取到方法后多次调用都不再过 check（性能权衡）
@@ -35,6 +36,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -48,6 +50,7 @@ ALLOWED_API: dict[str, frozenset[str]] = {
     "send_file": frozenset({"send_file"}),
     "join_chat": frozenset({"join_chat"}),
     "delete_message": frozenset({"delete_messages"}),
+    "moderate_chat": frozenset({"ban_user", "kick_user", "mute_user", "unban_user"}),
 }
 
 
@@ -114,6 +117,36 @@ def resolve_permissions(perms: list[str] | None) -> frozenset[str]:
             continue
         out |= methods
     return frozenset(out)
+
+
+async def _maybe_await(value: Any) -> Any:
+    if hasattr(value, "__await__"):
+        return await value
+    return value
+
+
+def _duration_to_until(duration_seconds: int | float | None) -> timedelta | None:
+    if duration_seconds is None:
+        return None
+    try:
+        seconds = int(duration_seconds)
+    except (TypeError, ValueError):
+        return None
+    if seconds <= 0:
+        return None
+    return timedelta(seconds=seconds)
+
+
+def _require_allowed_method(client: SandboxClient, method_name: str) -> Any:
+    allowed = object.__getattribute__(client, "_allowed")
+    if method_name not in allowed:
+        plugin_key = object.__getattribute__(client, "_plugin_key")
+        perms = object.__getattribute__(client, "_perms")
+        raise PermissionError(
+            f"插件 {plugin_key!r} 缺少权限调用 client.{method_name}; "
+            f"请在 manifest.permissions 中声明对应能力（持有: {perms}）"
+        )
+    return object.__getattribute__(client, "_real")
 
 
 class SandboxClient:
@@ -203,6 +236,59 @@ class SandboxClient:
             f"插件 {plugin_key!r} 缺少权限调用 client.{name}; "
             f"请在 manifest.permissions 中声明对应能力（持有: {perms}）"
         )
+
+    async def ban_user(
+        self,
+        entity: Any,
+        user: Any,
+        *,
+        duration_seconds: int | float | None = None,
+    ) -> Any:
+        """封禁指定成员，仅在 manifest 声明 ``moderate_chat`` 后可用。"""
+        real = _require_allowed_method(self, "ban_user")
+        return await _maybe_await(
+            real.edit_permissions(
+                entity,
+                user,
+                until_date=_duration_to_until(duration_seconds),
+                view_messages=False,
+            )
+        )
+
+    async def kick_user(self, entity: Any, user: Any) -> Any:
+        """踢出指定成员，仅在 manifest 声明 ``moderate_chat`` 后可用。"""
+        real = _require_allowed_method(self, "kick_user")
+        return await _maybe_await(real.kick_participant(entity, user))
+
+    async def mute_user(
+        self,
+        entity: Any,
+        user: Any,
+        *,
+        duration_seconds: int | float | None = None,
+    ) -> Any:
+        """禁言指定成员，仅在 manifest 声明 ``moderate_chat`` 后可用。"""
+        real = _require_allowed_method(self, "mute_user")
+        return await _maybe_await(
+            real.edit_permissions(
+                entity,
+                user,
+                until_date=_duration_to_until(duration_seconds),
+                send_messages=False,
+                send_media=False,
+                send_stickers=False,
+                send_gifs=False,
+                send_games=False,
+                send_inline=False,
+                embed_link_previews=False,
+                send_polls=False,
+            )
+        )
+
+    async def unban_user(self, entity: Any, user: Any) -> Any:
+        """解除指定成员限制，仅在 manifest 声明 ``moderate_chat`` 后可用。"""
+        real = _require_allowed_method(self, "unban_user")
+        return await _maybe_await(real.edit_permissions(entity, user))
 
     def __repr__(self) -> str:  # pragma: no cover - 调试用
         plugin_key = object.__getattribute__(self, "_plugin_key")

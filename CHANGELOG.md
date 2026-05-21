@@ -18,6 +18,19 @@
 
 ---
 
+## [0.21.0] — 2026-05-21 · added · 远程模块受控成员管理权限
+
+### Added
+- 远程模块沙箱新增 `moderate_chat` 高危权限，按声明开放受控的 `ban_user`、`kick_user`、`mute_user`、`unban_user` 成员管理方法。
+- `moderate_chat` 只暴露包装方法，不开放 raw MTProto、真实 client、session 或 Telethon 私有状态，第三方模块仍需通过权限表调用。
+
+### Verification
+- `backend/.venv/bin/ruff check app/worker/plugins/sandbox.py app/tests/test_plugin_security_regression.py`
+- `backend/.venv/bin/python -m pytest app/tests/test_plugin_security_regression.py -q`
+- `git diff --check`
+
+---
+
 ## [0.20.1] — 2026-05-21 · fixed · 前端 Docker pnpm 版本固定
 
 ### Fixed

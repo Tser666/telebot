@@ -279,6 +279,49 @@ class TestSandboxClientSecurity:
             with pytest.raises(PermissionError):
                 getattr(sandbox, attr)
 
+    @pytest.mark.asyncio
+    async def test_sandbox_moderate_chat_requires_permission(self):
+        """成员管理方法必须声明 moderate_chat 后才能调用。"""
+        from app.worker.plugins.sandbox import SandboxClient
+
+        raw_client = SimpleNamespace()
+        sandbox = SandboxClient(raw_client, [], plugin_key="demo")
+
+        with pytest.raises(PermissionError) as ex:
+            await sandbox.mute_user(-100123, 456, duration_seconds=60)
+        assert "moderate_chat" in str(ex.value) or "缺少权限" in str(ex.value)
+
+    @pytest.mark.asyncio
+    async def test_sandbox_moderate_chat_exposes_controlled_methods(self):
+        """moderate_chat 只开放受控封禁/踢出/禁言/解封包装方法。"""
+        from app.worker.plugins.sandbox import SandboxClient
+
+        calls: list[tuple[str, tuple, dict]] = []
+
+        class FakeClient:
+            async def edit_permissions(self, *args, **kwargs):
+                calls.append(("edit_permissions", args, kwargs))
+                return "edited"
+
+            async def kick_participant(self, *args, **kwargs):
+                calls.append(("kick_participant", args, kwargs))
+                return "kicked"
+
+        sandbox = SandboxClient(FakeClient(), ["moderate_chat"], plugin_key="demo")
+
+        assert await sandbox.mute_user(-100123, 456, duration_seconds=60) == "edited"
+        assert await sandbox.ban_user(-100123, 456) == "edited"
+        assert await sandbox.kick_user(-100123, 456) == "kicked"
+        assert await sandbox.unban_user(-100123, 456) == "edited"
+
+        assert calls[0][0] == "edit_permissions"
+        assert calls[0][1] == (-100123, 456)
+        assert calls[0][2]["send_messages"] is False
+        assert int(calls[0][2]["until_date"].total_seconds()) == 60
+        assert calls[1][2]["view_messages"] is False
+        assert calls[2] == ("kick_participant", (-100123, 456), {})
+        assert calls[3] == ("edit_permissions", (-100123, 456), {})
+
     def test_sandbox_blocks_mtproto_call(self):
         """禁止 raw MTProto 调用。"""
         sandbox = self._make_sandbox()
