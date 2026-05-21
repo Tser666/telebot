@@ -700,7 +700,7 @@ export interface SystemSettings {
   /** 群聊纯命令回声防误触检查前 N 条消息；0 = 关闭 */
   command_echo_guard_previous_messages?: number;
   api_qps_total?: number;
-  /** IANA 时区标识，如 "Asia/Shanghai"；空字符串 = 使用浏览器本地时区 */
+  /** IANA 时区标识，如 "Asia/Shanghai"；默认 Asia/Shanghai */
   timezone?: string;
   llm_limits?: {
     per_minute: number;

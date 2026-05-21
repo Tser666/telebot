@@ -114,7 +114,7 @@ export function SchedulerConfig() {
     queryKey: ["system", "settings"],
     queryFn: getSystemSettings,
   });
-  const tz = tzQ.data?.timezone || "";
+  const tz = tzQ.data?.timezone || "Asia/Shanghai";
   const cmdPrefix = tzQ.data?.command_prefix || ",";
   // Scheduler 不需要 featureKey（没有"功能总开关"语义）
   const crud = useRuleCrud({ aid, ruleKind: "scheduler" });
@@ -496,7 +496,7 @@ export function SchedulerConfig() {
                 }
                 placeholder="*/5 * * * *"
               />
-              <CronPreview preview={cronPreview} />
+              <CronPreview preview={cronPreview} timezone={tz} />
               <p className="text-xs text-muted-foreground">
                 示例：<code className="rounded bg-muted px-1">*/5 * * * *</code> 每5分钟
                 <code className="rounded bg-muted px-1">0 9 * * 1-5</code> 工作日9点
@@ -826,7 +826,7 @@ interface CronPreviewResult {
   next: Date[];
 }
 
-function CronPreview({ preview }: { preview: CronPreviewResult }) {
+function CronPreview({ preview, timezone }: { preview: CronPreviewResult; timezone: string }) {
   return (
     <div
       className={[
@@ -843,7 +843,7 @@ function CronPreview({ preview }: { preview: CronPreviewResult }) {
           {preview.next.map((item, idx) => (
             <div key={`${item.getTime()}-${idx}`} className="font-mono">
               {idx === 0 ? "下一次：" : `第 ${idx + 1} 次：`}
-              {formatCronPreviewDate(item)}
+              {formatCronPreviewDate(item, timezone)}
             </div>
           ))}
         </div>
@@ -866,7 +866,7 @@ const ACTION_TYPE_LABELS: Record<string, string> = {
   call_llm: "调用 LLM",
 };
 
-function buildCronPreview(expr: string, _timezone: string): CronPreviewResult {
+function buildCronPreview(expr: string, timezone: string): CronPreviewResult {
   const raw = expr.trim();
   if (!raw) {
     return {
@@ -939,7 +939,7 @@ function buildCronPreview(expr: string, _timezone: string): CronPreviewResult {
   return {
     ok: true,
     fieldHint,
-    summary: describeCron(parts),
+    summary: `${describeCron(parts)}；按 ${timezone || "Asia/Shanghai"} 预览`,
     next,
   };
 }
@@ -1128,8 +1128,9 @@ function padCron(raw: string): string {
   return /^\d+$/.test(raw) ? raw.padStart(2, "0") : raw;
 }
 
-function formatCronPreviewDate(date: Date): string {
+function formatCronPreviewDate(date: Date, timezone?: string): string {
   return new Intl.DateTimeFormat(undefined, {
+    timeZone: timezone || undefined,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",

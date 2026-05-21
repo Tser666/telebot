@@ -126,7 +126,7 @@ export function SettingsIndex() {
   });
 
   const [prefix, setPrefix] = useState("");
-  const [timezone, setTimezone] = useState("");
+  const [timezone, setTimezone] = useState("Asia/Shanghai");
   const [llmLimits, setLlmLimits] = useState({
     per_minute: "0",
     daily_requests: "0",
@@ -142,7 +142,7 @@ export function SettingsIndex() {
   useEffect(() => {
     if (settingsQ.data) {
       setPrefix(settingsQ.data.command_prefix ?? ",");
-      setTimezone(settingsQ.data.timezone ?? "");
+      setTimezone(settingsQ.data.timezone ?? "Asia/Shanghai");
       setLlmLimits({
         per_minute: String(settingsQ.data.llm_limits?.per_minute ?? 0),
         daily_requests: String(settingsQ.data.llm_limits?.daily_requests ?? 0),
@@ -555,7 +555,7 @@ export function SettingsIndex() {
             <CardHeader>
               <CardTitle className="text-base">时区设置</CardTitle>
               <CardDescription>
-                全局时区，影响定时任务"下次触发/上次触发"等时间显示。留空则使用浏览器本地时区。
+                全局时区，影响定时任务"下次触发/上次触发"等时间显示。默认使用 Asia/Shanghai。
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -565,7 +565,7 @@ export function SettingsIndex() {
                   <Input
                     value={timezone}
                     onChange={(e) => setTimezone(e.target.value)}
-                    placeholder="如 Asia/Shanghai，留空为浏览器时区"
+                    placeholder="如 Asia/Shanghai"
                   />
                   <p className="text-xs text-muted-foreground">
                     当前浏览器时区：<b>{Intl.DateTimeFormat().resolvedOptions().timeZone}</b>

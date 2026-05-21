@@ -138,7 +138,7 @@ async def _get_system_tz(db) -> ZoneInfo | None:
         tz_str = str(row.value.get("value", "")).strip()
         if tz_str:
             return ZoneInfo(tz_str)
-    return None
+    return ZoneInfo("Asia/Shanghai")
 
 
 def _croniter_next_dryrun(

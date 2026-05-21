@@ -610,7 +610,7 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
         prefix = str(prefix_val)
     kill_val = await _get_setting(db, "kill_switch", {"enabled": False})
     qps_val = await _get_setting(db, "global_api_qps", {"api_qps_total": 0})
-    tz_val = await _get_setting(db, "timezone", {"value": ""})
+    tz_val = await _get_setting(db, "timezone", {"value": "Asia/Shanghai"})
     llm_val = await _get_setting(db, "llm_limits", {})
     log_val = await _get_setting(db, "log_retention", {})
     sudo_val = await _get_setting(db, "sudo_enabled", {"enabled": False})
@@ -630,7 +630,7 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
         "command_prefix": prefix,
         "kill_switch": bool(kill_val.get("enabled", False)) if isinstance(kill_val, dict) else bool(kill_val),
         "api_qps_total": int(qps_val.get("api_qps_total", 0)) if isinstance(qps_val, dict) else int(qps_val),
-        "timezone": tz or "",
+        "timezone": tz or "Asia/Shanghai",
         "sudo_enabled": bool(sudo_val.get("enabled", False)) if isinstance(sudo_val, dict) else bool(sudo_val),
         "command_echo_guard_previous_messages": _normalize_command_echo_guard_limit(echo_guard_source),
         "llm_limits": {
@@ -700,10 +700,10 @@ async def patch_system_settings(
         await _broadcast_reload()
     if payload.timezone is not None:
         tz = payload.timezone.strip()
-        # 校验：空字符串（使用浏览器时区）或合法 IANA 时区
+        # 校验：空字符串会回到默认上海时区，非空必须是合法 IANA 时区。
         if tz and tz not in __import__("zoneinfo").available_timezones():  # noqa: PLC0415
             raise _bad("invalid_timezone", f"无效时区：{tz}")
-        await _set_setting(db, "timezone", {"value": tz})
+        await _set_setting(db, "timezone", {"value": tz or "Asia/Shanghai"})
     if payload.sudo_enabled is not None:
         enabled = bool(payload.sudo_enabled)
         await _set_setting(db, "sudo_enabled", {"enabled": enabled})

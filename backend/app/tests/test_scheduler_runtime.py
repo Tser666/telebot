@@ -4,6 +4,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -60,6 +61,26 @@ def test_cron_resolves_stale_six_field_next_fire_after_parser_upgrade() -> None:
     assert due is False
     assert next_fire == datetime(2026, 5, 21, 11, 5, 0, tzinfo=UTC)
     assert cfg["_cron_seconds_mode"] is True
+    assert cfg["_config_dirty"] is True
+
+
+def test_cron_resolves_stale_next_fire_after_timezone_marker_added() -> None:
+    executor = SchedulerRuleExecutor()
+    now = datetime(2026, 5, 21, 2, 54, 20, tzinfo=UTC)
+    tz = ZoneInfo("Asia/Shanghai")
+    cfg = {
+        "kind": "cron",
+        "cron": "0 41 11 * * *",
+        "_last_cron": "0 41 11 * * *",
+        "_cron_seconds_mode": True,
+        "next_fire": "2026-05-21T11:41:00+00:00",
+    }
+
+    due, next_fire = executor.resolve_cron(cfg, now, tz)
+
+    assert due is False
+    assert next_fire == datetime(2026, 5, 21, 3, 41, 0, tzinfo=UTC)
+    assert cfg["_cron_timezone"] == "Asia/Shanghai"
     assert cfg["_config_dirty"] is True
 
 

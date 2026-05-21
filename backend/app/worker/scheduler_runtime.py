@@ -36,6 +36,7 @@ log = logging.getLogger(__name__)
 
 SCHEDULER_TICK_SECONDS = 30
 _MAX_MESSAGE_LEN = 3900
+DEFAULT_TIMEZONE = "Asia/Shanghai"
 
 
 @dataclass(slots=True)
@@ -77,7 +78,7 @@ class _RuntimeJob:
 
 
 async def _get_system_tz() -> ZoneInfo | None:
-    """从 system_setting 读取用户配置的时区，未配置时返回 None（按 UTC）。"""
+    """从 system_setting 读取用户配置的时区，未配置时默认按上海时区。"""
     try:
         from app.db.models.system import SystemSetting
 
@@ -89,7 +90,7 @@ async def _get_system_tz() -> ZoneInfo | None:
                     return ZoneInfo(tz_str)
     except Exception:
         pass
-    return None
+    return ZoneInfo(DEFAULT_TIMEZONE)
 
 
 def _croniter_next(
@@ -252,6 +253,10 @@ class SchedulerRuleExecutor:
         previous_seconds_mode = cfg.get("_cron_seconds_mode")
         cron_mode_changed = previous_seconds_mode is not None and bool(previous_seconds_mode) != seconds_mode
         missing_mode_marker = previous_seconds_mode is None
+        tz_key = getattr(tz, "key", None) or "UTC"
+        previous_tz = cfg.get("_cron_timezone")
+        cron_timezone_changed = previous_tz is not None and previous_tz != tz_key
+        missing_timezone_marker = previous_tz is None
 
         if last_cron != expr:
             cfg["_last_cron"] = expr
@@ -259,8 +264,16 @@ class SchedulerRuleExecutor:
         if previous_seconds_mode != seconds_mode:
             cfg["_cron_seconds_mode"] = seconds_mode
             cfg["_config_dirty"] = True
+        if previous_tz != tz_key:
+            cfg["_cron_timezone"] = tz_key
+            cfg["_config_dirty"] = True
 
-        if cron_changed or cron_mode_changed or (missing_mode_marker and next_fire is not None):
+        if (
+            cron_changed
+            or cron_mode_changed
+            or cron_timezone_changed
+            or ((missing_mode_marker or missing_timezone_marker) and next_fire is not None)
+        ):
             nf = _croniter_next(expr, now, tz)
             if nf is None:
                 return False, None
