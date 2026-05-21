@@ -41,6 +41,8 @@ export interface ConfigField {
   format?: string;
   "x-ui-widget"?: string;
   enum?: Array<string | number | boolean>;
+  enumNames?: string[];
+  enumDescriptions?: string[];
   items?: { type?: string };
   default?: unknown;
   description?: string;
@@ -360,6 +362,7 @@ function FieldInput({ fk, field, value, previewValue, onChange }: FieldInputProp
   }
 
   if (field.enum && field.enum.length > 0) {
+    const enumLabels = field.enumNames ?? [];
     return (
       <div className="space-y-1.5">
         <Label htmlFor={inputId}>{label}</Label>
@@ -370,12 +373,24 @@ function FieldInput({ fk, field, value, previewValue, onChange }: FieldInputProp
           onChange={(e) => onChange(e.target.value)}
         >
           {!field.enum.some((v) => String(v) === "") && <option value="">未设置</option>}
-          {field.enum.map((opt) => (
+          {field.enum.map((opt, index) => (
             <option key={String(opt)} value={String(opt)}>
-              {String(opt)}
+              {enumLabels[index] || String(opt)}
             </option>
           ))}
         </Select>
+        {field.enumDescriptions && field.enumDescriptions.length > 0 && (
+          <ul className="space-y-1 text-xs text-muted-foreground">
+            {field.enum.map((opt, index) => (
+              field.enumDescriptions?.[index] ? (
+                <li key={String(opt)}>
+                  <span className="font-medium">{enumLabels[index] || String(opt)}</span>
+                  ：{field.enumDescriptions[index]}
+                </li>
+              ) : null
+            ))}
+          </ul>
+        )}
       </div>
     );
   }

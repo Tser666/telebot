@@ -18,6 +18,18 @@
 
 ---
 
+## [0.21.1] — 2026-05-21 · fixed · 配置枚举选项汉化
+
+### Fixed
+- 通用模块配置页支持 `enumNames` 与 `enumDescriptions`，下拉选项会显示中文名称，并在字段下方展示每个选项的说明。
+- 修复远程模块配置中枚举字段只能显示 `delete_only` 这类内部值，导致用户难以理解选项含义的问题。
+
+### Verification
+- `pnpm --dir frontend exec tsc -b --pretty false`
+- `git diff --check`
+
+---
+
 ## [0.21.0] — 2026-05-21 · added · 远程模块受控成员管理权限
 
 ### Added
