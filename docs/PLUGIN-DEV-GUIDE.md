@@ -353,7 +353,7 @@ version_pattern = r"^\d+\.\d+\.\d+"
 
 ### 交互 Bot 兼容声明（interaction entries）
 
-交互 Bot 用来承接群内高频互动，不能直接复用 UserBot 插件命令作为启动入口；否则高频游戏又会回到 UserBot 账号身上，违背风控隔离目标。后续模块要支持“转账命中后启动”，应通过 Manifest 声明一个或多个交互入口，由平台统一适配。
+交互 Bot 用来承接群内高频互动，不能直接复用 UserBot 插件命令作为启动入口；否则高频游戏又会回到 UserBot 账号身上，违背风控隔离目标。后续模块要支持“转账命中后启动”，应通过 Manifest 声明一个或多个交互入口，并实现 `on_interaction` 返回平台标准动作。
 
 推荐在 `manifest.py` 顶层声明 `category` 和 `interaction_entries`；旧写法也兼容 `config_schema["x-category"]` 与 `config_schema["x-interaction-entries"]`。这是声明式协议，不要求模块自己解析转账通知、Bot Token 或群消息格式。
 
@@ -367,6 +367,19 @@ version_pattern = r"^\d+\.\d+\.\d+"
 
 `category` 只决定展示分组；是否能被交互 Bot 启动，只看是否声明了 `interaction_entries`。
 
+注意：`interaction_entries` 只负责“让前端知道这个模块有哪些交互入口可选”。真正运行时，worker 会调用插件实例的 `on_interaction(ctx, entry_key, payload)`。如果模块只声明入口但没有实现这个 hook，交互 Bot 会提示“模块尚未实现交互入口”。
+
+交互 Bot 运行时采用事件路由模型：Bbot 负责接收群消息、转账通知和规则指令；平台只把命中规则且存在活跃会话的事件投递给对应模块，不会把所有群消息广播给所有模块。模块应在同一个 `on_interaction` 中按 `payload["event"]["type"]` 区分事件。
+
+当前标准事件类型：
+
+| event.type | 触发时机 | 说明 |
+| --- | --- | --- |
+| `payment_confirmed` | 转账通知命中规则 | 常用于付费开局 |
+| `keyword` | 模块启动关键词命中且无付费门槛 | 常用于免费开局 |
+| `message` | 规则已有活跃会话后的普通群消息 | 常用于答题、猜测、继续流程 |
+| `session_close` | 规则被关闭或会话被强制结束 | 模块可清理状态，第一版可按需实现 |
+
 ```python
 MANIFEST = Manifest(
     key="game24",
@@ -379,6 +392,7 @@ MANIFEST = Manifest(
             "title": "付费开局",
             "description": "转账命中或模块关键词命中后，由交互 Bot 开启一局游戏。",
             "session_scope": "chat",
+            "events": ["payment_confirmed", "keyword", "message", "session_close"],
             "input_schema": {
                 "type": "object",
                 "additionalProperties": False,
@@ -412,25 +426,109 @@ MANIFEST = Manifest(
 )
 ```
 
+`input_schema` 描述的是某个交互入口允许接收的参数形态和默认值，不是模块的全局配置。Web 端在交互规则里保存的是 `module_config`：它只属于当前规则，只保存这条规则对入口参数的覆盖值，并会随规则 payload 一起提交给后端。
+
+例如某条规则可以绑定 `game24 / start_paid_game`，并保存：
+
+```json
+{
+  "module_key": "game24",
+  "module_action": "start_paid_game",
+  "module_config": {
+    "prize": 200,
+    "timeout": 600
+  }
+}
+```
+
+运行时入口收到的 payload 会包含当前规则的 `module_config` 字段，并把其中的键平铺到 payload 顶层；Web 端会在选择入口时用 `input_schema.properties.*.default` 辅助生成初始 JSON。模块应从 `payload.get("prize")` / `payload.get("timeout")` 读取本次规则参数；模块自身的账号级配置仍通过 `ctx.config` 读取。
+
+### on_interaction 实现
+
+```python
+from typing import Any
+
+from app.worker.plugins.base import Plugin, PluginContext, register
+
+
+@register
+class GuessNumberPlugin(Plugin):
+    key = "guess_number"
+    display_name = "猜数字"
+
+    async def on_interaction(
+        self,
+        ctx: PluginContext,
+        entry_key: str,
+        payload: dict[str, Any],
+    ) -> list[dict[str, Any]] | None:
+        if entry_key != "start_game":
+            return None
+
+        event = payload.get("event") if isinstance(payload.get("event"), dict) else {}
+        event_type = str(event.get("type") or payload.get("event_type") or "")
+
+        if event_type == "message":
+            answer = str(event.get("text") or "").strip()
+            if answer != "42":
+                return []
+            return [
+                {
+                    "type": "send_message",
+                    "text": f"答对了：{event.get('display_name') or '玩家'}\n奖金：{payload.get('prize') or 123}",
+                    "reply_to_message_id": event.get("message_id"),
+                }
+            ]
+
+        prize = int(payload.get("prize") or 123)
+        return [
+            {
+                "type": "send_message",
+                "text": f"猜数字开始，奖金：{prize}",
+            }
+        ]
+```
+
+当前平台已支持的标准动作：
+
+| type | 字段 | 说明 |
+| --- | --- | --- |
+| `send_message` | `text` | 由交互 Bot 在命中的群里发送消息 |
+| `send_message` | `reply_to_message_id` | 可选，指定回复哪条消息 |
+| `send_photo` / `send_file` | `photo_base64` / `file_base64` | 由交互 Bot 发送图片/文件字节，适合题图 |
+| `send_photo` / `send_file` | `filename`、`caption`、`reply_to_message_id` | 可选，文件名、说明文字、回复目标 |
+| `end_session` | 无 | 本次入口处理完成后不保留交互会话，适合彩票、红包等长期轮回模块 |
+
+`payload["event"]` 的核心字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `type` | 事件类型，如 `payment_confirmed`、`message` |
+| `account_id` / `chat_id` | 账号与群 ID |
+| `rule_id` / `rule_name` | 命中的交互规则 |
+| `module_key` / `entry_key` | 规则绑定的模块与入口 |
+| `update_id` / `message_id` | Telegram update 与消息 ID |
+| `user_id` / `display_name` / `username` | 触发事件的用户身份 |
+| `text` | 原始消息文本 |
+| `reply_to_user_id` / `reply_to_display_name` / `reply_to_username` | 被回复消息的用户身份 |
+| `data` | 事件附加数据；转账事件包含 `payer_name`、`receiver_name`、`amount` 等 |
+
 `interaction_entries` 中的 `session_scope` 建议使用：
 
 - `chat`：同一个群内同一时间只开一局，适合 24 点这类公共抢答。
 - `user`：同一个用户一条会话，适合个人答题或私聊流程。
 - `none`：模块自己不提供并发隔离，由平台按全局规则限制。
 
-#### 配置合并顺序
+#### 入口参数来源
 
-交互入口的实际参数按以下顺序合并，越靠后优先级越高：
+交互入口 payload 由平台运行时组装，当前不会在后端再次读取 manifest 默认值或模块账号级配置做自动合并。有效来源如下，越靠后越容易覆盖同名字段：
 
 ```text
-input_schema default
-< 模块全局配置
-< 账号级模块配置
-< 交互规则 module_config
+交互规则 module_config
 < 转账事件动态参数（payer / receiver / amount / chat_id 等）
 ```
 
-其中 `module_config` 只保存当前交互规则的覆盖项，例如“这条门票规则奖金为 200”；模块自身的通用配置仍放在模块配置页中。
+`input_schema` 的默认值主要给前端表单预填使用；旧规则、API 直接写入或第三方客户端不一定会带上这些默认值，所以模块仍应在代码里为关键参数提供兜底。`module_config` 只保存当前交互规则的覆盖项，例如“这条门票规则奖金为 200”。模块自身的通用配置仍放在模块配置页中，运行时从 `ctx.config` 读取，不能混进规则的 `module_config`。
 
 #### 标准事件输入
 
@@ -452,27 +550,102 @@ input_schema default
 
 #### 标准动作输出
 
-交互入口或适配器应返回平台可执行的标准动作，而不是直接调用 Telegram API。交互 Bot runtime 统一负责发送、编辑、回复、持久化状态和幂等处理。
+交互入口或适配器应返回平台可执行的标准动作，而不是直接调用 Telegram API。交互 Bot runtime 统一负责发送、回复与基础动作执行；业务状态和幂等锁由模块自己放在 `ctx.redis`。
 
 ```json
 [
   {
     "type": "send_message",
-    "text": "24 点开始...",
-    "state_key": "game24",
-    "state": {"numbers": [1, 5, 5, 5], "prize": 123}
+    "text": "24 点开始..."
   },
   {
-    "type": "wait_answer",
-    "state_key": "game24",
-    "answer_type": "game24_expression"
-  },
-  {
-    "type": "award_notice",
+    "type": "send_message",
     "text": "答对了：AAA\n题目：24 点 [1 5 5 5]\n奖金：123",
-    "reply_to": "winner_message"
+    "reply_to_message_id": 99
+  },
+  {
+    "type": "send_photo",
+    "photo_base64": "...",
+    "filename": "puzzle.png",
+    "caption": "题面"
   }
 ]
+```
+
+#### 端到端示例：24 点交互入口
+
+下面是 `payment_confirmed` / `keyword` 开局、`message` 答题、`session_close` 清理的最小形态。真实模块可以把 `generate_24_puzzle()`、`check_answer()`、`render_start()` 拆成纯函数复用。
+
+```python
+import json
+import secrets
+import time
+from typing import Any
+
+from app.worker.plugins.base import Plugin, PluginContext, register
+
+
+@register
+class Game24Plugin(Plugin):
+    key = "game24"
+    display_name = "24点游戏"
+
+    async def on_interaction(
+        self,
+        ctx: PluginContext,
+        entry_key: str,
+        payload: dict[str, Any],
+    ) -> list[dict[str, Any]] | None:
+        if entry_key != "start_paid_game":
+            return None
+        event = payload.get("event") if isinstance(payload.get("event"), dict) else {}
+        event_type = str(event.get("type") or payload.get("event_type") or "")
+        chat_id = int(payload.get("chat_id") or event.get("chat_id") or 0)
+        if not chat_id:
+            return []
+
+        state_key = f"account_bot:game24:{ctx.account_id}:{chat_id}"
+
+        if event_type in ("payment_confirmed", "keyword"):
+            numbers = generate_24_puzzle()
+            prize = int(payload.get("prize") or 123)
+            state = {
+                "account_id": ctx.account_id,
+                "chat_id": chat_id,
+                "numbers": numbers,
+                "prize": prize,
+                "active": True,
+                "game_id": secrets.token_hex(8),
+                "created_at": time.time(),
+            }
+            await ctx.redis.set(state_key, json.dumps(state, ensure_ascii=False), ex=3600)
+            return [{"type": "send_message", "text": render_start(numbers, prize)}]
+
+        raw = await ctx.redis.get(state_key)
+        state = json.loads(raw.decode() if isinstance(raw, bytes) else raw or "{}")
+        if event_type == "message":
+            if not state.get("active") or not check_answer(str(payload.get("message_text") or ""), state["numbers"]):
+                return []
+            claim_key = f"account_bot:game24_claim:{ctx.account_id}:{chat_id}:{state['game_id']}"
+            if not await ctx.redis.set(claim_key, str(payload.get("message_id") or ""), nx=True, ex=3600):
+                return []
+            state["active"] = False
+            await ctx.redis.set(state_key, json.dumps(state, ensure_ascii=False), ex=3600)
+            return [
+                {
+                    "type": "send_message",
+                    "text": f"答对了：{payload.get('sender_name') or '玩家'}\n奖金：{state['prize']}",
+                    "reply_to_message_id": payload.get("message_id"),
+                }
+            ]
+
+        if event_type == "session_close":
+            if state.get("active"):
+                state["active"] = False
+                await ctx.redis.set(state_key, json.dumps(state, ensure_ascii=False), ex=3600)
+            return []
+
+        return []
 ```
 
 #### 兼容边界
@@ -2221,6 +2394,19 @@ __all__ = ["PLUGIN_CLASS", "MANIFEST"]
 - [ ] `permissions` 是否覆盖实际调用的方法
 - [ ] `on_command` 签名是否是 5 参数
 - [ ] 错误是否都被捕获并反馈给用户
+
+### 为什么我的 on_interaction 没被调用
+
+按这条顺序排查，基本能定位 90% 的交互 Bot 问题：
+
+- `RemotePlugin.enabled`：远程模块是否已安装并启用。
+- `AccountFeature.enabled`：当前账号是否启用了这个模块。
+- 规则动作是否是 `action == "module"`，不是普通通知或算数题。
+- `module_key` 是否和 `MANIFEST.key` 完全一致，`module_action` 是否等于 `interaction_entries[].key`。
+- 当前群 `chat_id` 是否在规则 `chat_ids` 内；未配置时才表示所有群。
+- 触发模式是否匹配：付费通知走 `payment_confirmed`，免费关键词走 `keyword`，已有会话后的群消息才走 `message`。
+- worker 是否在线；离线时交互 Bot 会返回“模块启动失败：worker 调用超时”。
+- 日志页搜索 `run_interaction_entry`、`interaction module`、`unsupported type`，未知 action type 会写入 runtime log，便于发现返回了平台尚不支持的动作。
 
 ### 常见问题
 

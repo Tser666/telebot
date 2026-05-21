@@ -3,6 +3,7 @@ import type {
   AccountBotConfig,
   AccountBotConfigUpdate,
   AccountBotInteractionConfig,
+  AccountBotInteractionConfigUpdate,
   AccountBotTestRequest,
   AccountBotTestResponse,
   AccountBotUser,
@@ -49,7 +50,7 @@ export async function getInteractionBotConfig(
 
 export async function updateInteractionBotConfig(
   aid: number,
-  payload: AccountBotInteractionConfig,
+  payload: AccountBotInteractionConfigUpdate,
 ): Promise<AccountBotInteractionConfig> {
   const { data } = await api.put<AccountBotInteractionConfig>(
     `/api/accounts/${aid}/interaction-bot`,

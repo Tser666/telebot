@@ -238,8 +238,8 @@ export function AccountDetail() {
       </div>
 
       <Tabs defaultValue={defaultTab}>
-        <div className="-mx-1 flex overflow-x-auto px-1 pb-1">
-          <TabsList className="w-max flex-nowrap whitespace-nowrap">
+        <div className="w-full max-w-full overflow-x-auto overscroll-x-contain pb-1 [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <TabsList className="!mx-0 !inline-flex !w-max !max-w-none !justify-start flex-nowrap whitespace-nowrap">
             <TabsTrigger value="overview" className="shrink-0 gap-1.5">
               <LayoutDashboard className="h-4 w-4" /> 概览
             </TabsTrigger>

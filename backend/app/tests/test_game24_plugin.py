@@ -2,14 +2,34 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
 from app.worker.plugins.base import PluginContext
+from app.worker.plugins.builtin.game24 import plugin as game24_plugin
 from app.worker.plugins.builtin.game24.manifest import MANIFEST
 from app.worker.plugins.builtin.game24.plugin import Game24Plugin, GameState, check_answer
+
+
+class _Redis:
+    def __init__(self) -> None:
+        self.data: dict[str, str] = {}
+        self.expires: dict[str, int] = {}
+
+    async def get(self, key: str):
+        return self.data.get(key)
+
+    async def set(self, key: str, value: str, **kwargs):
+        if kwargs.get("nx") and key in self.data:
+            return False
+        self.data[key] = value
+        if kwargs.get("ex") is not None:
+            self.expires[key] = int(kwargs["ex"])
+        return True
 
 
 def test_game24_accepts_common_answer_formats() -> None:
@@ -25,6 +45,230 @@ def test_game24_manifest_schema_matches_runtime_config() -> None:
     assert set(schema["properties"].keys()) == {"command", "timeout"}
     assert schema["properties"]["command"]["default"] == "24d"
     assert schema["properties"]["timeout"]["default"] == 500
+
+
+def test_game24_manifest_declares_interaction_entry() -> None:
+    assert MANIFEST.category == "interactive"
+    assert MANIFEST.interaction_entries
+    entry = MANIFEST.interaction_entries[0]
+    assert entry["key"] == "start_paid_game"
+    assert entry["session_scope"] == "chat"
+    assert "prize" in entry["input_schema"]["properties"]
+    assert "timeout" in entry["input_schema"]["properties"]
+    assert "valid_seconds" in entry["input_schema"]["properties"]
+
+
+@pytest.mark.asyncio
+async def test_game24_on_interaction_handles_three_event_types(monkeypatch) -> None:
+    monkeypatch.setattr(game24_plugin, "generate_24_puzzle", lambda: [1, 5, 5, 5])
+    redis = _Redis()
+    plugin = Game24Plugin()
+    ctx = PluginContext(account_id=1, feature_key="game24", redis=redis, log=AsyncMock())
+
+    start_actions = await plugin.on_interaction(
+        ctx,
+        "start_paid_game",
+        {
+            "event_type": "payment_confirmed",
+            "chat_id": -100123,
+            "source_update_id": 7,
+            "source_message_id": 70,
+            "prize": 888,
+            "timeout": 500,
+            "valid_seconds": 120,
+        },
+    )
+
+    assert start_actions == [
+        {
+            "type": "send_message",
+            "text": (
+                "24 点开始\n"
+                "━━━━━━━━\n"
+                "数字：[ 1 ] [ 5 ] [ 5 ] [ 5 ]\n"
+                "奖金：888\n"
+                "可用符号：+ - x ÷ * / ( )\n"
+                "请直接发送算式，结果必须等于 24，并且恰好使用这 4 个数字各一次。"
+            ),
+        }
+    ]
+    state_key = "account_bot:game24:1:-100123"
+    state = json.loads(redis.data[state_key])
+    assert state["active"] is True
+    assert state["numbers"] == [1, 5, 5, 5]
+    assert state["timeout"] == 120
+    assert redis.expires[state_key] == 120
+
+    wrong_actions = await plugin.on_interaction(
+        ctx,
+        "start_paid_game",
+        {
+            "event_type": "message",
+            "chat_id": -100123,
+            "message_text": "1+5+5+5",
+            "message_id": 98,
+            "sender_name": "AAA",
+        },
+    )
+    assert wrong_actions == []
+
+    answer_actions = await plugin.on_interaction(
+        ctx,
+        "start_paid_game",
+        {
+            "event_type": "message",
+            "chat_id": -100123,
+            "message_text": "5*(5-1/5)",
+            "message_id": 99,
+            "sender_name": "AAA",
+            "payout_account_label": "@owner",
+        },
+    )
+    assert answer_actions == [
+        {
+            "type": "send_message",
+            "text": "答对了：AAA\n题目：24 点 [1 5 5 5]\n答案：5*(5-1/5) = 24\n奖金：888\n请由 @owner 人工回复赢家发放奖金。",
+            "reply_to_message_id": 99,
+        },
+        {"type": "end_session"},
+    ]
+    state = json.loads(redis.data[state_key])
+    assert state["active"] is False
+    assert state["winner_message_id"] == 99
+    assert redis.expires[state_key] == 120
+
+    await plugin.on_interaction(
+        ctx,
+        "start_paid_game",
+        {"event_type": "keyword", "chat_id": -100123, "prize": 123},
+    )
+    close_actions = await plugin.on_interaction(
+        ctx,
+        "start_paid_game",
+        {"event_type": "session_close", "chat_id": -100123},
+    )
+    assert close_actions == []
+    state = json.loads(redis.data[state_key])
+    assert state["active"] is False
+
+
+@pytest.mark.asyncio
+async def test_game24_expired_interaction_state_does_not_block_new_game(monkeypatch) -> None:
+    monkeypatch.setattr(game24_plugin, "generate_24_puzzle", lambda: [1, 5, 5, 5])
+    redis = _Redis()
+    plugin = Game24Plugin()
+    ctx = PluginContext(account_id=1, feature_key="game24", redis=redis, log=AsyncMock())
+    state_key = "account_bot:game24:1:-100123"
+    redis.data[state_key] = json.dumps(
+        {
+            "account_id": 1,
+            "chat_id": -100123,
+            "numbers": [1, 2, 3, 4],
+            "prize": 888,
+            "timeout": 30,
+            "active": True,
+            "game_id": "old-game",
+            "created_at": 1000.0,
+        }
+    )
+    monkeypatch.setattr(game24_plugin.time, "time", lambda: 2000.0)
+
+    actions = await plugin.on_interaction(
+        ctx,
+        "start_paid_game",
+        {
+            "event_type": "keyword",
+            "chat_id": -100123,
+            "prize": 123,
+            "valid_seconds": 90,
+        },
+    )
+
+    assert actions and actions[0]["type"] == "send_message"
+    state = json.loads(redis.data[state_key])
+    assert state["active"] is True
+    assert state["game_id"] != "old-game"
+    assert state["timeout"] == 90
+    assert redis.expires[state_key] == 90
+
+
+@pytest.mark.asyncio
+async def test_game24_interaction_winner_announcement_escapes_html_fields(monkeypatch) -> None:
+    monkeypatch.setattr(game24_plugin, "generate_24_puzzle", lambda: [1, 5, 5, 5])
+    redis = _Redis()
+    plugin = Game24Plugin()
+    ctx = PluginContext(account_id=1, feature_key="game24", redis=redis, log=AsyncMock())
+    await plugin.on_interaction(
+        ctx,
+        "start_paid_game",
+        {"event_type": "payment_confirmed", "chat_id": -100123, "prize": 888},
+    )
+
+    actions = await plugin.on_interaction(
+        ctx,
+        "start_paid_game",
+        {
+            "event_type": "message",
+            "chat_id": -100123,
+            "message_text": "5*(5-1/5)",
+            "message_id": 99,
+            "sender_name": "A<B & C>",
+            "payout_account_label": "@owner<&>",
+        },
+    )
+
+    assert actions[0]["text"] == (
+        "答对了：A&lt;B &amp; C&gt;\n"
+        "题目：24 点 [1 5 5 5]\n"
+        "答案：5*(5-1/5) = 24\n"
+        "奖金：888\n"
+        "请由 @owner&lt;&amp;&gt; 人工回复赢家发放奖金。"
+    )
+    assert "A<B & C>" not in actions[0]["text"]
+    assert "@owner<&>" not in actions[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_game24_concurrent_answer_only_awards_once(monkeypatch) -> None:
+    monkeypatch.setattr(game24_plugin, "generate_24_puzzle", lambda: [1, 5, 5, 5])
+    redis = _Redis()
+    plugin = Game24Plugin()
+    ctx = PluginContext(account_id=1, feature_key="game24", redis=redis, log=AsyncMock())
+    await plugin.on_interaction(
+        ctx,
+        "start_paid_game",
+        {"event_type": "payment_confirmed", "chat_id": -100123, "prize": 888},
+    )
+
+    first, second = await asyncio.gather(
+        plugin.on_interaction(
+            ctx,
+            "start_paid_game",
+            {
+                "event_type": "message",
+                "chat_id": -100123,
+                "message_text": "5*(5-1/5)",
+                "message_id": 99,
+                "sender_name": "AAA",
+            },
+        ),
+        plugin.on_interaction(
+            ctx,
+            "start_paid_game",
+            {
+                "event_type": "message",
+                "chat_id": -100123,
+                "message_text": "5*(5-1/5)",
+                "message_id": 100,
+                "sender_name": "BBB",
+            },
+        ),
+    )
+
+    replies = [actions for actions in [first, second] if actions]
+    assert len(replies) == 1
+    assert replies[0][0]["reply_to_message_id"] in {99, 100}
+    assert replies[0][-1] == {"type": "end_session"}
 
 
 @pytest.mark.asyncio

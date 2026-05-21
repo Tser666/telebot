@@ -13,7 +13,7 @@ from app.worker import runtime
 def test_parse_account_bot_winner_notice() -> None:
     assert (
         runtime._parse_account_bot_winner_notice(
-            "答对了：AAA\n题目：7 - 1 = 6\n奖金：123\n请由 userbot 账号人工回复赢家发放奖金。"
+            "答对了：AAA\n题目：7 - 1 = 6\n奖金：123\n请由 @owner 人工回复赢家发放奖金。"
         )
         == 123
     )
@@ -126,7 +126,7 @@ async def test_account_bot_auto_award_replies_to_winner_answer(monkeypatch) -> N
 
     client = SimpleNamespace(send_message=AsyncMock())
     event = SimpleNamespace(
-        raw_text="答对了：AAA\n题目：7 - 1 = 6\n奖金：123\n请由 userbot 账号人工回复赢家发放奖金。",
+        raw_text="答对了：AAA\n题目：7 - 1 = 6\n奖金：123\n请由 @owner 人工回复赢家发放奖金。",
         reply_to_msg_id=66,
         chat_id=-100123,
         id=77,

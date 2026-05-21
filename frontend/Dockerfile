@@ -7,17 +7,17 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 
 # 启用 corepack，使用与 lockfile 匹配的 pnpm 版本
-# Using npm to avoid pnpm ERR_PNPM_IGNORED_BUILDS
+RUN corepack enable
 
 # 仅拷贝清单先装依赖，命中构建缓存
-COPY frontend/package.json frontend/package-lock.json* ./
-RUN npm install
+COPY frontend/package.json frontend/pnpm-lock.yaml frontend/.npmrc ./
+RUN pnpm install --frozen-lockfile
 
 # 拷贝其余源码、docs 与根更新日志（Sidebar 会通过 ?raw 读取 CHANGELOG.md）
 COPY frontend/ .
 COPY docs/ /docs/
 COPY CHANGELOG.md /CHANGELOG.md
-RUN npx vite build
+RUN pnpm build
 
 
 FROM nginx:1.27-alpine AS runtime

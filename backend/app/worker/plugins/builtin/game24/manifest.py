@@ -39,6 +39,12 @@ MANIFEST = Manifest(
                         "minimum": 30,
                         "maximum": 3600,
                     },
+                    "valid_seconds": {
+                        "type": "integer",
+                        "title": "平台会话有效期（秒）",
+                        "minimum": 30,
+                        "maximum": 86400,
+                    },
                 },
                 "required": ["prize"],
             },

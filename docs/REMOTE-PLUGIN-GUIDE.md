@@ -9,6 +9,7 @@
 - [模块开发指南：远程模块](./PLUGIN-DEV-GUIDE.md#10-远程模块)
 - [Manifest 元数据](./PLUGIN-DEV-GUIDE.md#5-manifest-元数据)
 - [交互 Bot 兼容声明](./PLUGIN-DEV-GUIDE.md#交互-bot-兼容声明interaction-entries)
+- [交互 Bot 端到端示例](./PLUGIN-DEV-GUIDE.md#端到端示例24-点交互入口)
 - [安全边界](./PLUGIN-DEV-GUIDE.md#12-安全边界)
 - [模块最小测试清单](./PLUGIN-DEV-GUIDE.md#模块最小测试清单)
 

@@ -52,6 +52,8 @@ CMD_RELOAD_IGNORED = "reload_ignored"
 CMD_GET_RECENT_PEERS = "get_recent_peers"
 # RPC：手动执行 scheduler 规则（payload: {"rule_id": int, "reply_to": <应答频道>}）
 CMD_EXECUTE_RULE = "execute_rule"
+# RPC：交互 Bot 调用已加载插件声明的交互入口
+CMD_RUN_INTERACTION_ENTRY = "run_interaction_entry"
 
 # ── 事件类型（worker→主） ──────────────────────────────────────
 EVT_STATUS = "status"                      # payload: {status: active|paused|...}

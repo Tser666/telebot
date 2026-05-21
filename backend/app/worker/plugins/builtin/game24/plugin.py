@@ -9,9 +9,13 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import html
+import json
 import random
 import re
-from dataclasses import dataclass
+import secrets
+import time
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from telethon import events
@@ -23,6 +27,8 @@ DEFAULT_COMMAND = "24d"
 DEFAULT_TIMEOUT = 500
 MIN_TIMEOUT = 30
 MAX_TIMEOUT = 3600
+INTERACTION_GAME_PREFIX = "account_bot:game24:"
+INTERACTION_GAME_CLAIM_PREFIX = "account_bot:game24_claim:"
 
 
 # ─────────────────────────────────────────────────────
@@ -219,6 +225,24 @@ class GameState:
         self.timeout_task = value
 
 
+@dataclass
+class InteractionGameState:
+    """交互 Bot 路径下持久化到 Redis 的 24 点状态。"""
+
+    account_id: int
+    chat_id: int
+    numbers: list[int]
+    prize: int = 123
+    timeout: int = DEFAULT_TIMEOUT
+    active: bool = True
+    game_id: str = ""
+    created_at: float = 0.0
+    source_update_id: int | None = None
+    source_message_id: int | None = None
+    winner_update_id: int | None = None
+    winner_message_id: int | None = None
+
+
 def _clean_command_name(value: Any) -> str:
     command = str(value or "").strip()
     if not command or re.search(r"\s", command):
@@ -240,6 +264,69 @@ def _load_config(raw: dict[str, Any] | None) -> Game24Config:
         command=_clean_command_name(cfg.get("command", DEFAULT_COMMAND)),
         timeout=_clamp_timeout(cfg.get("timeout", DEFAULT_TIMEOUT)),
     )
+
+
+def _int_payload(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _interaction_game_key(account_id: int, chat_id: int) -> str:
+    return f"{INTERACTION_GAME_PREFIX}{int(account_id)}:{int(chat_id)}"
+
+
+def _interaction_claim_key(state: InteractionGameState) -> str:
+    return f"{INTERACTION_GAME_CLAIM_PREFIX}{state.account_id}:{state.chat_id}:{state.game_id}"
+
+
+def _interaction_state_from_payload(payload: Any) -> InteractionGameState | None:
+    if isinstance(payload, bytes):
+        payload = payload.decode("utf-8", errors="ignore")
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(payload, dict):
+        return None
+    try:
+        numbers = payload.get("numbers")
+        if not isinstance(numbers, list):
+            return None
+        return InteractionGameState(
+            account_id=int(payload["account_id"]),
+            chat_id=int(payload["chat_id"]),
+            numbers=[int(item) for item in numbers],
+            prize=int(payload.get("prize") or 123),
+            timeout=_clamp_timeout(payload.get("timeout", DEFAULT_TIMEOUT)),
+            active=bool(payload.get("active", True)),
+            game_id=str(payload.get("game_id") or ""),
+            created_at=float(payload.get("created_at") or 0.0),
+            source_update_id=_int_payload(payload.get("source_update_id")),
+            source_message_id=_int_payload(payload.get("source_message_id")),
+            winner_update_id=_int_payload(payload.get("winner_update_id")),
+            winner_message_id=_int_payload(payload.get("winner_message_id")),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _interaction_timeout_from_payload(payload: dict[str, Any]) -> int:
+    timeout = _clamp_timeout(payload.get("timeout") or payload.get("valid_seconds") or DEFAULT_TIMEOUT)
+    valid_seconds = _int_payload(payload.get("valid_seconds"))
+    if valid_seconds is not None:
+        timeout = min(timeout, _clamp_timeout(valid_seconds))
+    return timeout
+
+
+def _interaction_state_expired(state: InteractionGameState) -> bool:
+    if not state.active:
+        return False
+    if state.created_at <= 0:
+        return True
+    return time.time() >= state.created_at + _clamp_timeout(state.timeout)
 
 
 def _event_message(event: Any) -> Any:
@@ -369,6 +456,183 @@ class Game24Plugin(Plugin):
         self._games.clear()
         self._locks.clear()
         await self._log(ctx, "info", "24 点游戏已停止，进行中的局和超时计时器已清理。")
+
+    # ── 交互 Bot 入口（管理 Bot / 交互 Bot rule 调用）────────────
+    async def on_interaction(
+        self,
+        ctx: PluginContext,
+        entry_key: str,
+        payload: dict[str, Any],
+    ) -> list[dict[str, Any]] | None:
+        if entry_key != "start_paid_game":
+            return None
+        event = payload.get("event") if isinstance(payload.get("event"), dict) else {}
+        event_type = str(event.get("type") or payload.get("event_type") or "")
+        chat_id = _int_payload(payload.get("chat_id") or event.get("chat_id"))
+        if chat_id is None:
+            return []
+        if event_type in {"payment_confirmed", "keyword"}:
+            return await self._handle_interaction_start(ctx, payload, event, chat_id)
+        if event_type == "message":
+            return await self._handle_interaction_answer(ctx, payload, event, chat_id)
+        if event_type == "session_close":
+            return await self._handle_interaction_close(ctx, chat_id)
+        return []
+
+    async def _handle_interaction_start(
+        self,
+        ctx: PluginContext,
+        payload: dict[str, Any],
+        event: dict[str, Any],
+        chat_id: int,
+    ) -> list[dict[str, Any]]:
+        active = await self._load_interaction_state(ctx, ctx.account_id, chat_id)
+        if active is not None and active.active:
+            return [{"type": "send_message", "text": "当前已有进行中的 24 点游戏，请先答完再开新局。"}]
+
+        prize = _int_payload(payload.get("prize")) or 123
+        timeout = _interaction_timeout_from_payload(payload)
+        numbers = generate_24_puzzle()
+        state = InteractionGameState(
+            account_id=ctx.account_id,
+            chat_id=chat_id,
+            numbers=numbers,
+            prize=prize,
+            timeout=timeout,
+            game_id=secrets.token_hex(8),
+            created_at=time.time(),
+            source_update_id=_int_payload(payload.get("source_update_id") or event.get("update_id")),
+            source_message_id=_int_payload(payload.get("source_message_id") or event.get("message_id")),
+        )
+        await self._save_interaction_state(ctx, state)
+        await self._log(
+            ctx,
+            "info",
+            f"24 点交互 Bot 开局：聊天 {chat_id}，数字 {numbers}，奖金 {prize}。",
+            chat_id=chat_id,
+            numbers=numbers,
+            prize=prize,
+            timeout=timeout,
+            game_id=state.game_id,
+        )
+        return [{"type": "send_message", "text": self._render_interaction_start_message(numbers, prize)}]
+
+    async def _handle_interaction_answer(
+        self,
+        ctx: PluginContext,
+        payload: dict[str, Any],
+        event: dict[str, Any],
+        chat_id: int,
+    ) -> list[dict[str, Any]]:
+        state = await self._load_interaction_state(ctx, ctx.account_id, chat_id)
+        if state is None or not state.active:
+            return []
+
+        text = str(payload.get("message_text") or event.get("text") or "").strip()
+        result = check_answer_detailed(text, state.numbers)
+        if not result.ok:
+            await self._log(
+                ctx,
+                "debug",
+                f"24 点交互 Bot 答案未通过：{result.reason}。",
+                chat_id=chat_id,
+                answer=text,
+                normalized_expr=result.normalized_expr,
+                numbers=state.numbers,
+                reason=result.reason,
+            )
+            return []
+
+        if not await self._claim_interaction_winner(ctx, state, payload, event):
+            return []
+
+        winner = str(payload.get("sender_name") or event.get("display_name") or payload.get("payer_name") or "未知用户")
+        payout_account = str(payload.get("payout_account_label") or "账号持有者").strip()
+        winner_display = html.escape(winner)
+        payout_account_display = html.escape(payout_account)
+        nums_disp = " ".join(str(item) for item in state.numbers)
+        await self._log(
+            ctx,
+            "info",
+            f"24 点交互 Bot 识别到正确答案：{winner} 的 {result.normalized_expr!r} 正好等于 24。",
+            chat_id=chat_id,
+            winner=winner,
+            answer=text,
+            normalized_expr=result.normalized_expr,
+            numbers=state.numbers,
+            prize=state.prize,
+        )
+        return [
+            {
+                "type": "send_message",
+                "text": (
+                    f"答对了：{winner_display}\n"
+                    f"题目：24 点 [{nums_disp}]\n"
+                    f"答案：{result.normalized_expr} = 24\n"
+                    f"奖金：{state.prize}\n"
+                    f"请由 {payout_account_display} 人工回复赢家发放奖金。"
+                ),
+                "reply_to_message_id": _int_payload(payload.get("message_id") or event.get("message_id")),
+            },
+            {"type": "end_session"},
+        ]
+
+    async def _handle_interaction_close(self, ctx: PluginContext, chat_id: int) -> list[dict[str, Any]]:
+        state = await self._load_interaction_state(ctx, ctx.account_id, chat_id)
+        if state is not None and state.active:
+            state.active = False
+            await self._save_interaction_state(ctx, state)
+            await self._log(ctx, "info", f"24 点交互 Bot 会话已清理：聊天 {chat_id}。", chat_id=chat_id)
+        return []
+
+    async def _load_interaction_state(
+        self,
+        ctx: PluginContext,
+        account_id: int,
+        chat_id: int,
+    ) -> InteractionGameState | None:
+        if ctx.redis is None:
+            return None
+        raw = await ctx.redis.get(_interaction_game_key(account_id, chat_id))
+        state = _interaction_state_from_payload(raw)
+        if state is not None and _interaction_state_expired(state):
+            state.active = False
+            await self._save_interaction_state(ctx, state)
+            return None
+        return state
+
+    async def _save_interaction_state(self, ctx: PluginContext, state: InteractionGameState) -> None:
+        if ctx.redis is None:
+            return
+        ttl = _clamp_timeout(state.timeout)
+        await ctx.redis.set(
+            _interaction_game_key(state.account_id, state.chat_id),
+            json.dumps(asdict(state), ensure_ascii=False),
+            ex=ttl,
+        )
+
+    async def _claim_interaction_winner(
+        self,
+        ctx: PluginContext,
+        state: InteractionGameState,
+        payload: dict[str, Any],
+        event: dict[str, Any],
+    ) -> bool:
+        if ctx.redis is None:
+            return False
+        acquired = await ctx.redis.set(
+            _interaction_claim_key(state),
+            str(payload.get("message_id") or event.get("message_id") or event.get("update_id") or ""),
+            ex=_clamp_timeout(state.timeout),
+            nx=True,
+        )
+        if not acquired:
+            return False
+        state.active = False
+        state.winner_update_id = _int_payload(payload.get("source_update_id") or event.get("update_id"))
+        state.winner_message_id = _int_payload(payload.get("message_id") or event.get("message_id"))
+        await self._save_interaction_state(ctx, state)
+        return True
 
     # ── 命令 handler（outgoing 触发）────────────
     async def _cmd_handler(
@@ -759,6 +1023,18 @@ class Game24Plugin(Plugin):
             "请直接发送算式，结果必须等于 24。\n"
             "示例：(1+2+3)*4、8/(3-8/3)\n"
             "必须恰好使用这 4 个数字各一次，可用 + - x ÷ * / ( )"
+        )
+
+    @staticmethod
+    def _render_interaction_start_message(numbers: list[int], prize: int) -> str:
+        nums_disp = " ] [ ".join(str(n) for n in numbers)
+        return (
+            "24 点开始\n"
+            "━━━━━━━━\n"
+            f"数字：[ {nums_disp} ]\n"
+            f"奖金：{prize}\n"
+            "可用符号：+ - x ÷ * / ( )\n"
+            "请直接发送算式，结果必须等于 24，并且恰好使用这 4 个数字各一次。"
         )
 
     @staticmethod

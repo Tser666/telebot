@@ -49,6 +49,7 @@ from .ipc import (
     CMD_RELOAD_IGNORED,
     CMD_RELOAD_PLUGIN,
     CMD_RESUME,
+    CMD_RUN_INTERACTION_ENTRY,
     CMD_STOP,
     EVT_ACK,
     EVT_LOGIN_REQUIRED,
@@ -634,6 +635,34 @@ async def _listen_cmd(
                             await redis.publish(
                                 reply_to,
                                 make_cmd(CMD_EXECUTE_RULE, ok=result_ok, error=result_error),
+                            )
+                        except Exception:  # noqa: BLE001
+                            pass
+                    elif cmd.type == CMD_RUN_INTERACTION_ENTRY:
+                        # RPC：交互 Bot 调用插件声明的交互入口，返回平台标准动作。
+                        reply_to = cmd.payload.get("reply_to")
+                        if not isinstance(reply_to, str) or not reply_to:
+                            continue
+                        result_ok = False
+                        result_error: str | None = None
+                        actions: list[dict[str, Any]] = []
+                        try:
+                            from .plugins.loader import invoke_interaction_entry  # type: ignore
+
+                            actions = await invoke_interaction_entry(
+                                account_id,
+                                plugin_key=str(cmd.payload.get("plugin_key") or ""),
+                                entry_key=str(cmd.payload.get("entry_key") or ""),
+                                payload=dict(cmd.payload.get("payload") or {}),
+                            )
+                            result_ok = True
+                        except Exception as e:  # noqa: BLE001
+                            result_error = f"{type(e).__name__}: {e}"
+                            await _log(redis, account_id, "warn", f"run_interaction_entry 失败: {result_error}")
+                        try:
+                            await redis.publish(
+                                reply_to,
+                                make_cmd(CMD_RUN_INTERACTION_ENTRY, ok=result_ok, error=result_error, actions=actions),
                             )
                         except Exception:  # noqa: BLE001
                             pass

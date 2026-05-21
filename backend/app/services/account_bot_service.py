@@ -14,6 +14,11 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..account_bot_defaults import (
+    DEFAULT_INTERACTION_DISABLED_MESSAGE,
+    DEFAULT_INTERACTION_RESPONSE_TEMPLATE,
+    DEFAULT_TRANSFER_NOTICE_TEMPLATE,
+)
 from ..crypto import decrypt_str, encrypt_str
 from ..db.models.account import Account
 from ..db.models.account_bot import (
@@ -131,12 +136,14 @@ def default_transfer_notice_config() -> dict[str, Any]:
         "interaction_last_update_id": None,
         "interaction_last_error": None,
         "trusted_bot_id": None,
+        "transfer_bot_id": None,
         "transfer_bot_token_enc": None,
         "has_transfer_bot_token": False,
         "trigger_mode": "payment",
         "trigger_text": "转账成功",
         "trigger_texts": ["转账成功"],
         "module_start_keywords": [],
+        "receiver_user_id": None,
         "receiver_text": None,
         "amount": None,
         "amount_match_mode": "eq",
@@ -145,14 +152,16 @@ def default_transfer_notice_config() -> dict[str, Any]:
         "module_key": None,
         "module_action": None,
         "module_prize": None,
+        "module_config": {},
         "module_start_text": None,
         "open_commands": [],
         "close_commands": [],
         "status_commands": [],
-        "disabled_message": "规则已关闭，暂时不能开启该模块。",
+        "disabled_message": DEFAULT_INTERACTION_DISABLED_MESSAGE,
         "valid_seconds": 600,
         "concurrency": "chat",
-        "response_template": "检测到 {payer_name} 向 {receiver_name} 转账 {amount}，已进入游戏流程。",
+        "response_template": DEFAULT_INTERACTION_RESPONSE_TEMPLATE,
+        "transfer_notice_template": DEFAULT_TRANSFER_NOTICE_TEMPLATE,
         "rules": [],
     }
 
@@ -169,10 +178,12 @@ def normalize_transfer_notice_config(raw: Any) -> dict[str, Any]:
         "interaction_bot_id",
         "interaction_last_update_id",
         "trusted_bot_id",
+        "transfer_bot_id",
         "amount",
         "math_prize",
         "module_prize",
         "valid_seconds",
+        "receiver_user_id",
     ):
         try:
             base[key] = int(base[key]) if base[key] not in (None, "") else None
@@ -241,6 +252,8 @@ def normalize_transfer_notice_config(raw: Any) -> dict[str, Any]:
     base["receiver_text"] = receiver or None
     template = str(base.get("response_template") or "").strip()
     base["response_template"] = template or default_transfer_notice_config()["response_template"]
+    notice_template = str(base.get("transfer_notice_template") or "").strip()
+    base["transfer_notice_template"] = (notice_template or DEFAULT_TRANSFER_NOTICE_TEMPLATE)[:1000]
     rules = normalize_interaction_rules(base.get("rules"))
     if not rules:
         rules = [
@@ -252,6 +265,7 @@ def normalize_transfer_notice_config(raw: Any) -> dict[str, Any]:
                 "trigger_mode": base["trigger_mode"],
                 "trigger_texts": list(base["trigger_texts"]),
                 "module_start_keywords": list(base["module_start_keywords"]),
+                "receiver_user_id": base["receiver_user_id"],
                 "receiver_text": base["receiver_text"],
                 "amount": base["amount"],
                 "amount_match_mode": base["amount_match_mode"],
@@ -260,6 +274,7 @@ def normalize_transfer_notice_config(raw: Any) -> dict[str, Any]:
                 "module_key": base["module_key"],
                 "module_action": base["module_action"],
                 "module_prize": base["module_prize"],
+                "module_config": dict(base["module_config"]) if isinstance(base.get("module_config"), dict) else {},
                 "module_start_text": base["module_start_text"],
                 "open_commands": list(base["open_commands"]),
                 "close_commands": list(base["close_commands"]),
@@ -277,6 +292,7 @@ def normalize_transfer_notice_config(raw: Any) -> dict[str, Any]:
     base["trigger_texts"] = list(first_enabled.get("trigger_texts") or base["trigger_texts"])
     base["trigger_text"] = base["trigger_texts"][0] if base["trigger_texts"] else "转账成功"
     base["module_start_keywords"] = list(first_enabled.get("module_start_keywords") or [])
+    base["receiver_user_id"] = first_enabled.get("receiver_user_id")
     base["receiver_text"] = first_enabled.get("receiver_text")
     base["amount"] = first_enabled.get("amount")
     base["amount_match_mode"] = first_enabled.get("amount_match_mode") or "eq"
@@ -285,6 +301,7 @@ def normalize_transfer_notice_config(raw: Any) -> dict[str, Any]:
     base["module_key"] = first_enabled.get("module_key")
     base["module_action"] = first_enabled.get("module_action")
     base["module_prize"] = first_enabled.get("module_prize")
+    base["module_config"] = dict(first_enabled.get("module_config") or {})
     base["module_start_text"] = first_enabled.get("module_start_text")
     base["open_commands"] = list(first_enabled.get("open_commands") or [])
     base["close_commands"] = list(first_enabled.get("close_commands") or [])
@@ -349,6 +366,10 @@ def normalize_interaction_rules(raw: Any) -> list[dict[str, Any]]:
             amount = int(item["amount"]) if item.get("amount") not in (None, "") else None
         except (TypeError, ValueError):
             amount = None
+        try:
+            receiver_user_id = int(item["receiver_user_id"]) if item.get("receiver_user_id") not in (None, "") else None
+        except (TypeError, ValueError):
+            receiver_user_id = None
         amount_match_mode = str(item.get("amount_match_mode") or "eq").strip()
         if amount_match_mode not in VALID_AMOUNT_MATCH_MODES:
             amount_match_mode = "eq"
@@ -372,6 +393,7 @@ def normalize_interaction_rules(raw: Any) -> list[dict[str, Any]]:
             action = "notice"
         module_key = str(item.get("module_key") or "").strip() or None
         module_action = str(item.get("module_action") or "").strip() or None
+        module_config = item.get("module_config") if isinstance(item.get("module_config"), dict) else {}
         module_start_text = str(item.get("module_start_text") or "").strip() or None
         try:
             module_prize = int(item["module_prize"]) if item.get("module_prize") not in (None, "") else None
@@ -391,6 +413,7 @@ def normalize_interaction_rules(raw: Any) -> list[dict[str, Any]]:
                 "trigger_mode": trigger_mode,
                 "trigger_texts": triggers,
                 "module_start_keywords": module_start_keywords,
+                "receiver_user_id": receiver_user_id if receiver_user_id is None or receiver_user_id > 0 else None,
                 "receiver_text": receiver_text,
                 "amount": amount if amount is None or amount > 0 else None,
                 "amount_match_mode": amount_match_mode,
@@ -399,6 +422,7 @@ def normalize_interaction_rules(raw: Any) -> list[dict[str, Any]]:
                 "module_key": module_key,
                 "module_action": module_action,
                 "module_prize": module_prize if module_prize is None or module_prize > 0 else None,
+                "module_config": dict(module_config),
                 "module_start_text": module_start_text,
                 "open_commands": open_commands,
                 "close_commands": close_commands,
@@ -467,9 +491,16 @@ async def update_transfer_notice_config(
             current["interaction_last_error"] = sanitize_bot_error(exc, token=interaction_token)
     if incoming.get("clear_transfer_bot_token"):
         current["transfer_bot_token_enc"] = None
+        current["transfer_bot_id"] = None
     token = str(incoming.get("transfer_bot_token") or "").strip()
     if token:
         current["transfer_bot_token_enc"] = encrypt_str(token)
+        try:
+            me = await get_me(token)
+            bot_id = me.get("id")
+            current["transfer_bot_id"] = int(bot_id) if bot_id is not None else None
+        except Exception:
+            current["transfer_bot_id"] = None
     for transient_key in (
         "interaction_bot_token",
         "clear_interaction_bot_token",
@@ -478,6 +509,7 @@ async def update_transfer_notice_config(
         "interaction_bot_id",
         "interaction_last_update_id",
         "interaction_last_error",
+        "transfer_bot_id",
         "transfer_bot_token",
         "clear_transfer_bot_token",
         "has_transfer_bot_token",
@@ -760,6 +792,36 @@ async def send_message(
         payload["reply_to_message_id"] = reply_to_message_id
         payload["allow_sending_without_reply"] = True
     return await call_bot_api(token, "sendMessage", payload)
+
+
+async def send_photo_bytes(
+    token: str,
+    chat_id: int,
+    photo: bytes,
+    *,
+    filename: str = "photo.png",
+    caption: str | None = None,
+    reply_to_message_id: int | None = None,
+    parse_mode: str | None = "HTML",
+) -> dict[str, Any]:
+    url = f"{BOT_API_BASE}/bot{token}/sendPhoto"
+    data: dict[str, Any] = {"chat_id": chat_id}
+    if caption:
+        data["caption"] = caption[:1024]
+    if parse_mode:
+        data["parse_mode"] = parse_mode
+    if reply_to_message_id is not None:
+        data["reply_to_message_id"] = reply_to_message_id
+        data["allow_sending_without_reply"] = True
+    files = {"photo": (filename or "photo.png", photo)}
+    async with httpx.AsyncClient(timeout=BOT_API_TIMEOUT) as client:
+        resp = await client.post(url, data=data, files=files)
+    payload = resp.json() if resp.content else {}
+    if resp.status_code >= 400 or not payload.get("ok", False):
+        desc = payload.get("description") or f"HTTP {resp.status_code}"
+        raise RuntimeError(desc)
+    result = payload.get("result")
+    return result if isinstance(result, dict) else {"result": result}
 
 
 async def edit_message(

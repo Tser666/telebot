@@ -178,6 +178,7 @@ export interface AccountBotInteractionRule {
   trigger_mode?: "payment" | "keyword" | "both";
   trigger_texts?: string[];
   module_start_keywords?: string[];
+  receiver_user_id?: number | null;
   receiver_text?: string | null;
   amount?: number | null;
   amount_match_mode?: "eq" | "gte";
@@ -185,6 +186,7 @@ export interface AccountBotInteractionRule {
   math_prize: number;
   module_key?: string | null;
   module_action?: string | null;
+  module_config?: Record<string, unknown> | null;
   module_prize?: number | null;
   module_start_text?: string | null;
   open_commands?: string[];
@@ -210,6 +212,7 @@ export interface AccountBotInteractionConfig {
   interaction_last_update_id?: number | null;
   interaction_last_error?: string | null;
   trusted_bot_id?: number | null;
+  transfer_bot_id?: number | null;
   transfer_bot_token?: string | null;
   clear_transfer_bot_token?: boolean;
   has_transfer_bot_token?: boolean;
@@ -217,6 +220,7 @@ export interface AccountBotInteractionConfig {
   trigger_text: string;
   trigger_texts?: string[];
   module_start_keywords?: string[];
+  receiver_user_id?: number | null;
   receiver_text?: string | null;
   amount?: number | null;
   amount_match_mode?: "eq" | "gte";
@@ -224,6 +228,7 @@ export interface AccountBotInteractionConfig {
   math_prize: number;
   module_key?: string | null;
   module_action?: string | null;
+  module_config?: Record<string, unknown> | null;
   module_prize?: number | null;
   module_start_text?: string | null;
   open_commands?: string[];
@@ -233,8 +238,45 @@ export interface AccountBotInteractionConfig {
   valid_seconds?: number | null;
   concurrency?: "chat" | "user" | "none";
   response_template: string;
+  transfer_notice_template: string;
   rules?: AccountBotInteractionRule[];
 }
+
+export type AccountBotInteractionConfigUpdate = Pick<
+  AccountBotInteractionConfig,
+  | "enabled"
+  | "chat_id"
+  | "chat_ids"
+  | "interaction_bot_token"
+  | "clear_interaction_bot_token"
+  | "trusted_bot_id"
+  | "transfer_bot_token"
+  | "clear_transfer_bot_token"
+  | "trigger_mode"
+  | "trigger_text"
+  | "trigger_texts"
+  | "module_start_keywords"
+  | "receiver_user_id"
+  | "receiver_text"
+  | "amount"
+  | "amount_match_mode"
+  | "action"
+  | "math_prize"
+  | "module_key"
+  | "module_action"
+  | "module_config"
+  | "module_prize"
+  | "module_start_text"
+  | "open_commands"
+  | "close_commands"
+  | "status_commands"
+  | "disabled_message"
+  | "valid_seconds"
+  | "concurrency"
+  | "response_template"
+  | "transfer_notice_template"
+  | "rules"
+>;
 
 export type AccountBotTransferNoticeConfig = AccountBotInteractionConfig;
 

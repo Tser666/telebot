@@ -56,6 +56,7 @@ from ...db.models.remote_plugin import RemotePlugin
 from ...db.models.rule import Rule
 from ...db.models.system import SystemSetting
 from ...redis_client import get_redis
+from ...services import interaction_bot_service
 from ...services.rate_limit_service import get_effective
 from ...settings import settings as app_settings
 from ...util.sudo_permissions import sudo_chat_allowed
@@ -502,6 +503,53 @@ async def _event_allowed_for_owner_only(state: _AccountState, event: Any) -> boo
     return True
 
 
+def _rule_chat_matches_for_interaction_guard(rule: dict[str, Any], chat_id: int | None) -> bool:
+    if chat_id is None:
+        return False
+    chat_ids = rule.get("chat_ids")
+    if isinstance(chat_ids, list) and chat_ids:
+        try:
+            return int(chat_id) in {int(item) for item in chat_ids}
+        except (TypeError, ValueError):
+            return False
+    return True
+
+
+def _text_equals_any(text: str, values: Any) -> bool:
+    if not isinstance(values, list):
+        return False
+    clean = str(text or "").strip()
+    return bool(clean and any(clean == str(item or "").strip() for item in values if str(item or "").strip()))
+
+
+async def _interaction_bot_owns_incoming_text(state: _AccountState, event: Any) -> bool:
+    """交互 Bot 规则接管的关键词不再交给普通插件 on_message 自行开局。"""
+
+    text = str(getattr(event, "raw_text", "") or "").strip()
+    if not text:
+        return False
+    try:
+        async with AsyncSessionLocal() as db:
+            row = await db.get(SystemSetting, interaction_bot_service.transfer_notice_setting_key(state.account_id))
+        cfg = interaction_bot_service.normalize_transfer_notice_config(row.value if row is not None else None)
+    except Exception:  # noqa: BLE001
+        log.debug("读取交互 Bot 规则失败 account=%s", state.account_id, exc_info=True)
+        return False
+    if not cfg.get("enabled"):
+        return False
+    chat_id = getattr(event, "chat_id", None)
+    for rule in cfg.get("rules") or []:
+        if not isinstance(rule, dict) or not bool(rule.get("enabled", True)):
+            continue
+        if not _rule_chat_matches_for_interaction_guard(rule, chat_id):
+            continue
+        if _text_equals_any(text, rule.get("open_commands")) or _text_equals_any(text, rule.get("close_commands")):
+            return True
+        if _text_equals_any(text, rule.get("module_start_keywords")):
+            return True
+    return False
+
+
 # ─────────────────────────────────────────────────────
 # 主入口：load_plugins_for_account
 # ─────────────────────────────────────────────────────
@@ -620,6 +668,8 @@ async def load_plugins_for_account(
                         )
                     except Exception:  # noqa: BLE001
                         pass
+                if await _interaction_bot_owns_incoming_text(state, event):
+                    return
 
             for fkey, inst in list(state.instances.items()):
                 if direction not in inst.message_channels:
@@ -1375,10 +1425,39 @@ def get_recent_peers(account_id: int) -> list[dict[str, Any]]:
     return out
 
 
+async def invoke_interaction_entry(
+    account_id: int,
+    *,
+    plugin_key: str,
+    entry_key: str,
+    payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """调用已加载插件的交互 Bot 入口，返回平台标准动作。"""
+
+    state = _STATES.get(account_id)
+    if state is None:
+        raise RuntimeError("账号 worker 尚未运行")
+    plugin_key = str(plugin_key or "").strip()
+    entry_key = str(entry_key or "").strip()
+    if not plugin_key or not entry_key:
+        raise ValueError("缺少 plugin_key 或 entry_key")
+    inst = state.instances.get(plugin_key)
+    ctx = state.contexts.get(plugin_key)
+    if inst is None or ctx is None:
+        raise RuntimeError(f"模块未加载或未启用：{plugin_key}")
+    actions = await inst.on_interaction(ctx, entry_key, dict(payload or {}))
+    if actions is None:
+        raise RuntimeError(f"模块尚未实现交互入口：{plugin_key}.{entry_key}")
+    if not isinstance(actions, list) or not all(isinstance(item, dict) for item in actions):
+        raise TypeError("交互入口必须返回 list[dict] 标准动作")
+    return actions
+
+
 __all__ = [
     "RECENT_PEERS_LIMIT",
     "discover_plugins",
     "get_recent_peers",
+    "invoke_interaction_entry",
     "load_plugins_for_account",
     "registered_plugins",
     "reload_account_config",

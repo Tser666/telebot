@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import hashlib
 import json
 import logging
@@ -15,6 +17,10 @@ from typing import Any
 
 from sqlalchemy import desc, select
 
+from ..account_bot_defaults import (
+    DEFAULT_INTERACTION_RESPONSE_TEMPLATE,
+    DEFAULT_TRANSFER_NOTICE_TEMPLATE,
+)
 from ..db.base import AsyncSessionLocal
 from ..db.models.account import Account
 from ..db.models.account_bot import (
@@ -37,13 +43,15 @@ from ..settings import settings
 from ..worker.ipc import (
     CMD_EXECUTE_RULE,
     CMD_RELOAD_CONFIG,
+    CMD_RUN_INTERACTION_ENTRY,
     GLOBAL_CHANNEL,
+    RUNTIME_LOG_STREAM,
     IPCMessage,
+    RuntimeLogPayload,
     cmd_channel,
     make_cmd,
     publish_cmd_with_ack,
 )
-from ..worker.plugins.builtin.game24.plugin import check_answer_detailed, generate_24_puzzle
 from . import (
     account_bot_service,
     account_service,
@@ -67,11 +75,9 @@ _RUNTIME_NOTIFY_DEDUPE_PREFIX = "account_bot:runtime_notify:"
 _MATH_GAME_PREFIX = "account_bot:math_game:"
 _MATH_GAME_CLAIM_PREFIX = "account_bot:math_game_claim:"
 _MATH_GAME_TTL_SECONDS = 900
-_GAME24_PREFIX = "account_bot:game24:"
-_GAME24_CLAIM_PREFIX = "account_bot:game24_claim:"
-_GAME24_TTL_SECONDS = 3600
 _INTERACTION_RULE_STATE_PREFIX = "account_bot:interaction_rule_state:"
 _INTERACTION_TRIGGER_DEDUPE_PREFIX = "account_bot:interaction_trigger:"
+_INTERACTION_SESSION_PREFIX = "account_bot:interaction_session:"
 
 
 async def _load_command_prefix(db) -> str:
@@ -101,8 +107,10 @@ class Incoming:
     callback_id: str | None = None
     callback_data: str | None = None
     display_name: str | None = None
+    username: str | None = None
     reply_to_user_id: int | None = None
     reply_to_display_name: str | None = None
+    reply_to_username: str | None = None
 
 
 @dataclass
@@ -125,21 +133,26 @@ _MATH_GAMES: dict[tuple[int, int], MathGameState] = {}
 
 
 @dataclass
-class Game24State:
+class InteractionEvent:
+    """交互 Bot 投递给模块的标准事件。"""
+
+    type: str
     account_id: int
-    chat_id: int
-    numbers: list[int]
-    prize: int = 123
-    active: bool = True
-    game_id: str = ""
-    created_at: float = 0.0
-    source_update_id: int | None = None
-    source_message_id: int | None = None
-    winner_update_id: int | None = None
-    winner_message_id: int | None = None
-
-
-_GAME24_GAMES: dict[tuple[int, int], Game24State] = {}
+    chat_id: int | None
+    rule_id: str
+    rule_name: str
+    module_key: str
+    entry_key: str
+    update_id: int
+    message_id: int | None
+    user_id: int | None
+    display_name: str | None
+    username: str | None
+    text: str
+    reply_to_user_id: int | None = None
+    reply_to_display_name: str | None = None
+    reply_to_username: str | None = None
+    data: dict[str, Any] | None = None
 
 
 def _button(text: str, action: str, resource: str = "_", *, aid: int, nonce: str | None = None) -> dict[str, str]:
@@ -618,14 +631,14 @@ async def _handle_interaction_update(aid: int, token: str, update: dict[str, Any
             return
         if await _try_handle_interaction_rule_command_or_keyword(db, incoming):
             return
-        if await _try_handle_game24_answer(incoming):
+        if await _try_handle_interaction_module_message(db, incoming):
             return
         if await _try_handle_math_answer(incoming):
             return
 
 
 def _parse_transfer_notice(text: str) -> dict[str, Any] | None:
-    """解析测试阶段的固定转账通知文案。"""
+    """解析官方或测试阶段自定义转账通知文案。"""
 
     if not text.strip():
         return None
@@ -642,6 +655,12 @@ def _parse_transfer_notice(text: str) -> dict[str, Any] | None:
         value = match.group(1).strip()
         out[key] = int(value) if key == "amount" else value
     if set(out) == {"payer_name", "receiver_name", "amount"}:
+        payer_id_match = re.search(r"付款人\s*(?:用户)?(?:ID|id)\s*[:：]\s*(\d+)", text)
+        if payer_id_match:
+            out["payer_user_id"] = int(payer_id_match.group(1))
+        receiver_id_match = re.search(r"收款人\s*(?:ID|id)\s*[:：]\s*(\d+)", text)
+        if receiver_id_match:
+            out["receiver_user_id"] = int(receiver_id_match.group(1))
         return out
 
     payer_match = re.search(r"^\s*(.+?)\s*(?:转出|射出|转账)\s*(\d+)\b", text, re.M)
@@ -651,24 +670,34 @@ def _parse_transfer_notice(text: str) -> dict[str, Any] | None:
         receiver_amount = int(receiver_match.group(2))
         if payer_amount != receiver_amount:
             return None
-        return {
+        parsed = {
             "payer_name": payer_match.group(1).strip(),
             "receiver_name": receiver_match.group(1).strip(),
             "amount": payer_amount,
         }
+        payer_id_match = re.search(r"付款人\s*(?:用户)?(?:ID|id)\s*[:：]\s*(\d+)", text)
+        if payer_id_match:
+            parsed["payer_user_id"] = int(payer_id_match.group(1))
+        receiver_id_match = re.search(r"收款人\s*(?:ID|id)\s*[:：]\s*(\d+)", text)
+        if receiver_id_match:
+            parsed["receiver_user_id"] = int(receiver_id_match.group(1))
+        return parsed
     return None
 
 
 def _render_transfer_notice_response(template: str, data: dict[str, Any]) -> str:
     values = {
-        "payer_name": data.get("payer_name", ""),
-        "receiver_name": data.get("receiver_name", ""),
-        "amount": data.get("amount", ""),
+        "payer_name": account_bot_service.html_text(data.get("payer_name", "")),
+        "payer_user_id": account_bot_service.html_text(data.get("payer_user_id", "")),
+        "receiver_name": account_bot_service.html_text(data.get("receiver_name", "")),
+        "amount": account_bot_service.html_text(data.get("amount", "")),
+        "receiver_user_id": account_bot_service.html_text(data.get("receiver_user_id", "")),
     }
+    raw_template = str(template or "").strip() or DEFAULT_INTERACTION_RESPONSE_TEMPLATE
     try:
-        return template.format(**values)
+        return raw_template.format_map(_TemplateValues(values))
     except Exception:
-        return account_bot_service.default_transfer_notice_config()["response_template"].format(**values)
+        return DEFAULT_INTERACTION_RESPONSE_TEMPLATE.format_map(_TemplateValues(values))
 
 
 def _parse_transfer_command(text: str) -> int | None:
@@ -679,8 +708,51 @@ def _parse_transfer_command(text: str) -> int | None:
     return amount if amount > 0 else None
 
 
-def _render_transfer_bot_notice(payer_name: str, receiver_name: str, amount: int) -> str:
-    return f"转账成功\n{payer_name} 射出 {amount}\n{receiver_name} 接收 {amount}"
+class _TemplateValues(dict[str, Any]):
+    def __missing__(self, key: str) -> str:
+        return ""
+
+
+def _compact_rendered_template(text: str) -> str:
+    return "\n".join(line.rstrip() for line in text.splitlines() if line.strip())
+
+
+def _render_transfer_bot_notice(
+    template: str,
+    payer_name: str,
+    receiver_name: str,
+    amount: int,
+    *,
+    payer_user_id: int | None = None,
+    receiver_user_id: int | None = None,
+    escape_html: bool = True,
+) -> str:
+    def _value(value: Any) -> str:
+        text = str(value)
+        return account_bot_service.html_text(text) if escape_html else text
+
+    payer_id_text = "" if payer_user_id is None else str(payer_user_id)
+    receiver_id_text = "" if receiver_user_id is None else str(receiver_user_id)
+    values = _TemplateValues(
+        {
+            "payer_name": _value(payer_name),
+            "payer_user_id": _value(payer_id_text),
+            "payer_user_id_line": f"付款人ID：{_value(payer_id_text)}" if payer_id_text else "",
+            "receiver_name": _value(receiver_name),
+            "amount": _value(amount),
+            "receiver_user_id": _value(receiver_id_text),
+            "receiver_user_id_line": f"收款人ID：{_value(receiver_id_text)}" if receiver_id_text else "",
+        }
+    )
+    raw_template = str(template or "").strip() or DEFAULT_TRANSFER_NOTICE_TEMPLATE
+    try:
+        rendered = raw_template.format_map(values)
+    except Exception:
+        rendered = DEFAULT_TRANSFER_NOTICE_TEMPLATE.format_map(values)
+    rendered = _compact_rendered_template(rendered)
+    if rendered:
+        return rendered[:4000]
+    return _compact_rendered_template(DEFAULT_TRANSFER_NOTICE_TEMPLATE.format_map(values))[:4000]
 
 
 def _interaction_chat_matches(cfg: dict[str, Any], chat_id: int) -> bool:
@@ -703,7 +775,7 @@ def _interaction_triggers(cfg: dict[str, Any]) -> list[str]:
 
 
 def _matches_interaction_trigger(cfg: dict[str, Any], text: str) -> bool:
-    return any(trigger in text for trigger in _interaction_triggers(cfg))
+    return _message_line_equals_any(text, _interaction_triggers(cfg))
 
 
 def _legacy_interaction_rule(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -715,6 +787,7 @@ def _legacy_interaction_rule(cfg: dict[str, Any]) -> dict[str, Any]:
         "trigger_mode": cfg.get("trigger_mode") or "payment",
         "trigger_texts": _interaction_triggers(cfg),
         "module_start_keywords": cfg.get("module_start_keywords") or [],
+        "receiver_user_id": cfg.get("receiver_user_id"),
         "receiver_text": cfg.get("receiver_text"),
         "amount": cfg.get("amount"),
         "amount_match_mode": cfg.get("amount_match_mode") or "eq",
@@ -761,7 +834,7 @@ def _rule_triggers(rule: dict[str, Any]) -> list[str]:
 
 
 def _rule_matches_trigger(rule: dict[str, Any], text: str) -> bool:
-    return any(trigger in text for trigger in _rule_triggers(rule))
+    return _message_line_equals_any(text, _rule_triggers(rule))
 
 
 def _rule_amount_matches(rule: dict[str, Any], amount: int) -> bool:
@@ -771,6 +844,10 @@ def _rule_amount_matches(rule: dict[str, Any], amount: int) -> bool:
     if str(rule.get("amount_match_mode") or "eq") == "gte":
         return int(amount) >= int(expected)
     return int(expected) == int(amount)
+
+
+def _rule_has_paid_threshold(rule: dict[str, Any]) -> bool:
+    return rule.get("amount") is not None
 
 
 def _rule_trigger_mode_allows(rule: dict[str, Any], trigger_type: str) -> bool:
@@ -796,17 +873,198 @@ def _message_equals_any(text: str, candidates: list[str]) -> bool:
     return bool(clean and any(clean == candidate for candidate in candidates))
 
 
-def _message_contains_any(text: str, candidates: list[str]) -> bool:
-    return any(candidate in text for candidate in candidates)
+def _message_line_equals_any(text: str, candidates: list[str]) -> bool:
+    units = [text.strip(), *(line.strip() for line in text.splitlines())]
+    return any(_message_equals_any(unit, candidates) for unit in units if unit)
 
 
 def _rule_state_key(account_id: int, rule: dict[str, Any], chat_id: int | None) -> str:
     scope = str(rule.get("concurrency") or "chat")
     if scope == "none":
         scoped = "global"
+    elif scope == "user":
+        scoped = f"chat:{chat_id or 0}"
     else:
         scoped = str(chat_id or 0)
     return f"{_INTERACTION_RULE_STATE_PREFIX}{int(account_id)}:{rule.get('id') or 'legacy'}:{scoped}"
+
+
+def _interaction_session_scope(rule: dict[str, Any], chat_id: int | None, user_id: int | None) -> str:
+    scope = str(rule.get("concurrency") or "chat")
+    if scope == "none":
+        return "global"
+    if scope == "user":
+        return f"{chat_id or 0}:user:{user_id or 0}"
+    return str(chat_id or 0)
+
+
+def _interaction_session_key(account_id: int, rule: dict[str, Any], chat_id: int | None, user_id: int | None = None) -> str:
+    scoped = _interaction_session_scope(rule, chat_id, user_id)
+    return f"{_INTERACTION_SESSION_PREFIX}{int(account_id)}:{rule.get('id') or 'legacy'}:{scoped}"
+
+
+def _interaction_session_ttl(rule: dict[str, Any]) -> int:
+    try:
+        ttl = int(rule.get("valid_seconds") or 600)
+    except (TypeError, ValueError):
+        ttl = 600
+    return min(max(ttl, 30), 86400)
+
+
+def _interaction_session_user_id(incoming: Incoming, data: dict[str, Any] | None = None) -> int | None:
+    payload = data if isinstance(data, dict) else {}
+    return (
+        _int_or_none(payload.get("payer_user_id"))
+        or _int_or_none(payload.get("sender_user_id"))
+        or incoming.user_id
+    )
+
+
+async def _save_interaction_session(
+    incoming: Incoming,
+    rule: dict[str, Any],
+    event_type: str,
+    data: dict[str, Any] | None = None,
+) -> None:
+    module_key = str(rule.get("module_key") or "").strip()
+    entry_key = str(rule.get("module_action") or "").strip()
+    if not module_key or not entry_key:
+        return
+    session_user_id = _interaction_session_user_id(incoming, data)
+    payload = {
+        "account_id": incoming.account_id,
+        "chat_id": incoming.chat_id,
+        "rule_id": str(rule.get("id") or "legacy"),
+        "rule_name": str(rule.get("name") or ""),
+        "module_key": module_key,
+        "entry_key": entry_key,
+        "started_by_user_id": session_user_id,
+        "source_user_id": incoming.user_id,
+        "started_by_message_id": incoming.message_id,
+        "event_type": event_type,
+        "created_at": time.time(),
+    }
+    try:
+        redis = get_redis()
+        await redis.set(
+            _interaction_session_key(incoming.account_id, rule, incoming.chat_id, session_user_id),
+            json.dumps(payload, ensure_ascii=False),
+            ex=_interaction_session_ttl(rule),
+        )
+    except Exception:  # noqa: BLE001
+        log.debug("save interaction session failed aid=%s rule=%s", incoming.account_id, rule.get("id"), exc_info=True)
+
+
+async def _load_interaction_session(incoming: Incoming, rule: dict[str, Any]) -> dict[str, Any] | None:
+    keys = [_interaction_session_key(incoming.account_id, rule, incoming.chat_id, incoming.user_id)]
+    if str(rule.get("concurrency") or "chat") == "user":
+        keys.append(_interaction_session_key(incoming.account_id, rule, incoming.chat_id, None))
+    try:
+        redis = get_redis()
+        for key in keys:
+            raw = await redis.get(key)
+            if isinstance(raw, bytes):
+                raw = raw.decode("utf-8", errors="ignore")
+            if not raw:
+                continue
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(data, dict):
+                return data
+    except Exception:  # noqa: BLE001
+        log.debug("load interaction session failed aid=%s rule=%s", incoming.account_id, rule.get("id"), exc_info=True)
+    return None
+
+
+async def _interaction_session_keys_for_rule(account_id: int, rule: dict[str, Any], chat_id: int | None) -> list[str]:
+    if str(rule.get("concurrency") or "chat") != "user":
+        return [_interaction_session_key(account_id, rule, chat_id)]
+
+    prefix = _interaction_session_key(account_id, rule, chat_id, None).rsplit(":", 1)[0] + ":"
+    redis = get_redis()
+    keys: list[str] = []
+    scan_iter = getattr(redis, "scan_iter", None)
+    if callable(scan_iter):
+        async for key in scan_iter(match=f"{prefix}*"):
+            keys.append(key.decode("utf-8", errors="ignore") if isinstance(key, bytes) else str(key))
+        return keys
+    keys_fn = getattr(redis, "keys", None)
+    if callable(keys_fn):
+        raw_keys = await keys_fn(f"{prefix}*")
+        return [key.decode("utf-8", errors="ignore") if isinstance(key, bytes) else str(key) for key in raw_keys]
+    return []
+
+
+async def _list_interaction_sessions_for_rule(account_id: int, rule: dict[str, Any], chat_id: int | None) -> list[dict[str, Any]]:
+    sessions: list[dict[str, Any]] = []
+    try:
+        redis = get_redis()
+        for key in await _interaction_session_keys_for_rule(account_id, rule, chat_id):
+            raw = await redis.get(key)
+            if isinstance(raw, bytes):
+                raw = raw.decode("utf-8", errors="ignore")
+            if not raw:
+                continue
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                data = {"session_key": key}
+            if isinstance(data, dict):
+                sessions.append(data)
+    except Exception:  # noqa: BLE001
+        log.debug("list interaction sessions failed aid=%s rule=%s", account_id, rule.get("id"), exc_info=True)
+    return sessions
+
+
+async def _clear_interaction_session(account_id: int, rule: dict[str, Any], chat_id: int | None, user_id: int | None = None) -> bool:
+    try:
+        redis = get_redis()
+        deleted = await redis.delete(_interaction_session_key(account_id, rule, chat_id, user_id))
+        return bool(deleted)
+    except Exception:  # noqa: BLE001
+        log.debug("clear interaction session failed aid=%s rule=%s", account_id, rule.get("id"), exc_info=True)
+        return False
+
+
+async def _clear_interaction_sessions_for_rule(account_id: int, rule: dict[str, Any], chat_id: int | None) -> int:
+    deleted = 0
+    try:
+        redis = get_redis()
+        for key in await _interaction_session_keys_for_rule(account_id, rule, chat_id):
+            deleted += int(await redis.delete(key))
+        return deleted
+    except Exception:  # noqa: BLE001
+        log.debug("clear interaction user sessions failed aid=%s rule=%s", account_id, rule.get("id"), exc_info=True)
+        return deleted
+
+
+async def _clear_loaded_interaction_session(
+    account_id: int,
+    rule: dict[str, Any],
+    chat_id: int | None,
+    session: dict[str, Any] | None,
+    *,
+    incoming_user_id: int | None = None,
+) -> int:
+    if str(rule.get("concurrency") or "chat") != "user":
+        return 1 if await _clear_interaction_session(account_id, rule, chat_id) else 0
+
+    user_ids: list[int | None] = []
+    if isinstance(session, dict):
+        user_ids.append(_int_or_none(session.get("started_by_user_id")))
+    user_ids.append(incoming_user_id)
+
+    deleted = 0
+    seen: set[int | None] = set()
+    for user_id in user_ids:
+        if user_id in seen:
+            continue
+        seen.add(user_id)
+        if await _clear_interaction_session(account_id, rule, chat_id, user_id):
+            deleted += 1
+    return deleted
 
 
 async def _is_interaction_rule_open(account_id: int, rule: dict[str, Any], chat_id: int | None) -> bool:
@@ -827,6 +1085,102 @@ async def _set_interaction_rule_open(account_id: int, rule: dict[str, Any], chat
         await redis.set(_rule_state_key(account_id, rule, chat_id), "open" if open_ else "closed")
     except Exception:  # noqa: BLE001
         log.debug("write interaction rule state failed aid=%s rule=%s", account_id, rule.get("id"), exc_info=True)
+
+
+def _account_holder_label_from_row(account: Any, account_id: int) -> str:
+    username = str(getattr(account, "tg_username", "") or "").strip().lstrip("@")
+    if username:
+        return f"@{username}"
+    display_name = str(getattr(account, "display_name", "") or "").strip()
+    if display_name:
+        return account_bot_service.html_text(display_name)
+    tg_user_id = _int_or_none(getattr(account, "tg_user_id", None))
+    if tg_user_id is not None:
+        return str(tg_user_id)
+    return f"账号 #{int(account_id)}"
+
+
+async def _load_account_holder_label(account_id: int) -> str:
+    try:
+        async with AsyncSessionLocal() as db:
+            account = await db.get(Account, account_id)
+        return _account_holder_label_from_row(account, account_id)
+    except Exception:  # noqa: BLE001
+        log.debug("load account holder label failed aid=%s", account_id, exc_info=True)
+        return f"账号 #{int(account_id)}"
+
+
+async def _interaction_paid_threshold_message(db: Any, incoming: Incoming, rule: dict[str, Any]) -> str:
+    rule_name = str(rule.get("name") or rule.get("id") or "该规则").strip()
+    amount = rule.get("amount")
+    amount_text = str(amount) if amount is not None else "门槛金额"
+    receiver_filter = await _rule_receiver_filter(db, incoming.account_id, rule)
+    if not receiver_filter.get("explicit"):
+        receiver = await _load_account_holder_label(incoming.account_id)
+    else:
+        receiver_texts = receiver_filter.get("texts") if isinstance(receiver_filter.get("texts"), list) else []
+        if receiver_texts:
+            receiver = account_bot_service.html_text(str(receiver_texts[0]))
+        elif receiver_filter.get("user_id") is not None:
+            receiver = account_bot_service.html_text(str(receiver_filter["user_id"]))
+        else:
+            receiver = await _load_account_holder_label(incoming.account_id)
+    return (
+        f"该{account_bot_service.html_text(rule_name)}是付费娱乐模块，"
+        f"请对收款人：{receiver}的任意消息回复+{account_bot_service.html_text(amount_text)}即可参与。"
+    )
+
+
+async def _close_active_interaction_games(incoming: Incoming, target_rule: dict[str, Any] | None = None) -> int:
+    account_id = incoming.account_id
+    chat_id = incoming.chat_id
+    if chat_id is None:
+        return 0
+    closed = 0
+    close_math = target_rule is None or str(target_rule.get("action") or "") == "math10"
+    if close_math:
+        math_state = await _load_math_game_state(account_id, chat_id)
+        if math_state is not None and math_state.active:
+            math_state.active = False
+            await _save_math_game_state(math_state)
+            closed += 1
+    try:
+        if target_rule is None:
+            async with AsyncSessionLocal() as db:
+                cfg = await account_bot_service.get_transfer_notice_config(db, account_id)
+            rules = _interaction_rules(cfg)
+        else:
+            rules = [target_rule]
+        for rule in rules:
+            if not _rule_chat_matches(rule, chat_id or 0):
+                continue
+            if str(rule.get("action") or "") != "module":
+                continue
+            module_key = str(rule.get("module_key") or "").strip()
+            entry_key = str(rule.get("module_action") or "").strip()
+            sessions = await _list_interaction_sessions_for_rule(account_id, rule, chat_id)
+            close_targets = sessions or [None]
+            for session in close_targets:
+                if not module_key or not entry_key:
+                    continue
+                payload = await _interaction_module_payload_async(
+                    incoming,
+                    rule,
+                    {"session": session} if session is not None else None,
+                    event_type="session_close",
+                )
+                ok, _error, actions = await _run_worker_interaction_entry(
+                    incoming,
+                    plugin_key=module_key,
+                    entry_key=entry_key,
+                    payload=payload,
+                )
+                if ok and actions:
+                    await _apply_interaction_actions(incoming, actions)
+            closed += await _clear_interaction_sessions_for_rule(account_id, rule, chat_id)
+    except Exception:  # noqa: BLE001
+        log.debug("close interaction module sessions failed aid=%s chat_id=%s", account_id, chat_id, exc_info=True)
+    return closed
 
 
 def _interaction_dedupe_key(incoming: Incoming, rule: dict[str, Any], kind: str, payload: Any) -> str:
@@ -857,16 +1211,66 @@ def _receiver_name_matches(receiver_filter: str | None, receiver_name: str) -> b
         return True
     expected = str(receiver_filter or "").strip().lstrip("@").casefold()
     actual = str(receiver_name or "").strip().lstrip("@").casefold()
-    return bool(expected and actual and expected in actual)
+    return bool(expected and actual and expected == actual)
 
 
-async def _receiver_text_or_account_username(db: Any, account_id: int, cfg: dict[str, Any]) -> str | None:
-    receiver = str(cfg.get("receiver_text") or "").strip()
-    if receiver:
-        return receiver
-    account = await db.get(Account, account_id)
-    username = str(getattr(account, "tg_username", "") or "").strip().lstrip("@") if account is not None else ""
-    return f"@{username}" if username else None
+def _user_identity_texts(*values: Any) -> list[str]:
+    out: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        candidates = [text]
+        username_match = re.search(r"@([A-Za-z0-9_]{3,})", text)
+        if username_match:
+            candidates.append(username_match.group(1))
+            candidates.append("@" + username_match.group(1))
+        for item in candidates:
+            normalized = item.strip()
+            if normalized and normalized not in out:
+                out.append(normalized)
+    return out
+
+
+async def _rule_receiver_filter(db: Any, account_id: int, rule: dict[str, Any]) -> dict[str, Any]:
+    explicit_text = str(rule.get("receiver_text") or "").strip()
+    try:
+        explicit_user_id = int(rule["receiver_user_id"]) if rule.get("receiver_user_id") not in (None, "") else None
+    except (TypeError, ValueError):
+        explicit_user_id = None
+    if explicit_text or explicit_user_id is not None:
+        return {"user_id": explicit_user_id, "texts": _user_identity_texts(explicit_text), "explicit": True}
+    get_account = getattr(db, "get", None)
+    account = await get_account(Account, account_id) if callable(get_account) else None
+    account_user_id = _int_or_none(getattr(account, "tg_user_id", None)) if account is not None else None
+    username = str(getattr(account, "tg_username", "") or "").strip()
+    display_name = str(getattr(account, "display_name", "") or "").strip()
+    return {"user_id": account_user_id, "texts": _user_identity_texts(username, f"@{username}" if username else "", display_name), "explicit": False}
+
+
+def _receiver_matches_filter(receiver_filter: dict[str, Any], *, user_id: int | None, name: str | None, username: str | None = None) -> bool:
+    expected_user_id = receiver_filter.get("user_id")
+    texts = receiver_filter.get("texts") if isinstance(receiver_filter.get("texts"), list) else []
+    if expected_user_id is not None:
+        if user_id is not None:
+            return int(user_id) == int(expected_user_id)
+        if not texts:
+            return False
+    if not texts:
+        return False
+    actuals = _user_identity_texts(name, username, f"@{username}" if username else "")
+    return any(_receiver_name_matches(expected, actual) for expected in texts for actual in actuals)
+
+
+def _trusted_transfer_notice_sender_matches(cfg: dict[str, Any], sender_id: int | None) -> bool:
+    if sender_id is None:
+        return False
+    trusted_ids = {
+        int(value)
+        for value in (cfg.get("trusted_bot_id"), cfg.get("transfer_bot_id"))
+        if value not in (None, "")
+    }
+    return not trusted_ids or int(sender_id) in trusted_ids
 
 
 async def _is_account_user_sender(db: Any, account_id: int, user_id: int) -> bool:
@@ -878,49 +1282,57 @@ async def _is_account_user_sender(db: Any, account_id: int, user_id: int) -> boo
     return account_tg_user_id is not None and int(account_tg_user_id) == int(user_id)
 
 
-async def _rule_receiver_text_or_account_username(db: Any, account_id: int, rule: dict[str, Any]) -> str | None:
-    receiver = str(rule.get("receiver_text") or "").strip()
-    if receiver:
-        return receiver
-    account = await db.get(Account, account_id)
-    username = str(getattr(account, "tg_username", "") or "").strip().lstrip("@") if account is not None else ""
-    return f"@{username}" if username else None
-
-
-async def _select_transfer_command_rule(
+async def _select_transfer_command_receiver(
     db: Any,
     incoming: Incoming,
     cfg: dict[str, Any],
     amount: int,
 ) -> dict[str, Any] | None:
+    if incoming.reply_to_display_name:
+        return {
+            "receiver_name": incoming.reply_to_display_name,
+            "receiver_user_id": incoming.reply_to_user_id,
+            "receiver_username": incoming.reply_to_username,
+        }
     for rule in _interaction_rules(cfg):
-        if not _rule_trigger_mode_allows(rule, "payment"):
-            continue
         if not _rule_chat_matches(rule, incoming.chat_id or 0):
+            continue
+        if not _rule_trigger_mode_allows(rule, "payment"):
             continue
         if not _rule_amount_matches(rule, amount):
             continue
-        rule_receiver = str(rule.get("receiver_text") or "").strip()
-        if incoming.reply_to_display_name:
-            receiver_filter = rule_receiver or None
-            receiver = incoming.reply_to_display_name
-        else:
-            receiver_filter = await _rule_receiver_text_or_account_username(db, incoming.account_id, rule)
-            receiver = receiver_filter
-        if not receiver:
+        if not await _is_interaction_rule_open(incoming.account_id, rule, incoming.chat_id):
             continue
-        if not _receiver_name_matches(receiver_filter, receiver):
-            log.info(
-                "transfer command skipped: receiver mismatch aid=%s incoming_receiver=%r expected=%r",
-                incoming.account_id,
-                receiver,
-                receiver_filter,
-            )
+        receiver_filter = await _rule_receiver_filter(db, incoming.account_id, rule)
+        if not receiver_filter.get("explicit"):
             continue
-        selected = dict(rule)
-        selected["_receiver_name"] = receiver
-        return selected
+        receiver_name = (receiver_filter.get("texts") or [None])[0]
+        receiver_user_id = _int_or_none(receiver_filter.get("user_id"))
+        receiver_username = None
+        if not receiver_name:
+            if receiver_user_id is None:
+                continue
+            receiver_name = str(receiver_user_id)
+        return {
+            "receiver_name": receiver_name,
+            "receiver_user_id": receiver_user_id,
+            "receiver_username": receiver_username,
+        }
     return None
+
+
+async def _transfer_command_can_emit_notice(db: Any, incoming: Incoming, cfg: dict[str, Any], amount: int) -> bool:
+    for rule in _interaction_rules(cfg):
+        if not _rule_chat_matches(rule, incoming.chat_id or 0):
+            continue
+        if not _rule_trigger_mode_allows(rule, "payment"):
+            continue
+        if not _rule_amount_matches(rule, amount):
+            continue
+        if not await _is_interaction_rule_open(incoming.account_id, rule, incoming.chat_id):
+            continue
+        return True
+    return False
 
 
 async def _select_transfer_notice_rule(
@@ -931,6 +1343,7 @@ async def _select_transfer_notice_rule(
 ) -> dict[str, Any] | None:
     parsed_amount = int(parsed.get("amount") or 0)
     parsed_receiver = str(parsed.get("receiver_name") or "")
+    parsed_receiver_id = _int_or_none(parsed.get("receiver_user_id"))
     for rule in _interaction_rules(cfg):
         if not _rule_trigger_mode_allows(rule, "payment"):
             continue
@@ -940,21 +1353,33 @@ async def _select_transfer_notice_rule(
             continue
         if not _rule_amount_matches(rule, parsed_amount):
             continue
-        receiver_filter = await _rule_receiver_text_or_account_username(db, incoming.account_id, rule)
-        if not _receiver_name_matches(receiver_filter, parsed_receiver):
+        if not await _is_interaction_rule_open(incoming.account_id, rule, incoming.chat_id):
+            continue
+        receiver_filter = await _rule_receiver_filter(db, incoming.account_id, rule)
+        if not _receiver_matches_filter(receiver_filter, user_id=parsed_receiver_id, name=parsed_receiver):
             continue
         return rule
     return None
 
 
-async def _execute_interaction_rule(incoming: Incoming, rule: dict[str, Any], parsed: dict[str, Any] | None = None) -> None:
+async def _execute_interaction_rule(
+    incoming: Incoming,
+    rule: dict[str, Any],
+    parsed: dict[str, Any] | None = None,
+    *,
+    event_type: str = "payment_confirmed",
+) -> bool:
     if rule.get("action") == "math10":
         await _start_math_game(incoming, prize=int(rule.get("math_prize") or 123))
-    elif rule.get("action") == "module":
-        await _start_interaction_module(incoming, rule)
-    else:
-        text = _render_transfer_notice_response(str(rule.get("response_template") or ""), parsed or {})
-        await _send(incoming, text)
+        return True
+    if rule.get("action") == "module":
+        started = await _start_interaction_module(incoming, rule, parsed=parsed, event_type=event_type)
+        if started:
+            await _save_interaction_session(incoming, rule, event_type, parsed)
+        return started
+    text = _render_transfer_notice_response(str(rule.get("response_template") or ""), parsed or {})
+    await _send(incoming, text)
+    return True
 
 
 async def _try_handle_interaction_rule_command_or_keyword(db: Any, incoming: Incoming) -> bool:
@@ -967,12 +1392,32 @@ async def _try_handle_interaction_rule_command_or_keyword(db: Any, incoming: Inc
         if not _rule_chat_matches(rule, incoming.chat_id):
             continue
         if _message_equals_any(incoming.text, _rule_keyword_list(rule, "open_commands")):
+            if incoming.user_id is None or not await _is_account_user_sender(db, incoming.account_id, incoming.user_id):
+                log.info(
+                    "interaction rule open command ignored: sender is not account owner aid=%s chat_id=%s sender_id=%s rule=%s",
+                    incoming.account_id,
+                    incoming.chat_id,
+                    incoming.user_id,
+                    rule.get("id"),
+                )
+                return True
             await _set_interaction_rule_open(incoming.account_id, rule, incoming.chat_id, True)
             await _send(incoming, f"规则「{account_bot_service.html_text(str(rule.get('name') or rule.get('id') or '未命名'))}」已开启。")
             return True
         if _message_equals_any(incoming.text, _rule_keyword_list(rule, "close_commands")):
+            if incoming.user_id is None or not await _is_account_user_sender(db, incoming.account_id, incoming.user_id):
+                log.info(
+                    "interaction rule close command ignored: sender is not account owner aid=%s chat_id=%s sender_id=%s rule=%s",
+                    incoming.account_id,
+                    incoming.chat_id,
+                    incoming.user_id,
+                    rule.get("id"),
+                )
+                return True
             await _set_interaction_rule_open(incoming.account_id, rule, incoming.chat_id, False)
-            await _send(incoming, f"规则「{account_bot_service.html_text(str(rule.get('name') or rule.get('id') or '未命名'))}」已关闭。")
+            closed = await _close_active_interaction_games(incoming, rule)
+            suffix = f"已结束 {closed} 个进行中的游戏。" if closed else "当前没有进行中的游戏。"
+            await _send(incoming, f"规则「{account_bot_service.html_text(str(rule.get('name') or rule.get('id') or '未命名'))}」已关闭，{suffix}")
             return True
         if _message_equals_any(incoming.text, _rule_keyword_list(rule, "status_commands")):
             open_ = await _is_interaction_rule_open(incoming.account_id, rule, incoming.chat_id)
@@ -981,16 +1426,96 @@ async def _try_handle_interaction_rule_command_or_keyword(db: Any, incoming: Inc
             return True
         if not _rule_trigger_mode_allows(rule, "keyword"):
             continue
-        if not _message_contains_any(incoming.text, _rule_keyword_list(rule, "module_start_keywords")):
+        if not _message_equals_any(incoming.text, _rule_keyword_list(rule, "module_start_keywords")):
             continue
         if not await _is_interaction_rule_open(incoming.account_id, rule, incoming.chat_id):
             message = str(rule.get("disabled_message") or "").strip()
             if message:
                 await _send(incoming, message)
             return True
+        if _rule_has_paid_threshold(rule):
+            await _send(
+                incoming,
+                await _interaction_paid_threshold_message(db, incoming, rule),
+                reply_to_message_id=incoming.message_id,
+            )
+            return True
         if not await _claim_interaction_trigger(incoming, rule, "keyword", incoming.text):
             return True
-        await _execute_interaction_rule(incoming, rule)
+        await _execute_interaction_rule(incoming, rule, event_type="keyword")
+        return True
+    return False
+
+
+async def _try_handle_interaction_module_message(db: Any, incoming: Incoming) -> bool:
+    if incoming.callback_id or incoming.chat_id is None or not incoming.text.strip():
+        return False
+    if incoming.text.startswith("/") or incoming.text.startswith(","):
+        return False
+    cfg = await account_bot_service.get_transfer_notice_config(db, incoming.account_id)
+    if not cfg.get("enabled"):
+        return False
+    for rule in _interaction_rules(cfg):
+        if not _rule_chat_matches(rule, incoming.chat_id):
+            continue
+        if not await _is_interaction_rule_open(incoming.account_id, rule, incoming.chat_id):
+            continue
+        if str(rule.get("action") or "") != "module":
+            continue
+        module_key = str(rule.get("module_key") or "").strip()
+        entry_key = str(rule.get("module_action") or "").strip()
+        if not module_key or not entry_key:
+            continue
+        session = await _load_interaction_session(incoming, rule)
+        if session is None:
+            continue
+        if _message_equals_any(incoming.text, _rule_keyword_list(rule, "open_commands")):
+            continue
+        if _message_equals_any(incoming.text, _rule_keyword_list(rule, "close_commands")):
+            continue
+        if _message_equals_any(incoming.text, _rule_keyword_list(rule, "status_commands")):
+            continue
+        if _message_equals_any(incoming.text, _rule_keyword_list(rule, "module_start_keywords")):
+            continue
+        payload = await _interaction_module_payload_async(
+            incoming,
+            rule,
+            {
+                "message_text": incoming.text,
+                "sender_user_id": incoming.user_id,
+                "sender_name": incoming.display_name,
+                "sender_username": incoming.username,
+                "message_id": incoming.message_id,
+                "session": session,
+            },
+            event_type="message",
+        )
+        ok, error, actions = await _run_worker_interaction_entry(
+            incoming,
+            plugin_key=module_key,
+            entry_key=entry_key,
+            payload=payload,
+        )
+        if not ok:
+            log.info(
+                "interaction module message ignored aid=%s plugin=%s entry=%s error=%s",
+                incoming.account_id,
+                module_key,
+                entry_key,
+                error,
+            )
+            continue
+        if not actions:
+            continue
+        await _apply_interaction_actions(incoming, actions)
+        if _interaction_actions_request_no_session(actions):
+            await _clear_loaded_interaction_session(
+                incoming.account_id,
+                rule,
+                incoming.chat_id,
+                session,
+                incoming_user_id=incoming.user_id,
+            )
         return True
     return False
 
@@ -1097,6 +1622,7 @@ async def _start_math_game(incoming: Incoming, *, prize: int = 123) -> None:
     if incoming.chat_id is None:
         return
     question, answer = _new_math_question()
+    account_holder = await _load_account_holder_label(incoming.account_id)
     state = MathGameState(
         account_id=incoming.account_id,
         chat_id=incoming.chat_id,
@@ -1115,7 +1641,7 @@ async def _start_math_game(incoming: Incoming, *, prize: int = 123) -> None:
             "算数题测试开始\n"
             f"题目：{question} = ?\n"
             f"奖金：{prize}\n"
-            "直接发送答案，答对后我会公告赢家；奖金由 userbot 账号人工发放。"
+            f"直接发送答案，答对后我会公告赢家；奖金由 {account_holder} 人工发放。"
         ),
     )
 
@@ -1134,176 +1660,246 @@ async def _try_handle_math_answer(incoming: Incoming) -> bool:
         return False
     if not await _claim_math_winner(state, incoming):
         return True
-    winner = incoming.display_name or str(incoming.user_id or "未知用户")
+    winner = account_bot_service.html_text(incoming.display_name or str(incoming.user_id or "未知用户"))
+    account_holder = await _load_account_holder_label(incoming.account_id)
     await _send(
         incoming,
         (
             f"答对了：{winner}\n"
             f"题目：{state.question} = {state.answer}\n"
             f"奖金：{state.prize}\n"
-            "请由 userbot 账号人工回复赢家发放奖金。"
+            f"请由 {account_holder} 人工回复赢家发放奖金。"
         ),
         reply_to_message_id=incoming.message_id,
     )
     return True
 
 
-def _game24_key(account_id: int, chat_id: int) -> str:
-    return f"{_GAME24_PREFIX}{int(account_id)}:{int(chat_id)}"
-
-
-def _game24_claim_key(state: Game24State) -> str:
-    return f"{_GAME24_CLAIM_PREFIX}{state.account_id}:{state.chat_id}:{state.game_id}"
-
-
-def _game24_state_from_payload(payload: Any) -> Game24State | None:
-    if isinstance(payload, bytes):
-        payload = payload.decode("utf-8", errors="ignore")
-    if isinstance(payload, str):
-        try:
-            payload = json.loads(payload)
-        except json.JSONDecodeError:
-            return None
-    if not isinstance(payload, dict):
-        return None
-    try:
-        numbers = payload.get("numbers")
-        if not isinstance(numbers, list):
-            return None
-        return Game24State(
-            account_id=int(payload["account_id"]),
-            chat_id=int(payload["chat_id"]),
-            numbers=[int(item) for item in numbers],
-            prize=int(payload.get("prize") or 123),
-            active=bool(payload.get("active", True)),
-            game_id=str(payload.get("game_id") or ""),
-            created_at=float(payload.get("created_at") or 0.0),
-            source_update_id=_int_or_none(payload.get("source_update_id")),
-            source_message_id=_int_or_none(payload.get("source_message_id")),
-            winner_update_id=_int_or_none(payload.get("winner_update_id")),
-            winner_message_id=_int_or_none(payload.get("winner_message_id")),
-        )
-    except (KeyError, TypeError, ValueError):
-        return None
-
-
-async def _save_game24_state(state: Game24State) -> None:
-    _GAME24_GAMES[(state.account_id, state.chat_id)] = state
-    try:
-        redis = get_redis()
-        await redis.set(
-            _game24_key(state.account_id, state.chat_id),
-            json.dumps(asdict(state), ensure_ascii=False),
-            ex=_GAME24_TTL_SECONDS,
-        )
-    except Exception:  # noqa: BLE001
-        log.debug("save game24 state failed aid=%s chat_id=%s", state.account_id, state.chat_id, exc_info=True)
-
-
-async def _load_game24_state(account_id: int, chat_id: int) -> Game24State | None:
-    try:
-        redis = get_redis()
-        state = _game24_state_from_payload(await redis.get(_game24_key(account_id, chat_id)))
-        if state is not None:
-            _GAME24_GAMES[(state.account_id, state.chat_id)] = state
-            return state
-    except Exception:  # noqa: BLE001
-        log.debug("load game24 state failed aid=%s chat_id=%s", account_id, chat_id, exc_info=True)
-    return _GAME24_GAMES.get((account_id, chat_id))
-
-
-async def _claim_game24_winner(state: Game24State, incoming: Incoming) -> bool:
-    try:
-        redis = get_redis()
-        acquired = await redis.set(
-            _game24_claim_key(state),
-            str(incoming.message_id or incoming.update_id),
-            ex=_GAME24_TTL_SECONDS,
-            nx=True,
-        )
-        if not acquired:
-            return False
-    except Exception:  # noqa: BLE001
-        cached = _GAME24_GAMES.get((state.account_id, state.chat_id))
-        if cached is not state and (cached is None or not cached.active):
-            return False
-        log.debug("claim game24 winner fell back to memory aid=%s chat_id=%s", state.account_id, state.chat_id, exc_info=True)
-
-    state.active = False
-    state.winner_update_id = incoming.update_id
-    state.winner_message_id = incoming.message_id
-    await _save_game24_state(state)
-    return True
-
-
-def _render_game24_start_message(numbers: list[int], prize: int) -> str:
-    nums_disp = " ] [ ".join(str(n) for n in numbers)
-    return (
-        "24 点开始\n"
-        "━━━━━━━━\n"
-        f"数字：[ {nums_disp} ]\n"
-        f"奖金：{prize}\n"
-        "可用符号：+ - x ÷ * / ( )\n"
-        "请直接发送算式，结果必须等于 24，并且恰好使用这 4 个数字各一次。"
-    )
-
-
-async def _start_game24_game(incoming: Incoming, *, prize: int = 123) -> None:
-    if incoming.chat_id is None:
-        return
-    active = await _load_game24_state(incoming.account_id, incoming.chat_id)
-    if active is not None and active.active:
-        await _send(incoming, "当前已有进行中的 24 点游戏，请先答完再开新局。")
-        return
-    numbers = generate_24_puzzle()
-    state = Game24State(
+def _interaction_event_payload(
+    incoming: Incoming,
+    rule: dict[str, Any],
+    event_type: str,
+    data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    event = InteractionEvent(
+        type=event_type,
         account_id=incoming.account_id,
         chat_id=incoming.chat_id,
-        numbers=numbers,
-        prize=prize,
-        game_id=secrets.token_hex(8),
-        created_at=time.time(),
-        source_update_id=incoming.update_id,
-        source_message_id=incoming.message_id,
+        rule_id=str(rule.get("id") or ""),
+        rule_name=str(rule.get("name") or ""),
+        module_key=str(rule.get("module_key") or ""),
+        entry_key=str(rule.get("module_action") or ""),
+        update_id=incoming.update_id,
+        message_id=incoming.message_id,
+        user_id=incoming.user_id,
+        display_name=incoming.display_name,
+        username=incoming.username,
+        text=incoming.text,
+        reply_to_user_id=incoming.reply_to_user_id,
+        reply_to_display_name=incoming.reply_to_display_name,
+        reply_to_username=incoming.reply_to_username,
+        data=dict(data or {}),
     )
-    await _save_game24_state(state)
-    await _send(incoming, _render_game24_start_message(numbers, prize))
+    return asdict(event)
 
 
-async def _start_interaction_module(incoming: Incoming, rule: dict[str, Any]) -> None:
+def _interaction_module_payload(
+    incoming: Incoming,
+    rule: dict[str, Any],
+    parsed: dict[str, Any] | None,
+    *,
+    event_type: str = "payment_confirmed",
+) -> dict[str, Any]:
+    data = dict(rule.get("module_config") or {}) if isinstance(rule.get("module_config"), dict) else {}
+    data.update(dict(parsed or {}))
+    prize = int(rule.get("module_prize") or rule.get("math_prize") or 123)
+    payer_user_id = _int_or_none(data.get("payer_user_id")) or incoming.user_id
+    payer_name = str(data.get("payer_name") or incoming.display_name or "")
+    data.update(
+        {
+            "event": _interaction_event_payload(incoming, rule, event_type, parsed),
+            "event_type": event_type,
+            "account_id": incoming.account_id,
+            "chat_id": incoming.chat_id,
+            "rule_id": str(rule.get("id") or ""),
+            "rule_name": str(rule.get("name") or ""),
+            "entry_key": str(rule.get("module_action") or ""),
+            "module_config": dict(rule.get("module_config") or {}) if isinstance(rule.get("module_config"), dict) else {},
+            "valid_seconds": _interaction_session_ttl(rule),
+            "payer_user_id": payer_user_id,
+            "payer_name": payer_name,
+            "source_update_id": incoming.update_id,
+            "source_message_id": incoming.message_id,
+            "message_text": incoming.text,
+            "sender_user_id": incoming.user_id,
+            "sender_name": incoming.display_name,
+            "sender_username": incoming.username,
+            "message_id": incoming.message_id,
+            "prize": prize,
+        }
+    )
+    return data
+
+
+async def _interaction_module_payload_async(
+    incoming: Incoming,
+    rule: dict[str, Any],
+    parsed: dict[str, Any] | None,
+    *,
+    event_type: str = "payment_confirmed",
+) -> dict[str, Any]:
+    data = _interaction_module_payload(incoming, rule, parsed, event_type=event_type)
+    data["payout_account_label"] = await _load_account_holder_label(incoming.account_id)
+    return data
+
+
+async def _run_worker_interaction_entry(
+    incoming: Incoming,
+    *,
+    plugin_key: str,
+    entry_key: str,
+    payload: dict[str, Any],
+) -> tuple[bool, str | None, list[dict[str, Any]]]:
+    reply_channel = f"account_bot:interaction_entry:{incoming.account_id}:{secrets.token_hex(8)}"
+    redis = get_redis()
+    pubsub = redis.pubsub()
+    try:
+        await pubsub.subscribe(reply_channel)
+        await redis.publish(
+            cmd_channel(incoming.account_id),
+            make_cmd(
+                CMD_RUN_INTERACTION_ENTRY,
+                plugin_key=plugin_key,
+                entry_key=entry_key,
+                payload=payload,
+                reply_to=reply_channel,
+            ),
+        )
+        deadline = time.time() + 5.0
+        while time.time() < deadline:
+            msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.5)
+            if not msg:
+                continue
+            response = IPCMessage.decode(msg["data"]).payload
+            actions = response.get("actions") if isinstance(response.get("actions"), list) else []
+            return bool(response.get("ok")), response.get("error"), [item for item in actions if isinstance(item, dict)]
+    except Exception as exc:  # noqa: BLE001
+        log.warning("interaction module ipc failed aid=%s plugin=%s entry=%s error=%s", incoming.account_id, plugin_key, entry_key, exc)
+        return False, f"{type(exc).__name__}: {exc}", []
+    finally:
+        try:
+            await pubsub.unsubscribe(reply_channel)
+        finally:
+            close = getattr(pubsub, "aclose", None) or getattr(pubsub, "close", None)
+            if close is not None:
+                ret = close()
+                if hasattr(ret, "__await__"):
+                    await ret
+    return False, "worker 调用超时", []
+
+
+async def _write_interaction_runtime_log(
+    incoming: Incoming,
+    level: str,
+    message: str,
+    **detail: Any,
+) -> None:
+    try:
+        payload = RuntimeLogPayload(
+            account_id=incoming.account_id,
+            level=level,  # type: ignore[arg-type]
+            source="event",
+            message=message,
+            detail=detail or None,
+        )
+        await get_redis().rpush(RUNTIME_LOG_STREAM, payload.encode())
+    except Exception:  # noqa: BLE001
+        log.debug("write interaction runtime log failed aid=%s", incoming.account_id, exc_info=True)
+
+
+_INTERACTION_CONTROL_ACTIONS = {"end_session", "close_session", "no_session"}
+
+
+def _interaction_actions_request_no_session(actions: list[dict[str, Any]]) -> bool:
+    return any(str(action.get("type") or "").strip() in _INTERACTION_CONTROL_ACTIONS for action in actions)
+
+
+async def _apply_interaction_actions(incoming: Incoming, actions: list[dict[str, Any]]) -> None:
+    for action in actions[:10]:
+        action_type = str(action.get("type") or "").strip()
+        if action_type in _INTERACTION_CONTROL_ACTIONS:
+            continue
+        raw_reply_to = action.get("reply_to_message_id")
+        reply_to_message_id = _int_or_none(raw_reply_to)
+        if action_type == "send_message":
+            text = str(action.get("text") or "").strip()
+            if not text:
+                continue
+            await _send(incoming, text, reply_to_message_id=reply_to_message_id)
+            continue
+        if action_type in {"send_photo", "send_file"}:
+            raw_photo = str(action.get("photo_base64") or action.get("file_base64") or "").strip()
+            if not raw_photo:
+                continue
+            try:
+                photo = base64.b64decode(raw_photo, validate=True)
+            except (binascii.Error, ValueError):
+                log.info("interaction action ignored: invalid base64 media aid=%s", incoming.account_id)
+                continue
+            if not photo:
+                continue
+            filename = str(action.get("filename") or "interaction.png").strip() or "interaction.png"
+            caption = str(action.get("caption") or action.get("text") or "").strip() or None
+            await account_bot_service.send_photo_bytes(
+                incoming.token,
+                incoming.chat_id or 0,
+                photo,
+                filename=filename,
+                caption=caption,
+                reply_to_message_id=reply_to_message_id,
+            )
+            continue
+        log.info("interaction action ignored: unsupported type=%s aid=%s", action_type, incoming.account_id)
+        await _write_interaction_runtime_log(
+            incoming,
+            "info",
+            f"interaction action ignored: unsupported type={action_type}",
+            action_type=action_type,
+            action=action,
+        )
+
+
+async def _start_interaction_module(
+    incoming: Incoming,
+    rule: dict[str, Any],
+    *,
+    parsed: dict[str, Any] | None = None,
+    event_type: str = "payment_confirmed",
+) -> bool:
     module_key = str(rule.get("module_key") or "").strip()
-    if module_key == "game24":
-        prize = int(rule.get("module_prize") or rule.get("math_prize") or 123)
-        await _start_game24_game(incoming, prize=prize)
-        return
-    await _send(incoming, f"模块启动失败：暂不支持交互 Bot 模块 {account_bot_service.html_text(module_key or '未配置')}")
-
-
-async def _try_handle_game24_answer(incoming: Incoming) -> bool:
-    if incoming.chat_id is None or incoming.callback_id:
+    entry_key = str(rule.get("module_action") or "").strip()
+    if not module_key or not entry_key:
+        await _send(incoming, "模块启动失败：请先选择模块和交互入口。")
         return False
-    state = await _load_game24_state(incoming.account_id, incoming.chat_id)
-    if state is None or not state.active:
-        return False
-    result = check_answer_detailed(incoming.text, state.numbers)
-    if not result.ok:
-        return False
-    if not await _claim_game24_winner(state, incoming):
-        return True
-    winner = incoming.display_name or str(incoming.user_id or "未知用户")
-    nums_disp = " ".join(str(item) for item in state.numbers)
-    await _send(
+    start_text = str(rule.get("module_start_text") or "").strip()
+    if start_text:
+        await _send(incoming, start_text, reply_to_message_id=incoming.message_id)
+    payload = await _interaction_module_payload_async(incoming, rule, parsed, event_type=event_type)
+    ok, error, actions = await _run_worker_interaction_entry(
         incoming,
-        (
-            f"答对了：{winner}\n"
-            f"题目：24 点 [{nums_disp}]\n"
-            f"答案：{result.normalized_expr} = 24\n"
-            f"奖金：{state.prize}\n"
-            "请由 userbot 账号人工回复赢家发放奖金。"
-        ),
-        reply_to_message_id=incoming.message_id,
+        plugin_key=module_key,
+        entry_key=entry_key,
+        payload=payload,
     )
-    return True
+    if not ok:
+        await _send(
+            incoming,
+            f"模块启动失败：{account_bot_service.html_text(error or f'{module_key}.{entry_key} 不可用')}",
+        )
+        return False
+    keep_session = not _interaction_actions_request_no_session(actions)
+    await _apply_interaction_actions(incoming, actions)
+    return keep_session
 
 
 def _is_private_chat(incoming: Incoming) -> bool:
@@ -1349,21 +1945,23 @@ async def _try_handle_transfer_command(db: Any, incoming: Incoming) -> bool:
     if not cfg.get("enabled"):
         log.info("transfer command skipped: disabled aid=%s", incoming.account_id)
         return False
-    rule = await _select_transfer_command_rule(db, incoming, cfg, amount)
-    if rule is None:
+    if not await _transfer_command_can_emit_notice(db, incoming, cfg, amount):
         log.info(
-            "transfer command skipped: no matching rule aid=%s incoming_chat=%s amount=%s",
+            "transfer command skipped: chat not monitored aid=%s incoming_chat=%s amount=%s",
             incoming.account_id,
             incoming.chat_id,
             amount,
         )
         return False
-    if not await _is_interaction_rule_open(incoming.account_id, rule, incoming.chat_id):
-        log.info("transfer command skipped: rule closed aid=%s rule=%s", incoming.account_id, rule.get("id"))
-        return True
-    if not await _claim_interaction_trigger(incoming, rule, "transfer_command", amount):
-        log.info("transfer command skipped: duplicate aid=%s rule=%s", incoming.account_id, rule.get("id"))
-        return True
+    receiver_info = await _select_transfer_command_receiver(db, incoming, cfg, amount)
+    if receiver_info is None:
+        log.info(
+            "transfer command skipped: receiver unknown aid=%s incoming_chat=%s amount=%s",
+            incoming.account_id,
+            incoming.chat_id,
+            amount,
+        )
+        return False
 
     transfer_token = await account_bot_service.get_transfer_bot_token(db, incoming.account_id)
     if not transfer_token:
@@ -1371,8 +1969,24 @@ async def _try_handle_transfer_command(db: Any, incoming: Incoming) -> bool:
         return False
 
     payer = incoming.display_name or str(incoming.user_id)
-    receiver = str(rule["_receiver_name"])
-    notice = _render_transfer_bot_notice(payer, receiver, amount)
+    receiver = str(receiver_info["receiver_name"])
+    notice = _render_transfer_bot_notice(
+        str(cfg.get("transfer_notice_template") or DEFAULT_TRANSFER_NOTICE_TEMPLATE),
+        payer,
+        receiver,
+        amount,
+        payer_user_id=incoming.user_id,
+        receiver_user_id=_int_or_none(receiver_info.get("receiver_user_id")),
+    )
+    probe_notice = _render_transfer_bot_notice(
+        str(cfg.get("transfer_notice_template") or DEFAULT_TRANSFER_NOTICE_TEMPLATE),
+        payer,
+        receiver,
+        amount,
+        payer_user_id=incoming.user_id,
+        receiver_user_id=_int_or_none(receiver_info.get("receiver_user_id")),
+        escape_html=False,
+    )
     result = await account_bot_service.send_message(transfer_token, incoming.chat_id, notice)
     log.info(
         "transfer command emitted notice aid=%s chat_id=%s payer=%r receiver=%r amount=%s",
@@ -1399,10 +2013,37 @@ async def _try_handle_transfer_command(db: Any, incoming: Incoming) -> bool:
                 sender_id,
                 cfg_bot_id,
             )
+        await _remember_transfer_bot_id(db, incoming.account_id, sender_id)
 
-    parsed = {"payer_name": payer, "receiver_name": receiver, "amount": amount}
-    await _execute_interaction_rule(incoming, rule, parsed)
+    probe_sender_id = sender_id or _int_or_none(cfg.get("transfer_bot_id")) or _int_or_none(cfg.get("trusted_bot_id"))
+    probe_message_id = _int_or_none(result.get("message_id")) if isinstance(result, dict) else None
+    if probe_sender_id is not None:
+        await handle_transfer_notice_probe(
+            db,
+            account_id=incoming.account_id,
+            token=incoming.token,
+            chat_id=incoming.chat_id,
+            sender_id=probe_sender_id,
+            text=probe_notice,
+            message_id=probe_message_id,
+        )
+
     return True
+
+
+async def _remember_transfer_bot_id(db: Any, account_id: int, bot_id: int) -> None:
+    try:
+        row = await db.get(SystemSetting, account_bot_service.transfer_notice_setting_key(account_id))
+        if row is None or not isinstance(row.value, dict):
+            return
+        current = dict(row.value)
+        if _int_or_none(current.get("transfer_bot_id")) == int(bot_id):
+            return
+        current["transfer_bot_id"] = int(bot_id)
+        row.value = current
+        await db.commit()
+    except Exception:  # noqa: BLE001
+        log.debug("remember transfer bot id failed aid=%s bot_id=%s", account_id, bot_id, exc_info=True)
 
 
 async def _try_handle_transfer_notice(db: Any, incoming: Incoming) -> bool:
@@ -1412,13 +2053,14 @@ async def _try_handle_transfer_notice(db: Any, incoming: Incoming) -> bool:
     cfg = await account_bot_service.get_transfer_notice_config(db, incoming.account_id)
     if not cfg.get("enabled"):
         return False
-    if cfg.get("trusted_bot_id") is not None and int(cfg["trusted_bot_id"]) != int(incoming.user_id):
+    if not _trusted_transfer_notice_sender_matches(cfg, incoming.user_id):
         if _matches_interaction_trigger(cfg, incoming.text):
             log.info(
-                "transfer notice skipped: sender mismatch aid=%s incoming_user=%s expected_bot=%s",
+                "transfer notice skipped: sender mismatch aid=%s incoming_user=%s trusted_bot_id=%s transfer_bot_id=%s",
                 incoming.account_id,
                 incoming.user_id,
                 cfg.get("trusted_bot_id"),
+                cfg.get("transfer_bot_id"),
             )
         return False
 
@@ -1536,6 +2178,7 @@ def _extract_incoming(aid: int, token: str, update: dict[str, Any]) -> Incoming 
             callback_id=str(cq.get("id") or ""),
             callback_data=str(cq.get("data") or ""),
             display_name=_format_user_name(from_user),
+            username=str(from_user.get("username") or "").strip() or None,
         )
     msg = update.get("message")
     if not isinstance(msg, dict):
@@ -1554,8 +2197,10 @@ def _extract_incoming(aid: int, token: str, update: dict[str, Any]) -> Incoming 
         message_id=_int_or_none(msg.get("message_id")),
         text=str(msg.get("text") or "").strip(),
         display_name=_format_user_name(from_user),
+        username=str(from_user.get("username") or "").strip() or None,
         reply_to_user_id=_int_or_none(reply_from.get("id")),
         reply_to_display_name=_format_user_name(reply_from) if reply_from else None,
+        reply_to_username=str(reply_from.get("username") or "").strip() or None,
     )
 
 

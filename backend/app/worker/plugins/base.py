@@ -127,6 +127,15 @@ class Plugin:
         """命令派发回调；返回 True 表示已处理，否则继续向后传。默认 no-op 返回 False。"""
         return False
 
+    async def on_interaction(
+        self,
+        ctx: PluginContext,
+        entry_key: str,
+        payload: dict[str, Any],
+    ) -> list[dict[str, Any]] | None:
+        """交互 Bot 入口；返回平台标准动作列表，默认表示未实现。"""
+        return None
+
 
 # ─────────────────────────────────────────────────────
 # 全局注册表

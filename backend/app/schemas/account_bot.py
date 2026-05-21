@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from ..account_bot_defaults import (
+    DEFAULT_INTERACTION_DISABLED_MESSAGE,
+    DEFAULT_INTERACTION_RESPONSE_TEMPLATE,
+    DEFAULT_TRANSFER_NOTICE_TEMPLATE,
+)
 from ..db.models.account_bot import ACCOUNT_BOT_ROLES
 
 AccountBotRole = Literal["viewer", "operator", "admin"]
@@ -103,6 +108,7 @@ class AccountBotInteractionRule(BaseModel):
     trigger_mode: InteractionTriggerMode = "payment"
     trigger_texts: list[str] = Field(default_factory=lambda: ["转账成功"], max_length=20)
     module_start_keywords: list[str] = Field(default_factory=list, max_length=20)
+    receiver_user_id: int | None = Field(default=None, ge=1)
     receiver_text: str | None = Field(default=None, max_length=128)
     amount: int | None = Field(default=None, ge=1)
     amount_match_mode: InteractionAmountMatchMode = "eq"
@@ -111,15 +117,16 @@ class AccountBotInteractionRule(BaseModel):
     module_key: str | None = Field(default=None, max_length=64)
     module_action: str | None = Field(default=None, max_length=64)
     module_prize: int | None = Field(default=None, ge=1)
+    module_config: dict[str, Any] = Field(default_factory=dict)
     module_start_text: str | None = Field(default=None, max_length=500)
     open_commands: list[str] = Field(default_factory=list, max_length=20)
     close_commands: list[str] = Field(default_factory=list, max_length=20)
     status_commands: list[str] = Field(default_factory=list, max_length=20)
-    disabled_message: str | None = Field(default="规则已关闭，暂时不能开启该模块。", max_length=500)
+    disabled_message: str | None = Field(default=DEFAULT_INTERACTION_DISABLED_MESSAGE, max_length=500)
     valid_seconds: int = Field(default=600, ge=30, le=86400)
     concurrency: InteractionConcurrency = "chat"
     response_template: str = Field(
-        default="检测到 {payer_name} 向 {receiver_name} 转账 {amount}，已进入游戏流程。",
+        default=DEFAULT_INTERACTION_RESPONSE_TEMPLATE,
         max_length=1000,
     )
 
@@ -202,6 +209,7 @@ class AccountBotInteractionConfig(BaseModel):
     interaction_last_update_id: int | None = None
     interaction_last_error: str | None = None
     trusted_bot_id: int | None = None
+    transfer_bot_id: int | None = None
     transfer_bot_token: str | None = Field(default=None, min_length=10, max_length=256)
     clear_transfer_bot_token: bool = False
     has_transfer_bot_token: bool = False
@@ -209,6 +217,7 @@ class AccountBotInteractionConfig(BaseModel):
     trigger_text: str = Field(default="转账成功", max_length=64)
     trigger_texts: list[str] = Field(default_factory=lambda: ["转账成功"], max_length=20)
     module_start_keywords: list[str] = Field(default_factory=list, max_length=20)
+    receiver_user_id: int | None = Field(default=None, ge=1)
     receiver_text: str | None = Field(default=None, max_length=128)
     amount: int | None = Field(default=None, ge=1)
     amount_match_mode: InteractionAmountMatchMode = "eq"
@@ -217,15 +226,20 @@ class AccountBotInteractionConfig(BaseModel):
     module_key: str | None = Field(default=None, max_length=64)
     module_action: str | None = Field(default=None, max_length=64)
     module_prize: int | None = Field(default=None, ge=1)
+    module_config: dict[str, Any] = Field(default_factory=dict)
     module_start_text: str | None = Field(default=None, max_length=500)
     open_commands: list[str] = Field(default_factory=list, max_length=20)
     close_commands: list[str] = Field(default_factory=list, max_length=20)
     status_commands: list[str] = Field(default_factory=list, max_length=20)
-    disabled_message: str | None = Field(default="规则已关闭，暂时不能开启该模块。", max_length=500)
+    disabled_message: str | None = Field(default=DEFAULT_INTERACTION_DISABLED_MESSAGE, max_length=500)
     valid_seconds: int = Field(default=600, ge=30, le=86400)
     concurrency: InteractionConcurrency = "chat"
     response_template: str = Field(
-        default="检测到 {payer_name} 向 {receiver_name} 转账 {amount}，已进入游戏流程。",
+        default=DEFAULT_INTERACTION_RESPONSE_TEMPLATE,
+        max_length=1000,
+    )
+    transfer_notice_template: str = Field(
+        default=DEFAULT_TRANSFER_NOTICE_TEMPLATE,
         max_length=1000,
     )
     rules: list[AccountBotInteractionRule] = Field(default_factory=list, max_length=20)
@@ -248,7 +262,7 @@ class AccountBotInteractionConfig(BaseModel):
             raise ValueError("不能包含换行")
         return value or None
 
-    @field_validator("trigger_text", "response_template")
+    @field_validator("trigger_text", "response_template", "transfer_notice_template")
     @classmethod
     def _trim_required_text(cls, v: str) -> str:
         value = str(v or "").strip()
