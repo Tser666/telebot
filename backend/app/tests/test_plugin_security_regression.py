@@ -208,7 +208,7 @@ class TestRemotePluginSecurity:
         assert ex.value.code == "PLUGIN_RUNTIME_FILES_MISSING"
         assert "manifest.py" in ex.value.message
         assert "__init__.py" in ex.value.message
-        assert "PLUGIN-DEV-GUIDE" in ex.value.message
+        assert "PLUGIN-REMOTE" in ex.value.message
 
     # ── 2. source_url scheme 白名单 ───────────────────────────────
 

@@ -10,7 +10,7 @@
 - 示例用 `edit_message` 把结果编辑回命令消息；如果要主动发新消息，可改为声明 `send_message`。
 - 运行时只通过 `ctx.ai` 调用文本 AI，不直接 import 后端私有 LLM runtime。
 - `ctx.ai.list_providers()` 只返回脱敏 provider 元数据，不包含 API Key、base URL 或代理 URL。
-- `ctx.ai.complete()` 推荐优先使用 `provider_tag` 选择用途标签；`provider_hint` 仅作为旧写法兼容别名保留。
+- `ctx.ai.complete()` 推荐优先使用 `provider_tag` 选择用途标签；`tag` / `tags` 仅作为旧写法兼容别名保留且已 deprecated。
 
 ## 使用
 
