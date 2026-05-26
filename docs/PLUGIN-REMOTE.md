@@ -235,7 +235,7 @@ DELETE /api/remote-plugins/{name}
 - “远程模块管理”里的启用/禁用是远程模块全局开关。
 - “模块中心”里的账号启用/禁用是账号级开关。
 
-远程模块实际加载需要 `RemotePlugin.enabled` 和 `AccountFeature.enabled` 同时为真。
+远程模块实际加载需要 `InstalledPlugin.enabled` 和 `AccountFeature.enabled` 同时为真；旧 `RemotePlugin` 表仅作为升级兼容的只读快照保留。
 
 Docker 部署时，`plugins/installed/{name}/` 和 `data/plugin_repos/` 必须挂载到持久化卷。否则 `docker compose up -d --build` 重建 web 容器后，数据库可能还保留模块开关，但模块文件或仓库缓存已经从容器临时文件系统消失，最终表现为远程模块指令没有响应。
 

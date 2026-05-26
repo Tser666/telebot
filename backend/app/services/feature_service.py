@@ -35,9 +35,8 @@ from ..db.models.feature import (
     AccountFeature,
     Feature,
 )
-from ..db.models.plugin import InstalledPlugin, PluginInstall
+from ..db.models.plugin import InstalledPlugin
 from ..db.models.plugin_global_config import PluginGlobalConfig
-from ..db.models.remote_plugin import RemotePlugin
 from ..redis_client import get_redis
 from ..schemas.feature import (
     ConfigValidationError,
@@ -159,10 +158,8 @@ async def _seed_local_installed_features(
     if not root.exists():
         return 0, False
 
-    plugin_install_rows = (await db.execute(select(PluginInstall))).scalars().all()
-    remote_plugin_rows = (await db.execute(select(RemotePlugin))).scalars().all()
-    installed_keys = {str(row.key) for row in plugin_install_rows}
-    remote_keys = {str(row.name) for row in remote_plugin_rows}
+    installed_plugin_rows = (await db.execute(select(InstalledPlugin))).scalars().all()
+    installed_plugin_by_key = {str(row.key): row for row in installed_plugin_rows}
 
     added = 0
     changed = False
@@ -175,7 +172,8 @@ async def _seed_local_installed_features(
         key = str(meta.get("name") or plugin_json.parent.name).strip()
         if not key or "/" in key or "\\" in key:
             continue
-        is_orphan = key not in installed_keys and key not in remote_keys
+        installed_plugin = installed_plugin_by_key.get(key)
+        is_orphan = installed_plugin is None
         display_name = str(meta.get("display_name") or key)
         version = str(meta.get("version") or "") or None
         cfg_schema = meta.get("config_schema")
@@ -215,8 +213,9 @@ async def _seed_local_installed_features(
             manifest["x-experimental"] = True
         if meta.get("permissions"):
             manifest["permissions"] = list(meta.get("permissions") or [])
-        source_label = "zip" if key in installed_keys else "remote"
-        manifest["source_label"] = source_label
+        source_label = getattr(installed_plugin, "source_label", None) or getattr(installed_plugin, "source", None)
+        if source_label:
+            manifest["source_label"] = str(source_label)
         manifest_data = manifest or None
 
         if key in existing:
@@ -352,10 +351,6 @@ async def feature_matrix(db: AsyncSession) -> dict[str, Any]:
     """
     # 1) 保证内置 feature 行齐全
     features = await list_features(db)
-    remote_rows = (await db.execute(select(RemotePlugin))).scalars().all()
-    remote_by_name = {row.name: row for row in remote_rows}
-    plugin_install_rows = (await db.execute(select(PluginInstall))).scalars().all()
-    plugin_install_by_key = {row.key: row for row in plugin_install_rows}
     installed_plugin_rows = (await db.execute(select(InstalledPlugin))).scalars().all()
     installed_plugin_by_key = {row.key: row for row in installed_plugin_rows}
 
@@ -398,8 +393,8 @@ async def feature_matrix(db: AsyncSession) -> dict[str, Any]:
         "features": [
             FeatureInfo.from_feature(
                 f,
-                remote_by_name.get(f.key),
-                plugin_install_by_key.get(f.key),
+                None,
+                None,
                 installed_plugin_by_key.get(f.key),
             ).model_dump()
             for f in features

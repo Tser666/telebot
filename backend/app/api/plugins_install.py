@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from ..db.models.account import Account
-from ..db.models.plugin import PluginInstall
+from ..db.models.plugin import InstalledPlugin
 from ..deps import CurrentUser, DBSession
 from ..redis_client import get_redis
 from ..services import audit
@@ -30,18 +30,18 @@ class PluginInstallOut(BaseModel):
     signature_ok: bool | None
     installed_path: str
     manifest: dict[str, Any] | None = None
-    installed_at: datetime
-    updated_at: datetime
+    installed_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
-def _to_out(row: PluginInstall) -> PluginInstallOut:
+def _to_out(row: InstalledPlugin) -> PluginInstallOut:
     return PluginInstallOut(
         key=row.key,
         source=row.source,
         version=row.version,
         enabled=bool(row.enabled),
         signature_ok=row.signature_ok,
-        installed_path=row.installed_path,
+        installed_path=row.installed_path or "",
         manifest=row.manifest_json,
         installed_at=row.installed_at,
         updated_at=row.updated_at,

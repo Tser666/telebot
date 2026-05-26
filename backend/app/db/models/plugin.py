@@ -25,6 +25,11 @@ PLUGIN_TRUST_ORPHAN = "orphan"
 
 
 class PluginInstall(Base):
+    """旧版 zip 安装表。
+
+    Deprecated: 新写路径已切到 ``InstalledPlugin``；本模型仅保留给升级兼容和只读排查。
+    """
+
     __tablename__ = "plugin_install"
 
     key: Mapped[str] = mapped_column(String, primary_key=True)
@@ -43,7 +48,7 @@ class PluginInstall(Base):
 
 
 class InstalledPlugin(Base):
-    """未来统一安装记录表；当前先 additive 建表，不切换运行时读写。"""
+    """统一安装记录表；插件安装、启停、卸载的权威数据源。"""
 
     __tablename__ = "installed_plugin"
 

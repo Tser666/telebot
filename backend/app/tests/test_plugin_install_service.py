@@ -25,38 +25,31 @@ from pathlib import Path
 import pytest
 
 from app.db.models.feature import FEATURE_AUTO_REPLY
-from app.db.models.plugin import InstalledPlugin, PluginInstall
+from app.db.models.plugin import InstalledPlugin
 from app.services import plugin_install_service as pis
 
 
 # ─────────────────────────────────────────────────────
-# Fake DB：超薄实现，仅支持 PluginInstall 的 get/add/delete/flush/execute(select)
+# Fake DB：超薄实现，仅支持 InstalledPlugin 的 get/add/delete/flush/execute(select)
 # ─────────────────────────────────────────────────────
 class _FakeDB:
-    """用 dict 模拟 plugin_install 表的 PK=key 行为；其它表不实现。"""
+    """用 dict 模拟 installed_plugin 表的 PK=key 行为；其它表不实现。"""
 
     def __init__(self) -> None:
-        self.rows: dict[str, PluginInstall] = {}
         self.installed_rows: dict[str, InstalledPlugin] = {}
         self.committed = False
 
     async def get(self, model, pk):  # noqa: ANN001
-        if model is PluginInstall:
-            return self.rows.get(pk)
         if model is InstalledPlugin:
             return self.installed_rows.get(pk)
         return None
 
     def add(self, obj) -> None:  # noqa: ANN001
-        if isinstance(obj, PluginInstall):
-            self.rows[obj.key] = obj
-        elif isinstance(obj, InstalledPlugin):
+        if isinstance(obj, InstalledPlugin):
             self.installed_rows[obj.key] = obj
 
     async def delete(self, obj) -> None:  # noqa: ANN001
-        if isinstance(obj, PluginInstall):
-            self.rows.pop(obj.key, None)
-        elif isinstance(obj, InstalledPlugin):
+        if isinstance(obj, InstalledPlugin):
             self.installed_rows.pop(obj.key, None)
 
     async def flush(self) -> None:
@@ -69,8 +62,8 @@ class _FakeDB:
         return None
 
     async def execute(self, stmt):  # noqa: ANN001
-        # 只为 list_installed 服务（select PluginInstall order by key）
-        return _FakeResult(list(self.rows.values()))
+        # 只为 list_installed 服务（select InstalledPlugin order by key）
+        return _FakeResult(list(self.installed_rows.values()))
 
 
 class _FakeResult:
@@ -271,7 +264,6 @@ async def test_install_zip_roundtrip(tmp_path, monkeypatch) -> None:
     assert target.is_dir()
     assert (target / "manifest.py").is_file()
     assert (target / "plugin.py").is_file()
-    assert "my_demo" in db.rows
     installed = db.installed_rows["my_demo"]
     assert installed.source == "zip"
     assert installed.version == "1.0.0"
@@ -302,7 +294,6 @@ async def test_install_zip_upgrade_keeps_enabled(tmp_path, monkeypatch) -> None:
     row2 = await pis.install_zip(db, zip_bytes=z2, signature=sig2)
     assert row2.version == "1.1.0"
     assert row2.enabled is True
-    assert db.rows["upgr"].version == "1.1.0"
     assert db.installed_rows["upgr"].enabled is True
     assert db.installed_rows["upgr"].version == "1.1.0"
 
@@ -379,7 +370,7 @@ async def test_set_enabled_blocks_when_signature_failed(tmp_path, monkeypatch) -
 
 
 @pytest.mark.asyncio
-async def test_set_enabled_syncs_installed_plugin_row(tmp_path, monkeypatch) -> None:
+async def test_set_enabled_updates_installed_plugin_row(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(pis.settings, "plugins_installed_dir", str(tmp_path / "installed"))
     z = _make_zip(key="toggle", version="1.0.0")
     sig, pub = _sign_payload(z)
@@ -389,7 +380,6 @@ async def test_set_enabled_syncs_installed_plugin_row(tmp_path, monkeypatch) -> 
 
     await pis.set_enabled(db, "toggle", True)
 
-    assert db.rows["toggle"].enabled is True
     assert db.installed_rows["toggle"].enabled is True
 
 
@@ -406,7 +396,6 @@ async def test_uninstall_removes_row_and_dir(tmp_path, monkeypatch) -> None:
 
     deleted = await pis.uninstall(db, "bye")
     assert deleted is True
-    assert "bye" not in db.rows
     assert "bye" not in db.installed_rows
     assert not target.exists()
 

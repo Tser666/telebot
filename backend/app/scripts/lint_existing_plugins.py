@@ -16,10 +16,8 @@ from pathlib import Path
 from sqlalchemy import select
 
 from app.db.base import AsyncSessionLocal
-from app.db.models.plugin import InstalledPlugin, PluginInstall
-from app.db.models.remote_plugin import RemotePlugin
+from app.db.models.plugin import InstalledPlugin
 from app.services.remote_plugin_service import lint_plugin_metadata_files
-from app.settings import settings
 
 
 @dataclass(frozen=True)
@@ -27,21 +25,6 @@ class LintTarget:
     source: str
     key: str
     path: Path
-
-
-def _legacy_plugin_dir(name: str) -> Path:
-    backend_root = Path(__file__).resolve().parents[2]
-    return (backend_root / "plugins" / "installed" / name).resolve()
-
-
-def _resolve_remote_plugin_dir(name: str) -> Path:
-    current = (settings.plugins_installed_path / name).resolve()
-    if current.exists():
-        return current
-    legacy = _legacy_plugin_dir(name)
-    if legacy.exists():
-        return legacy
-    return current
 
 
 def _merge_unique(existing: list[str], incoming: list[str]) -> list[str]:
@@ -71,23 +54,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 async def _run_backfill(*, dry_run: bool, only: str | None) -> int:
     async with AsyncSessionLocal() as db:
-        plugin_install_rows = (await db.execute(select(PluginInstall))).scalars().all()
-        remote_plugin_rows = (await db.execute(select(RemotePlugin))).scalars().all()
         installed_plugin_rows = (await db.execute(select(InstalledPlugin))).scalars().all()
 
         targets: list[LintTarget] = []
-        for row in plugin_install_rows:
-            if row.installed_path:
-                targets.append(LintTarget("plugin_install", row.key, Path(row.installed_path)))
         for row in installed_plugin_rows:
             if row.installed_path:
                 targets.append(LintTarget("installed_plugin", row.key, Path(row.installed_path)))
-        for row in remote_plugin_rows:
-            targets.append(LintTarget("remote_plugin", row.name, _resolve_remote_plugin_dir(row.name)))
 
         if only:
             targets = [item for item in targets if item.key == only]
-            remote_plugin_rows = [item for item in remote_plugin_rows if item.name == only]
             installed_plugin_rows = [item for item in installed_plugin_rows if item.key == only]
 
         warnings_by_key: dict[str, list[str]] = defaultdict(list)
@@ -101,20 +76,11 @@ async def _run_backfill(*, dry_run: bool, only: str | None) -> int:
 
         print(
             "扫描完成："
-            f" plugin_install={len(plugin_install_rows)}"
-            f" remote_plugin={len(remote_plugin_rows)}"
             f" installed_plugin={len(installed_plugin_rows)}"
             f" lint_targets={len(targets)}"
             f" only={only or '-'}"
             f" dry_run={dry_run}"
         )
-
-        for row in remote_plugin_rows:
-            new_warnings = list(warnings_by_key.get(row.name, []))
-            old_warnings = list(row.lint_warnings or [])
-            print(_render_diff("remote_plugin", row.name, old_warnings, new_warnings))
-            if not dry_run:
-                row.lint_warnings = new_warnings
 
         for row in installed_plugin_rows:
             new_warnings = list(warnings_by_key.get(row.key, []))
@@ -129,7 +95,7 @@ async def _run_backfill(*, dry_run: bool, only: str | None) -> int:
             return 0
 
         await db.commit()
-        print("回填完成：已写入 remote_plugin / installed_plugin 的 lint_warnings。")
+        print("回填完成：已写入 installed_plugin 的 lint_warnings。")
         return 0
 
 

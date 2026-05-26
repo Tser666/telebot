@@ -41,12 +41,20 @@ class FeatureInfo(BaseModel):
         installed_plugin: InstalledPlugin | None = None,
     ) -> FeatureInfo:
         manifest = getattr(f, "manifest", None) or {}
-        source_url = str(getattr(remote_plugin, "source_url", "") or "")
-        source_type = "remote" if remote_plugin is not None and not source_url.startswith("local://") else "local"
+        installed_source = str(getattr(installed_plugin, "source", "") or "")
+        installed_source_url = str(getattr(installed_plugin, "source_url", "") or "")
+        source_url = str(getattr(remote_plugin, "source_url", "") or installed_source_url)
+        source_type = (
+            "remote"
+            if installed_source in {"git", "repo"} or (remote_plugin is not None and not source_url.startswith("local://"))
+            else "local"
+        )
         source_label = manifest.get("source_label")
         if not source_label:
             if f.is_builtin:
                 source_label = "core"
+            elif installed_plugin is not None:
+                source_label = getattr(installed_plugin, "source_label", None) or installed_source or "local"
             elif plugin_install is not None:
                 source_label = str(getattr(plugin_install, "source", "") or "zip")
             elif remote_plugin is not None:
@@ -68,6 +76,13 @@ class FeatureInfo(BaseModel):
             else None
         )
         lint_warnings = raw_lint_warnings if isinstance(raw_lint_warnings, list) else []
+        installed_manifest = getattr(installed_plugin, "manifest_json", None) or {}
+        remote_info = (
+            installed_manifest.get("_telepilot_remote", {})
+            if isinstance(installed_manifest, dict)
+            else {}
+        )
+        remote_info = remote_info if isinstance(remote_info, dict) else {}
         return cls(
             key=f.key,
             display_name=f.display_name,
@@ -75,7 +90,11 @@ class FeatureInfo(BaseModel):
             source_type=source_type,
             source_label=str(source_label),
             orphan=bool(manifest.get("x-orphan")),
-            signature_ok=getattr(plugin_install, "signature_ok", None),
+            signature_ok=getattr(
+                installed_plugin,
+                "signature_ok",
+                getattr(plugin_install, "signature_ok", None),
+            ),
             version=f.version,
             config_schema=config_schema,
             category=category,
@@ -83,10 +102,16 @@ class FeatureInfo(BaseModel):
             experimental=bool(
                 manifest.get("x-experimental") or manifest.get("experimental")
             ),
-            update_available=bool(getattr(remote_plugin, "update_available", False)),
-            latest_version=getattr(remote_plugin, "latest_version", None),
-            last_update_check_at=getattr(remote_plugin, "last_update_check_at", None),
-            last_update_check_error=getattr(remote_plugin, "last_update_check_error", None),
+            update_available=bool(
+                remote_info.get("update_available", getattr(remote_plugin, "update_available", False))
+            ),
+            latest_version=remote_info.get("latest_version", getattr(remote_plugin, "latest_version", None)),
+            last_update_check_at=remote_info.get(
+                "last_update_check_at", getattr(remote_plugin, "last_update_check_at", None)
+            ),
+            last_update_check_error=remote_info.get(
+                "last_update_check_error", getattr(remote_plugin, "last_update_check_error", None)
+            ),
             lint_warnings=[item for item in lint_warnings if isinstance(item, str)],
         )
 

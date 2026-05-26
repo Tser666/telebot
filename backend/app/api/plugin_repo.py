@@ -117,7 +117,6 @@ async def install_plugin_from_repo(
             db, repo_id, plugin_name, default_enabled=default_enabled,
         )
         await db.commit()
-        await db.refresh(row)
         await trigger_reload(db, row.name)
         return row
     except PluginRepoNotFound as e:
@@ -150,7 +149,6 @@ async def install_local_plugin(
             db, plugin_name, default_enabled=default_enabled,
         )
         await db.commit()
-        await db.refresh(row)
         await trigger_reload(db, row.name)
         return row
     except PluginNotInRepo as e:

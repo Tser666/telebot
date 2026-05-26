@@ -5,7 +5,7 @@
 - 解析 manifest.py 拿到 ``MANIFEST`` 实例（不会 import 到 app 命名空间，全在临时目录隔离）
 - 可选 Ed25519 签名校验：``settings.plugin_pubkey`` 配置公钥 + 上传 ``.sig`` 文件
 - 把临时目录原子地搬到 ``settings.plugins_installed_dir/<key>/``
-- 在 ``plugin_install`` 表写一行（已存在则视为升级，写库覆盖）
+- 在 ``installed_plugin`` 表写一行（已存在则视为升级，写库覆盖）
 - ``set_enabled`` / ``uninstall`` 工具函数
 
 安全约束：
@@ -34,14 +34,12 @@ from ..db.models.plugin import (
     PLUGIN_SOURCE_ZIP,
     PLUGIN_TRUST_COMMUNITY,
     PLUGIN_TRUST_VERIFIED,
-    PluginInstall,
+    InstalledPlugin,
 )
 from ..settings import settings
 from ..worker.plugins.manifest import Manifest
 from .remote_plugin_service import (
-    delete_installed_plugin_record,
     lint_plugin_metadata_files,
-    set_installed_plugin_enabled,
     upsert_installed_plugin,
 )
 
@@ -296,7 +294,7 @@ async def install_zip(
     zip_bytes: bytes,
     signature: bytes | None = None,
     source: str = PLUGIN_SOURCE_ZIP,
-) -> PluginInstall:
+) -> InstalledPlugin:
     """完整的 zip 安装流程：解析 → 验签 → 落盘 → 写表。
 
     存在同名 ``key`` 时视作"升级"：写库 UPDATE 同时覆盖目录；
@@ -324,7 +322,7 @@ async def install_zip(
             )
 
         # 旧记录（升级情况）
-        existing = await db.get(PluginInstall, parsed.manifest.key)
+        existing = await db.get(InstalledPlugin, parsed.manifest.key)
         was_enabled = bool(existing.enabled) if existing is not None else False
 
         # 删除旧目录后把临时目录搬过去
@@ -338,26 +336,7 @@ async def install_zip(
 
         manifest_json = parsed.manifest.to_dict()
         lint_warnings = lint_plugin_metadata_files(final_dir)
-        if existing is None:
-            row = PluginInstall(
-                key=parsed.manifest.key,
-                source=source,
-                version=parsed.manifest.version,
-                manifest_json=manifest_json,
-                signature_ok=sig_ok,
-                installed_path=str(final_dir),
-                enabled=final_enabled
-            )
-            db.add(row)
-        else:
-            existing.source = source
-            existing.version = parsed.manifest.version
-            existing.manifest_json = manifest_json
-            existing.signature_ok = sig_ok
-            existing.installed_path = str(final_dir)
-            existing.enabled = final_enabled
-            row = existing
-        await upsert_installed_plugin(
+        row = await upsert_installed_plugin(
             db,
             key=parsed.manifest.key,
             source=source,
@@ -383,12 +362,11 @@ async def install_zip(
 
 async def uninstall(db: AsyncSession, key: str) -> bool:
     """卸载指定 key：删表行 + 删目录。返回 True 表示真删了一行。"""
-    row = await db.get(PluginInstall, key)
-    if row is None:
+    row = await db.get(InstalledPlugin, key)
+    if row is None or row.source != PLUGIN_SOURCE_ZIP:
         return False
-    target = Path(row.installed_path)
+    target = Path(row.installed_path or settings.plugins_installed_path / key)
     await db.delete(row)
-    await delete_installed_plugin_record(db, key)
     await db.flush()
     # 删目录失败不阻塞 DB 提交（但写日志方便排查）
     try:
@@ -399,10 +377,10 @@ async def uninstall(db: AsyncSession, key: str) -> bool:
     return True
 
 
-async def set_enabled(db: AsyncSession, key: str, enabled: bool) -> PluginInstall:
+async def set_enabled(db: AsyncSession, key: str, enabled: bool) -> InstalledPlugin:
     """设置 enabled 标志；调用方负责后续向 worker 广播 reload_config。"""
-    row = await db.get(PluginInstall, key)
-    if row is None:
+    row = await db.get(InstalledPlugin, key)
+    if row is None or row.source != PLUGIN_SOURCE_ZIP:
         raise PluginInstallError("PLUGIN_NOT_FOUND", f"插件不存在: {key}")
     if enabled and row.signature_ok is False:
         # 签名失败时不允许直接 enable；前端要显式"我知道风险"再调，会先把 signature_ok 置 None
@@ -411,15 +389,18 @@ async def set_enabled(db: AsyncSession, key: str, enabled: bool) -> PluginInstal
             "签名校验失败，禁止启用；管理员可先重新上传带正确签名的 zip",
         )
     row.enabled = bool(enabled)
-    await set_installed_plugin_enabled(db, key, row.enabled)
     await db.flush()
     return row
 
 
-async def list_installed(db: AsyncSession) -> list[PluginInstall]:
+async def list_installed(db: AsyncSession) -> list[InstalledPlugin]:
     """列出所有已安装的第三方插件，按 key 字典序。"""
     rows = (
-        await db.execute(select(PluginInstall).order_by(PluginInstall.key))
+        await db.execute(
+            select(InstalledPlugin)
+            .where(InstalledPlugin.source == PLUGIN_SOURCE_ZIP)
+            .order_by(InstalledPlugin.key)
+        )
     ).scalars().all()
     return list(rows)
 

@@ -1298,7 +1298,7 @@ class DemoPlugin(Plugin):
 
 按这条顺序排查，基本能定位 90% 的交互 Bot 问题：
 
-- `RemotePlugin.enabled`：远程模块是否已安装并启用。
+- `InstalledPlugin.enabled`：远程模块是否已安装并启用（旧 `RemotePlugin` 表仅作只读兼容）。
 - `AccountFeature.enabled`：当前账号是否启用了这个模块。
 - 规则动作是否是 `action == "module"`，不是普通通知或算数题。
 - `module_key` 是否和 `MANIFEST.key` 完全一致，`module_action` 是否等于 `interaction_entries[].key`。

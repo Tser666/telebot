@@ -1,11 +1,7 @@
-"""远程 Git 仓库插件登记表（阶段 D：tpm-style 远程插件管理）。
+"""远程 Git 仓库插件登记表（legacy 只读快照）。
 
-与 ``plugin_install`` 表的区别：
-- ``plugin_install`` 记录 zip 上传安装的第三方插件（阶段 B）
-- ``remote_plugin`` 记录从远程 Git 仓库 ``git clone`` 安装的插件（本阶段）
-
-二者并行存在；安装目录都是 ``plugins/installed/<name>/``，由 worker loader
-统一扫描。运行期靠目录覆盖语义保证唯一加载（loader 同名 key 后写胜出）。
+Deprecated: 新的安装、启停、卸载与更新状态都以 ``installed_plugin`` 为权威来源。
+本模型暂时保留给升级兼容、历史排查和下一个 major 前的只读访问。
 """
 
 from __future__ import annotations
@@ -19,12 +15,14 @@ from ..base import Base
 
 
 class RemotePlugin(Base):
-    """远程插件登记表：每行 = 一个从远程仓库克隆下来的第三方插件安装。
+    """旧版远程插件登记表：每行 = 一个从远程仓库克隆下来的第三方插件安装快照。
 
     ``name`` 字段同时承担三重身份：
       - 数据库唯一键
       - 文件系统下 ``plugins/installed/<name>/`` 目录名
       - worker loader 注册到 ``_REGISTRY`` 时使用的 plugin key（与 manifest.key 一致）
+
+    Deprecated: 写路径已切到 ``InstalledPlugin``，不要在新代码中更新本表。
     """
 
     __tablename__ = "remote_plugin"

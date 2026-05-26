@@ -1,8 +1,8 @@
 """远程 Git 仓库插件管理服务（阶段 D：tpm-style 远程插件）。
 
 职责：
-- ``install``：``git clone`` 到 ``plugins/installed/<name>/`` → 解析 ``plugin.json`` → 写 ``remote_plugin`` 表 → 触发 worker 热加载（``reload_config``）
-- ``uninstall``：删 DB 行 + 删插件目录
+- ``install``：``git clone`` 到 ``plugins/installed/<name>/`` → 解析 ``plugin.json`` → 写 ``installed_plugin`` 表 → 触发 worker 热加载（``reload_config``）
+- ``uninstall``：删 installed_plugin 行 + 删插件目录
 - ``enable`` / ``disable``：翻转 ``enabled`` 标志，并向 worker 广播热加载
 - ``update``：``git pull`` → 重读 plugin.json → 写新版本号 → 触发热加载
 
@@ -43,10 +43,11 @@ from ..db.models.account import Account
 from ..db.models.feature import FEATURE_STATE_DISABLED, AccountFeature, Feature
 from ..db.models.plugin import (
     PLUGIN_SOURCE_GIT,
+    PLUGIN_SOURCE_LOCAL,
+    PLUGIN_SOURCE_REPO,
     PLUGIN_TRUST_COMMUNITY,
     InstalledPlugin,
 )
-from ..db.models.remote_plugin import RemotePlugin
 from ..db.models.system import SystemSetting
 from ..settings import settings
 from ..worker.ipc import CMD_RELOAD_CONFIG, publish_cmd_with_ack
@@ -75,6 +76,8 @@ _HARDCODED_PREFIX_RE = re.compile(
     + r"|[\u4e00-\u9fff]{1,12}(?=$|[\s<。！？!?、，,；;：:）)\]}\"'`>])"
     + r"))"
 )
+_REMOTE_INSTALL_SOURCES = (PLUGIN_SOURCE_GIT, PLUGIN_SOURCE_REPO, PLUGIN_SOURCE_LOCAL)
+_REMOTE_INFO_KEY = "_telepilot_remote"
 
 
 # ─────────────────────────────────────────────────────
@@ -90,7 +93,7 @@ class RemotePluginError(Exception):
 
 
 class RemotePluginNotFound(RemotePluginError):
-    """根据 name 查不到 ``remote_plugin`` 行。"""
+    """根据 name 查不到 ``installed_plugin`` 行。"""
 
 
 class DuplicatePluginName(RemotePluginError):
@@ -198,6 +201,125 @@ class RemotePluginUpdateCheckSummary:
     checked: int = 0
     update_available: int = 0
     failed: int = 0
+
+
+@dataclass(slots=True)
+class RemotePluginView:
+    """由 installed_plugin 派生的远程插件 API 响应视图。"""
+
+    id: int
+    name: str
+    display_name: str
+    description: str
+    author: str
+    source_url: str
+    version: str
+    latest_version: str | None
+    update_available: bool
+    last_update_check_at: datetime | None
+    last_update_check_error: str | None
+    lint_warnings: list[str]
+    enabled: bool
+    default_enabled: bool
+    installed_at: datetime | None
+
+
+def _remote_info_from_manifest(manifest_json: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(manifest_json, dict):
+        return {}
+    raw = manifest_json.get(_REMOTE_INFO_KEY)
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _remote_info_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str) and value:
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _with_remote_info(
+    manifest_json: dict[str, Any],
+    *,
+    default_enabled: bool,
+    latest_version: str | None,
+    update_available: bool,
+    last_update_check_at: datetime | None = None,
+    last_update_check_error: str | None = None,
+) -> dict[str, Any]:
+    data = dict(manifest_json)
+    data[_REMOTE_INFO_KEY] = {
+        "default_enabled": bool(default_enabled),
+        "latest_version": latest_version,
+        "update_available": bool(update_available),
+        "last_update_check_at": last_update_check_at.isoformat() if last_update_check_at else None,
+        "last_update_check_error": last_update_check_error,
+    }
+    return data
+
+
+def _set_remote_update_info(
+    row: InstalledPlugin,
+    *,
+    latest_version: str | None,
+    update_available: bool,
+    last_update_check_error: str | None,
+    default_enabled: bool | None = None,
+) -> None:
+    current = dict(row.manifest_json or {})
+    info = _remote_info_from_manifest(current)
+    if default_enabled is None:
+        default_enabled = bool(info.get("default_enabled", False))
+    row.manifest_json = _with_remote_info(
+        current,
+        default_enabled=default_enabled,
+        latest_version=latest_version,
+        update_available=update_available,
+        last_update_check_at=datetime.now(UTC),
+        last_update_check_error=last_update_check_error,
+    )
+
+
+def _source_label_for_installed(row: InstalledPlugin) -> str:
+    if row.source_label:
+        return row.source_label
+    if row.source == PLUGIN_SOURCE_REPO:
+        return "Plugin Repo"
+    if row.source == PLUGIN_SOURCE_LOCAL:
+        return "Local"
+    return "Git"
+
+
+def _installed_remote_query():
+    return select(InstalledPlugin).where(InstalledPlugin.source.in_(_REMOTE_INSTALL_SOURCES))
+
+
+def remote_plugin_view_from_installed(row: InstalledPlugin) -> RemotePluginView:
+    """把 installed_plugin 行转换为远程插件 API 的兼容响应形状。"""
+
+    manifest = dict(row.manifest_json or {})
+    info = _remote_info_from_manifest(manifest)
+    return RemotePluginView(
+        id=0,
+        name=row.key,
+        display_name=str(manifest.get("display_name") or row.key),
+        description=str(manifest.get("description") or ""),
+        author=str(manifest.get("author") or ""),
+        source_url=str(row.source_url or ""),
+        version=row.version,
+        latest_version=info.get("latest_version") or row.version,
+        update_available=bool(info.get("update_available", False)),
+        last_update_check_at=_remote_info_datetime(info.get("last_update_check_at")),
+        last_update_check_error=info.get("last_update_check_error"),
+        lint_warnings=[item for item in (row.lint_warnings or []) if isinstance(item, str)],
+        enabled=bool(row.enabled),
+        default_enabled=bool(info.get("default_enabled", False)),
+        installed_at=row.installed_at,
+    )
 
 
 def _feature_manifest_from_meta(meta: PluginMetadata) -> dict[str, Any] | None:
@@ -666,7 +788,7 @@ async def upsert_installed_plugin(
     last_install_error: str | None = None,
     lint_warnings: list[str] | None = None,
 ) -> InstalledPlugin:
-    """双写统一安装记录表；legacy 表仍是当前运行时读源。"""
+    """写入统一安装记录表。"""
     row = await db.get(InstalledPlugin, key)
     if row is None:
         row = InstalledPlugin(key=key, source=source)
@@ -690,7 +812,7 @@ async def set_installed_plugin_enabled(
     key: str,
     enabled: bool,
 ) -> None:
-    """Keep additive ``installed_plugin`` rows in sync with legacy enable flags."""
+    """直接同步 installed_plugin.enabled；保留给邻近服务复用。"""
 
     row = await db.get(InstalledPlugin, key)
     if row is None:
@@ -700,7 +822,7 @@ async def set_installed_plugin_enabled(
 
 
 async def delete_installed_plugin_record(db: AsyncSession, key: str) -> None:
-    """Delete the additive unified install row when legacy install rows are removed."""
+    """删除统一安装记录；保留给邻近服务复用。"""
 
     row = await db.get(InstalledPlugin, key)
     if row is None:
@@ -727,29 +849,42 @@ def _find_plugin_metadata_in_repo(repo_dir: Path, name: str) -> tuple[PluginMeta
     )
 
 
-async def check_remote_plugin_update(db: AsyncSession, row: RemotePlugin) -> RemotePlugin:
-    """检查单个远程模块是否有更新，并把状态写回 remote_plugin 行。"""
-    row.last_update_check_at = datetime.now(UTC)
-    row.last_update_check_error = None
+async def check_remote_plugin_update(db: AsyncSession, row: InstalledPlugin) -> InstalledPlugin:
+    """检查单个远程模块是否有更新，并把状态写回 installed_plugin 行。"""
     try:
         if str(row.source_url or "").startswith("local://"):
-            target = _existing_plugin_dir(row.name)
+            target = Path(row.installed_path or _existing_plugin_dir(row.key))
             row.lint_warnings = lint_plugin_metadata_files(target) if target.exists() else []
-            row.latest_version = row.version
-            row.update_available = False
+            _set_remote_update_info(
+                row,
+                latest_version=row.version,
+                update_available=False,
+                last_update_check_error=None,
+            )
             await db.flush()
             return row
 
         with tempfile.TemporaryDirectory(prefix="telepilot-plugin-check-") as tmp:
             repo_dir = Path(tmp) / "repo"
-            await _run_git("clone", "--depth", "1", row.source_url, str(repo_dir), timeout=180.0)
-            meta, plugin_dir = _find_plugin_metadata_in_repo(repo_dir, row.name)
-            row.latest_version = meta.version
-            row.update_available = _has_newer_version(meta.version, row.version)
+            source_url = str(row.source_url or "")
+            if not source_url:
+                raise RemotePluginError("SOURCE_URL_MISSING", f"插件 {row.key} 缺少 source_url，无法检查更新")
+            await _run_git("clone", "--depth", "1", source_url, str(repo_dir), timeout=180.0)
+            meta, plugin_dir = _find_plugin_metadata_in_repo(repo_dir, row.key)
+            _set_remote_update_info(
+                row,
+                latest_version=meta.version,
+                update_available=_has_newer_version(meta.version, row.version),
+                last_update_check_error=None,
+            )
             row.lint_warnings = lint_plugin_metadata_files(plugin_dir)
     except Exception as exc:  # noqa: BLE001
-        row.last_update_check_error = f"{type(exc).__name__}: {exc}"
-        row.update_available = False
+        _set_remote_update_info(
+            row,
+            latest_version=row.version,
+            update_available=False,
+            last_update_check_error=f"{type(exc).__name__}: {exc}",
+        )
     await db.flush()
     return row
 
@@ -759,18 +894,19 @@ async def check_updates(
     *,
     name: str | None = None,
 ) -> RemotePluginUpdateCheckSummary:
-    """检查已安装远程模块更新状态；只更新标记，不自动安装新版本。"""
-    stmt = select(RemotePlugin).order_by(RemotePlugin.name)
+    """检查已安装远程模块更新状态；只更新 installed_plugin 标记，不自动安装新版本。"""
+    stmt = _installed_remote_query().order_by(InstalledPlugin.key)
     if name:
-        stmt = stmt.where(RemotePlugin.name == name)
+        stmt = stmt.where(InstalledPlugin.key == name)
     rows = (await db.execute(stmt)).scalars().all()
     summary = RemotePluginUpdateCheckSummary(total=len(rows))
     for row in rows:
         await check_remote_plugin_update(db, row)
+        info = _remote_info_from_manifest(row.manifest_json)
         summary.checked += 1
-        if row.update_available:
+        if info.get("update_available"):
             summary.update_available += 1
-        if row.last_update_check_error:
+        if info.get("last_update_check_error"):
             summary.failed += 1
     return summary
 
@@ -890,7 +1026,7 @@ async def _enable_for_all_accounts_if_unclaimed(db: AsyncSession, name: str) -> 
 async def enable_for_all_accounts(db: AsyncSession, name: str) -> int:
     """为所有现有账号启用远程插件的账号级开关。
 
-    远程插件实际加载需要 RemotePlugin.enabled 和 AccountFeature.enabled 同时为真。
+    远程插件实际加载需要 InstalledPlugin.enabled 和 AccountFeature.enabled 同时为真。
     管理页的“启用”是用户可见的显式动作，因此应让它收敛到“当前账号都能实际运行”，
     避免只打开全局开关却留下账号级 disabled 的半启用状态。
     """
@@ -935,7 +1071,7 @@ async def install(
     name: str | None = None,
     enable: bool = False,
     default_enabled: bool = False,
-) -> RemotePlugin:
+) -> RemotePluginView:
     """从 Git 仓库克隆并安装一个远程插件。
 
     **安全要求**：
@@ -948,7 +1084,7 @@ async def install(
       3. 拒绝重名：DB 已有同名行或目录已存在 → ``DuplicatePluginName``
       4. ``git clone <source_url> plugins/installed/<name>`` (带 timeout)
       5. 读 ``plugin.json``（不执行 manifest.py）
-      6. 写 ``remote_plugin`` 行
+      6. 写 ``installed_plugin`` 行
       7. 注册到 ``feature`` 表（is_builtin=False），使功能矩阵可见
       8. 若 ``default_enabled=True``，为所有已有账号创建 ``AccountFeature`` 行
       9. 触发 ``reload_config`` 广播
@@ -964,9 +1100,7 @@ async def install(
     staging = target.parent / f"{target.name}.installing"
 
     # 2. 重名拦截：先查 DB，再查目录
-    existing = (
-        await db.execute(select(RemotePlugin).where(RemotePlugin.name == final_name))
-    ).scalar_one_or_none()
+    existing = await db.get(InstalledPlugin, final_name)
     if existing is not None:
         raise DuplicatePluginName(
             "PLUGIN_EXISTS", f"插件 {final_name!r} 已安装"
@@ -998,20 +1132,7 @@ async def install(
         lint_warnings = lint_plugin_metadata_files(staging)
         staging.rename(target)
         renamed = True
-        row = RemotePlugin(
-            name=final_name,
-            display_name=meta.display_name or final_name,
-            description=meta.description,
-            author=meta.author,
-            source_url=source_url,
-            version=meta.version,
-            latest_version=meta.version,
-            update_available=False,
-            lint_warnings=lint_warnings,
-            enabled=bool(enable or default_enabled),
-            default_enabled=default_enabled,
-        )
-        db.add(row)
+        final_enabled = bool(enable or default_enabled)
 
         # 注册到 feature 表（使功能矩阵可见）
         feat = (
@@ -1032,16 +1153,21 @@ async def install(
             feat.is_builtin = False
             feat.manifest = _merge_feature_manifest_preserving_global_config(feat.manifest, meta)
 
-        await db.flush()
-        await upsert_installed_plugin(
+        manifest_json = _with_remote_info(
+            _manifest_json_from_remote_meta(meta),
+            default_enabled=default_enabled,
+            latest_version=meta.version,
+            update_available=False,
+        )
+        row = await upsert_installed_plugin(
             db,
             key=final_name,
             source=PLUGIN_SOURCE_GIT,
             source_url=source_url,
             installed_path=str(target),
             version=meta.version,
-            manifest_json=_manifest_json_from_remote_meta(meta),
-            enabled=row.enabled,
+            manifest_json=manifest_json,
+            enabled=final_enabled,
             signature_ok=None,
             trust_tier=PLUGIN_TRUST_COMMUNITY,
             source_label="Git",
@@ -1079,18 +1205,16 @@ async def install(
             shutil.rmtree(target, ignore_errors=True)
         raise
 
-    return row
+    return remote_plugin_view_from_installed(row)
 
 
 async def uninstall(db: AsyncSession, name: str) -> bool:
-    """卸载远程插件：删 DB 行 + 删插件目录 + 清理 Feature/AccountFeature 行。
+    """卸载远程插件：删 installed_plugin 行 + 删插件目录 + 清理 Feature/AccountFeature 行。
 
     返回 ``True`` 表示真删了一行。``name`` 不存在时返回 ``False``，不抛异常。
     """
-    row = (
-        await db.execute(select(RemotePlugin).where(RemotePlugin.name == name))
-    ).scalar_one_or_none()
-    if row is None:
+    row = await db.get(InstalledPlugin, name)
+    if row is None or row.source not in _REMOTE_INSTALL_SOURCES:
         return False
 
     # 清理 AccountFeature 行
@@ -1109,7 +1233,6 @@ async def uninstall(db: AsyncSession, name: str) -> bool:
     if feat is not None:
         await db.delete(feat)
 
-    await delete_installed_plugin_record(db, name)
     await db.delete(row)
     await db.flush()
 
@@ -1126,45 +1249,40 @@ async def uninstall(db: AsyncSession, name: str) -> bool:
 
 async def set_enabled(
     db: AsyncSession, name: str, *, enabled: bool, bootstrap_accounts: bool = False
-) -> RemotePlugin:
+) -> RemotePluginView:
     """翻转 ``enabled`` 标志。``name`` 不存在抛 ``RemotePluginNotFound``。"""
-    row = (
-        await db.execute(select(RemotePlugin).where(RemotePlugin.name == name))
-    ).scalar_one_or_none()
-    if row is None:
+    row = await db.get(InstalledPlugin, name)
+    if row is None or row.source not in _REMOTE_INSTALL_SOURCES:
         raise RemotePluginNotFound("PLUGIN_NOT_FOUND", f"插件不存在: {name}")
     row.enabled = bool(enabled)
-    await set_installed_plugin_enabled(db, name, row.enabled)
     if row.enabled and bootstrap_accounts:
         await _enable_for_all_accounts_if_unclaimed(db, name)
     await db.flush()
-    return row
+    return remote_plugin_view_from_installed(row)
 
 
 async def enable(
     db: AsyncSession, name: str, *, bootstrap_accounts: bool = False
-) -> RemotePlugin:
+) -> RemotePluginView:
     """启用插件 = ``set_enabled(..., enabled=True)``。"""
     return await set_enabled(db, name, enabled=True, bootstrap_accounts=bootstrap_accounts)
 
 
-async def disable(db: AsyncSession, name: str) -> RemotePlugin:
+async def disable(db: AsyncSession, name: str) -> RemotePluginView:
     """禁用插件 = ``set_enabled(..., enabled=False)``。"""
     return await set_enabled(db, name, enabled=False)
 
 
-async def update(db: AsyncSession, name: str) -> RemotePlugin:
+async def update(db: AsyncSession, name: str) -> RemotePluginView:
     """从远程仓库拉取最新版本（``git pull``）+ 重读 plugin.json + 写新版本号。
 
     注意：manifest.py 不会被执行，只解析 plugin.json。
     """
-    row = (
-        await db.execute(select(RemotePlugin).where(RemotePlugin.name == name))
-    ).scalar_one_or_none()
-    if row is None:
+    row = await db.get(InstalledPlugin, name)
+    if row is None or row.source not in _REMOTE_INSTALL_SOURCES:
         raise RemotePluginNotFound("PLUGIN_NOT_FOUND", f"插件不存在: {name}")
 
-    target = _existing_plugin_dir(name)
+    target = Path(row.installed_path or _existing_plugin_dir(name))
     if not target.exists():
         raise RemotePluginError(
             "DIR_MISSING",
@@ -1176,9 +1294,12 @@ async def update(db: AsyncSession, name: str) -> RemotePlugin:
     if (target / ".git").exists():
         await _run_git("pull", "--ff-only", cwd=target, timeout=60.0)
     else:
+        source_url = str(row.source_url or "")
+        if not source_url:
+            raise RemotePluginError("SOURCE_URL_MISSING", f"插件 {name} 缺少 source_url，无法更新")
         with tempfile.TemporaryDirectory(prefix="telepilot-plugin-update-") as tmp:
             repo_dir = Path(tmp) / "repo"
-            await _run_git("clone", "--depth", "1", row.source_url, str(repo_dir), timeout=180.0)
+            await _run_git("clone", "--depth", "1", source_url, str(repo_dir), timeout=180.0)
 
             candidates = [repo_dir]
             candidates.extend([p for p in repo_dir.iterdir() if p.is_dir() and not p.name.startswith(".")])
@@ -1196,7 +1317,7 @@ async def update(db: AsyncSession, name: str) -> RemotePlugin:
         if source_dir is None:
             raise RemotePluginError(
                 "PLUGIN_NOT_IN_REPO",
-                f"仓库 {row.source_url!r} 内未找到插件 {name!r}",
+                f"仓库 {source_url!r} 内未找到插件 {name!r}",
             )
 
         staging = target.with_name(f"{target.name}.installing")
@@ -1235,16 +1356,13 @@ async def update(db: AsyncSession, name: str) -> RemotePlugin:
     meta = _read_plugin_metadata(target, fallback_name=name)
     _validate_runtime_plugin_shape(target, meta)
     lint_warnings = lint_plugin_metadata_files(target)
-    if meta.display_name:
-        row.display_name = meta.display_name
-    row.description = meta.description
-    row.author = meta.author or row.author
-    row.version = meta.version or row.version
-    row.latest_version = row.version
-    row.update_available = False
-    row.last_update_check_error = None
-    row.last_update_check_at = datetime.now(UTC)
-    row.lint_warnings = lint_warnings
+    old_source = row.source
+    old_source_url = row.source_url
+    old_enabled = row.enabled
+    old_signature_ok = row.signature_ok
+    old_trust_tier = row.trust_tier
+    old_source_label = _source_label_for_installed(row)
+    old_default_enabled = remote_plugin_view_from_installed(row).default_enabled
     feat = (
         await db.execute(select(Feature).where(Feature.key == name))
     ).scalar_one_or_none()
@@ -1253,39 +1371,49 @@ async def update(db: AsyncSession, name: str) -> RemotePlugin:
         feat.version = meta.version or feat.version
         feat.is_builtin = False
         feat.manifest = _merge_feature_manifest_preserving_global_config(feat.manifest, meta)
-    await upsert_installed_plugin(
+    updated_version = meta.version or row.version
+    manifest_json = _with_remote_info(
+        _manifest_json_from_remote_meta(meta),
+        default_enabled=old_default_enabled,
+        latest_version=updated_version,
+        update_available=False,
+        last_update_check_at=datetime.now(UTC),
+        last_update_check_error=None,
+    )
+    row = await upsert_installed_plugin(
         db,
         key=name,
-        source=PLUGIN_SOURCE_GIT,
-        source_url=row.source_url,
+        source=old_source,
+        source_url=old_source_url,
         installed_path=str(target),
-        version=row.version,
-        manifest_json=_manifest_json_from_remote_meta(meta),
-        enabled=row.enabled,
-        signature_ok=None,
-        trust_tier=PLUGIN_TRUST_COMMUNITY,
-        source_label="Git",
+        version=updated_version,
+        manifest_json=manifest_json,
+        enabled=old_enabled,
+        signature_ok=old_signature_ok,
+        trust_tier=old_trust_tier,
+        source_label=old_source_label,
         last_install_error=None,
         lint_warnings=lint_warnings,
     )
     await db.flush()
 
-    return row
+    return remote_plugin_view_from_installed(row)
 
 
-async def list_installed(db: AsyncSession) -> list[RemotePlugin]:
+async def list_installed(db: AsyncSession) -> list[RemotePluginView]:
     """按 name 字典序列出所有远程插件。"""
     rows = (
-        await db.execute(select(RemotePlugin).order_by(RemotePlugin.name))
+        await db.execute(_installed_remote_query().order_by(InstalledPlugin.key))
     ).scalars().all()
-    return list(rows)
+    return [remote_plugin_view_from_installed(row) for row in rows]
 
 
-async def get_by_name(db: AsyncSession, name: str) -> RemotePlugin | None:
+async def get_by_name(db: AsyncSession, name: str) -> RemotePluginView | None:
     """按 name 查单个插件；不存在返回 None（不抛异常，调用方自决）。"""
-    return (
-        await db.execute(select(RemotePlugin).where(RemotePlugin.name == name))
-    ).scalar_one_or_none()
+    row = await db.get(InstalledPlugin, name)
+    if row is None or row.source not in _REMOTE_INSTALL_SOURCES:
+        return None
+    return remote_plugin_view_from_installed(row)
 
 
 __all__ = [
@@ -1298,6 +1426,7 @@ __all__ = [
     "RemotePluginError",
     "RemotePluginNotFound",
     "RemotePluginUpdateCheckSummary",
+    "RemotePluginView",
     "auto_update_check_loop",
     "check_remote_plugin_update",
     "check_updates",
@@ -1307,6 +1436,7 @@ __all__ = [
     "get_by_name",
     "install",
     "list_installed",
+    "remote_plugin_view_from_installed",
     "set_enabled",
     "set_installed_plugin_enabled",
     "trigger_reload",

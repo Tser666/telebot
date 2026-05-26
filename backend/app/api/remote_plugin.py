@@ -41,7 +41,6 @@ async def api_install_plugin(
             db, body.source_url, default_enabled=body.default_enabled,
         )
         await db.commit()
-        await db.refresh(row)
         await svc.trigger_reload(db, row.name)
         return row
     except DuplicatePluginName as e:
@@ -123,7 +122,6 @@ async def api_update(name: str, db: DBSession, _user: CurrentUser):
     try:
         row = await svc.update(db, name)
         await db.commit()
-        await db.refresh(row)
         await svc.trigger_reload(db, row.name)
         return row
     except RemotePluginNotFound as e:

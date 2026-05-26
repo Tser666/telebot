@@ -5,7 +5,7 @@
 2. installed 插件无法访问 client.session
 3. source_url scheme 白名单校验（只允许 https:// 和 git+ssh://）
 4. 插件禁用后旧命令不再触发
-5. RemotePlugin.enabled=false 时即使 AccountFeature.enabled=true 也不加载
+5. InstalledPlugin.enabled=false 时即使 AccountFeature.enabled=true 也不加载
 6. SandboxClient 反射防护（__class__, __dict__ 等）
 """
 
@@ -851,25 +851,23 @@ class TestRemotePluginEnableFlow:
 
         await svc.enable(db, "idiom_chain")
 
-        assert db.remote.enabled is True
         assert db.installed_rows["idiom_chain"].enabled is True
         assert db.added == []
 
     @pytest.mark.asyncio
-    async def test_disable_syncs_installed_plugin_row(self):
-        """远程插件禁用时同步统一安装表 enabled，避免未来读新表状态陈旧。"""
+    async def test_disable_updates_installed_plugin_row(self):
+        """远程插件禁用时只更新统一安装表 enabled。"""
         db = _FakeRemotePluginDB()
         db.remote.enabled = True
         db.installed_rows["idiom_chain"].enabled = True
 
         await svc.disable(db, "idiom_chain")
 
-        assert db.remote.enabled is False
         assert db.installed_rows["idiom_chain"].enabled is False
 
     @pytest.mark.asyncio
-    async def test_install_dual_writes_installed_plugin_with_lint_warnings(self, monkeypatch, tmp_path):
-        """Git 安装成功后同步写 installed_plugin，并保存静态 lint warning。"""
+    async def test_install_writes_installed_plugin_with_lint_warnings(self, monkeypatch, tmp_path):
+        """Git 安装成功后写 installed_plugin，并保存静态 lint warning。"""
         monkeypatch.setattr(svc.settings, "plugins_installed_dir", str(tmp_path / "installed"))
 
         async def _fake_clone(*args, **_kwargs):  # noqa: ANN001
@@ -917,8 +915,8 @@ class TestRemotePluginEnableFlow:
         assert any("httpx.get" in item and "timeout" in item for item in installed.lint_warnings)
 
     @pytest.mark.asyncio
-    async def test_update_dual_writes_installed_plugin(self, monkeypatch, tmp_path):
-        """Git 更新成功后也同步刷新 installed_plugin。"""
+    async def test_update_writes_installed_plugin(self, monkeypatch, tmp_path):
+        """Git 更新成功后刷新 installed_plugin。"""
         monkeypatch.setattr(svc.settings, "plugins_installed_dir", str(tmp_path / "installed"))
         plugin_dir = tmp_path / "installed" / "update_demo"
         (plugin_dir / ".git").mkdir(parents=True)
@@ -947,14 +945,15 @@ class TestRemotePluginEnableFlow:
 
         monkeypatch.setattr(svc, "_run_git", _fake_pull)
         db = _FakeRemoteInstallDB()
-        db.remote_rows["update_demo"] = RemotePlugin(
-            name="update_demo",
-            display_name="Update Demo",
-            description="",
-            author="",
+        db.installed_rows["update_demo"] = InstalledPlugin(
+            key="update_demo",
+            source="git",
             source_url="https://example.com/update_demo.git",
+            installed_path=str(plugin_dir),
             version="1.0.0",
             enabled=False,
+            trust_tier="community",
+            source_label="Git",
         )
 
         row = await svc.update(db, "update_demo")
@@ -994,7 +993,7 @@ class TestRemotePluginEnableFlow:
         deleted = await svc.uninstall(db, "remove_demo")
 
         assert deleted is True
-        assert "remove_demo" not in db.remote_rows
+        assert "remove_demo" in db.remote_rows
         assert "remove_demo" not in db.installed_rows
         assert "remove_demo" not in db.features
         assert db.account_features == []
@@ -1002,10 +1001,10 @@ class TestRemotePluginEnableFlow:
 
 
 class TestPluginRepoInstallFlow:
-    """仓库/本地导入路径也要同步统一安装表。"""
+    """仓库/本地导入路径也要写统一安装表。"""
 
     @pytest.mark.asyncio
-    async def test_install_plugin_from_repo_dual_writes_installed_plugin(self, monkeypatch, tmp_path):
+    async def test_install_plugin_from_repo_writes_installed_plugin(self, monkeypatch, tmp_path):
         monkeypatch.setattr(repo_svc.settings, "plugins_installed_dir", str(tmp_path / "installed"))
         repo_dir = tmp_path / "repo"
         _write_runtime_plugin(
@@ -1036,7 +1035,7 @@ class TestPluginRepoInstallFlow:
         assert any("httpx.get" in item and "timeout" in item for item in installed.lint_warnings)
 
     @pytest.mark.asyncio
-    async def test_install_local_plugin_dual_writes_installed_plugin(self, monkeypatch, tmp_path):
+    async def test_install_local_plugin_writes_installed_plugin(self, monkeypatch, tmp_path):
         monkeypatch.setattr(repo_svc.settings, "plugins_installed_dir", str(tmp_path / "installed"))
         local_root = tmp_path / "local_imports"
         _write_runtime_plugin(local_root / "local_demo", key="local_demo", version="3.0.0")

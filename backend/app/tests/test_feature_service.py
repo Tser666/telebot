@@ -275,8 +275,6 @@ async def test_feature_matrix_separates_enabled_switch_from_runtime_state(monkey
     db = AsyncMock()
     db.execute = AsyncMock(
         side_effect=[
-            Result([]),  # RemotePlugin
-            Result([]),  # PluginInstall
             Result([]),  # InstalledPlugin
             Result([account]),
             Result([account_feature]),
@@ -324,8 +322,6 @@ async def test_feature_matrix_passes_installed_plugin_lint_warnings(monkeypatch)
     db = AsyncMock()
     db.execute = AsyncMock(
         side_effect=[
-            Result([]),  # RemotePlugin
-            Result([]),  # PluginInstall
             Result([installed_plugin]),  # InstalledPlugin
             Result([]),  # Account
             Result([]),  # AccountFeature

@@ -35,7 +35,6 @@ from ..db.models.account_bot import (
 from ..db.models.command import AccountCommandLink
 from ..db.models.feature import AccountFeature, Feature
 from ..db.models.log import LEVEL_ERROR, LEVEL_WARN, RuntimeLog
-from ..db.models.remote_plugin import RemotePlugin
 from ..db.models.rule import Rule
 from ..db.models.system import SystemSetting
 from ..redis_client import get_redis
@@ -2497,9 +2496,7 @@ async def _show_plugins(incoming: Incoming, role: str, *, edit: bool = False) ->
     async with AsyncSessionLocal() as db:
         features = await feature_service.list_features(db)
         afs = await feature_service.get_account_features(db, incoming.account_id)
-        remotes = (
-            await db.execute(select(RemotePlugin).order_by(RemotePlugin.name.asc()))
-        ).scalars().all()
+        remotes = await remote_plugin_service.list_installed(db)
     state = {af.feature_key: af for af in afs}
     lines = [
         "🧱 <b>插件列表</b>",

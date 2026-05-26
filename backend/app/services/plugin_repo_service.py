@@ -2,7 +2,7 @@
 
 与 ``remote_plugin_service`` 的分工：
 - 本服务管理“仓库列表”（plugin_repo 表）：CRUD + 列出仓库内插件 + 触发安装
-- ``remote_plugin_service`` 才是真正的“已安装插件”落地逻辑（写 remote_plugin 表 +
+- ``remote_plugin_service`` 才是真正的“已安装插件”落地逻辑（写 installed_plugin 表 +
   落盘 plugins/installed/<name>/ + 注册 Feature + 热加载）
 
 安装路径分两种：
@@ -10,7 +10,7 @@
    ``remote_plugin_service.install(repo_url)`` 走 git clone 流程
 2) 仓库下多个子目录、每个子目录一个插件 → 不能简单 git clone 整个仓库到
    ``plugins/installed/<plugin>/``（会把无关插件也带进去）；本服务从本地缓存
-   的对应子目录复制到 ``plugins/installed/<plugin>/``，写 remote_plugin 行 +
+   的对应子目录复制到 ``plugins/installed/<plugin>/``，写 installed_plugin 行 +
    注册 Feature + 触发热加载，整套流程与 ``remote_plugin_service.install`` 一致
 
 安全设计：
@@ -37,9 +37,9 @@ from ..db.models.plugin import (
     PLUGIN_SOURCE_REPO,
     PLUGIN_TRUST_COMMUNITY,
     PLUGIN_TRUST_LOCAL,
+    InstalledPlugin,
 )
 from ..db.models.plugin_repo import PluginRepo
-from ..db.models.remote_plugin import RemotePlugin
 from ..schemas.plugin_repo import PluginRepoPlugin
 from ..settings import settings
 from . import remote_plugin_service as rps
@@ -47,6 +47,7 @@ from .remote_plugin_service import (
     DuplicatePluginName,
     InvalidPluginMetadata,
     RemotePluginError,
+    RemotePluginView,
     _derive_name_from_url,
     _feature_manifest_from_meta,
     _manifest_json_from_remote_meta,
@@ -55,7 +56,9 @@ from .remote_plugin_service import (
     _run_git,
     _validate_runtime_plugin_shape,
     _validate_source_url,
+    _with_remote_info,
     lint_plugin_metadata_files,
+    remote_plugin_view_from_installed,
     upsert_installed_plugin,
 )
 
@@ -200,7 +203,7 @@ async def list_plugins_in_repo(
       2. ``_ensure_repo_cached`` 拉到最新副本
       3. 扫描根 / 一级子目录里的 plugin.json
       4. 用 ``_read_plugin_metadata`` 静态解析元数据
-      5. 与 ``remote_plugin.name`` 做差集，标记 ``installed`` 字段
+      5. 与 ``installed_plugin.key`` 做差集，标记 ``installed`` 字段
     """
     row = await _get_repo(db, repo_id)
 
@@ -208,7 +211,7 @@ async def list_plugins_in_repo(
     raw = _scan_plugins(repo_dir)
 
     installed_rows = (
-        await db.execute(select(RemotePlugin.name, RemotePlugin.version))
+        await db.execute(select(InstalledPlugin.key, InstalledPlugin.version))
     ).all()
     installed_versions = {str(name): str(version or "") for name, version in installed_rows}
 
@@ -337,7 +340,7 @@ async def install_plugin_from_repo(
     plugin_name: str,
     *,
     default_enabled: bool = False,
-) -> RemotePlugin:
+) -> RemotePluginView:
     """从仓库中安装指定名字的插件。
 
     步骤：
@@ -345,7 +348,7 @@ async def install_plugin_from_repo(
       2. 在缓存里定位含 plugin.json 的插件目录
       3. 校验目标安装目录 ``plugins/installed/<plugin_name>/`` 不存在且 DB 无同名行
       4. ``copytree`` 把插件目录拷过去（不含 .git）
-      5. 写 ``remote_plugin`` 行（source_url 用仓库 URL，便于追溯）
+      5. 写 ``installed_plugin`` 行（source_url 用仓库 URL，便于追溯）
       6. 注册到 ``feature`` 表 + 按 ``default_enabled`` 批量启用账号
       7. 触发 worker 热加载
     """
@@ -386,9 +389,7 @@ async def install_plugin_from_repo(
     staging = install_path.parent / f"{install_path.name}.installing"
 
     # 重名检查：DB 行 + 目录都不能存在
-    existing = (
-        await db.execute(select(RemotePlugin).where(RemotePlugin.name == final_name))
-    ).scalar_one_or_none()
+    existing = await db.get(InstalledPlugin, final_name)
     if existing is not None:
         raise DuplicatePluginName(
             "PLUGIN_EXISTS", f"插件 {final_name!r} 已安装"
@@ -422,20 +423,13 @@ async def install_plugin_from_repo(
         ) from exc
 
     try:
-        rp_row = RemotePlugin(
-            name=final_name,
-            display_name=meta.display_name or final_name,
-            description=meta.description,
-            author=meta.author,
-            source_url=row.url,
-            version=meta.version,
+        final_enabled = bool(default_enabled)
+        manifest_json = _with_remote_info(
+            _manifest_json_from_remote_meta(meta),
+            default_enabled=default_enabled,
             latest_version=meta.version,
             update_available=False,
-            lint_warnings=lint_warnings,
-            enabled=bool(default_enabled),
-            default_enabled=default_enabled,
         )
-        db.add(rp_row)
 
         feat = (
             await db.execute(select(Feature).where(Feature.key == final_name))
@@ -457,15 +451,15 @@ async def install_plugin_from_repo(
             feat.manifest = _feature_manifest_from_meta(meta)
 
         await db.flush()
-        await upsert_installed_plugin(
+        installed_row = await upsert_installed_plugin(
             db,
             key=final_name,
             source=PLUGIN_SOURCE_REPO,
             source_url=row.url,
             installed_path=str(install_path),
             version=meta.version,
-            manifest_json=_manifest_json_from_remote_meta(meta),
-            enabled=rp_row.enabled,
+            manifest_json=manifest_json,
+            enabled=final_enabled,
             signature_ok=None,
             trust_tier=PLUGIN_TRUST_COMMUNITY,
             source_label="Plugin Repo",
@@ -503,7 +497,7 @@ async def install_plugin_from_repo(
             shutil.rmtree(install_path, ignore_errors=True)
         raise
 
-    return rp_row
+    return remote_plugin_view_from_installed(installed_row)
 
 
 def list_local_import_candidates() -> list[PluginRepoPlugin]:
@@ -536,7 +530,7 @@ async def install_local_plugin(
     plugin_name: str,
     *,
     default_enabled: bool = False,
-) -> RemotePlugin:
+) -> RemotePluginView:
     """从 ``plugins/local_imports`` 导入指定本地插件。"""
     root = _local_import_root()
     target_dir: Path | None = None
@@ -557,9 +551,7 @@ async def install_local_plugin(
     install_path = _plugin_dir(final_name)
     staging = install_path.parent / f"{install_path.name}.installing"
 
-    existing = (
-        await db.execute(select(RemotePlugin).where(RemotePlugin.name == final_name))
-    ).scalar_one_or_none()
+    existing = await db.get(InstalledPlugin, final_name)
     if existing is not None:
         raise DuplicatePluginName("PLUGIN_EXISTS", f"插件 {final_name!r} 已安装")
     if install_path.exists():
@@ -586,20 +578,13 @@ async def install_local_plugin(
         raise PluginRepoError("COPY_FAILED", f"复制本地插件目录失败: {exc}") from exc
 
     try:
-        rp_row = RemotePlugin(
-            name=final_name,
-            display_name=meta.display_name or final_name,
-            description=meta.description,
-            author=meta.author,
-            source_url=f"local://local_imports/{final_name}",
-            version=meta.version,
+        final_enabled = bool(default_enabled)
+        manifest_json = _with_remote_info(
+            _manifest_json_from_remote_meta(meta),
+            default_enabled=default_enabled,
             latest_version=meta.version,
             update_available=False,
-            lint_warnings=lint_warnings,
-            enabled=bool(default_enabled),
-            default_enabled=default_enabled,
         )
-        db.add(rp_row)
 
         feat = (
             await db.execute(select(Feature).where(Feature.key == final_name))
@@ -621,15 +606,15 @@ async def install_local_plugin(
             feat.manifest = _feature_manifest_from_meta(meta)
 
         await db.flush()
-        await upsert_installed_plugin(
+        installed_row = await upsert_installed_plugin(
             db,
             key=final_name,
             source=PLUGIN_SOURCE_LOCAL,
             source_url=f"local://local_imports/{final_name}",
             installed_path=str(install_path),
             version=meta.version,
-            manifest_json=_manifest_json_from_remote_meta(meta),
-            enabled=rp_row.enabled,
+            manifest_json=manifest_json,
+            enabled=final_enabled,
             signature_ok=None,
             trust_tier=PLUGIN_TRUST_LOCAL,
             source_label="Local",
@@ -666,7 +651,7 @@ async def install_local_plugin(
             shutil.rmtree(install_path, ignore_errors=True)
         raise
 
-    return rp_row
+    return remote_plugin_view_from_installed(installed_row)
 
 
 __all__ = [
