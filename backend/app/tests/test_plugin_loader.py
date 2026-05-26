@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
@@ -891,6 +892,60 @@ async def test_ai_facade_injected_only_with_ai_text_permission(monkeypatch) -> N
         loader_mod._STATES.pop(1, None)
         _REGISTRY.pop("_test_ai_allowed", None)
         _REGISTRY.pop("_test_ai_denied", None)
+
+
+@pytest.mark.asyncio
+async def test_activate_logs_reserved_unsupported_facade_permission() -> None:
+    """声明预留 facade 权限时要写 warning，避免插件作者误以为权限已生效。"""
+    from app.worker.plugins.base import _REGISTRY, register
+
+    @register
+    class _TempReservedFacadePlugin(Plugin):
+        key = "_test_reserved_facade_permission"
+        display_name = "预留 facade 权限测试"
+
+        async def on_startup(self, ctx: PluginContext) -> None:  # noqa: D401
+            return None
+
+    plugin_key = _TempReservedFacadePlugin.key
+    _TempReservedFacadePlugin._source = "installed"
+    _TempReservedFacadePlugin._manifest = Manifest(
+        key=plugin_key,
+        display_name="预留 facade 权限测试",
+        permissions=["ai_vision"],
+    )
+
+    af = _FakeAF(account_id=1, feature_key=plugin_key, enabled=True, config={})
+    db = _FakeDB(
+        accounts={1: _FakeAcc(id=1)},
+        humanize={1: None},
+        afs=[af],
+        rules=[],
+        plugin_installs={
+            plugin_key: _FakePluginInstall(
+                key=plugin_key,
+                enabled=True,
+                signature_ok=True,
+            )
+        },
+    )
+    state = loader_mod._AccountState(account_id=1)
+    state.client = MagicMock()
+    redis = _FakeRedis()
+
+    try:
+        await loader_mod._activate(db, state, af, redis)
+    finally:
+        _REGISTRY.pop(plugin_key, None)
+
+    decoded_logs = [json.loads(payload) for _, payload in redis.list_pushes]
+    assert any(
+        log["source"] == "system"
+        and log["level"] == "warn"
+        and "ai_vision" in log["message"]
+        and log["detail"]["plugin_key"] == plugin_key
+        for log in decoded_logs
+    )
 
 
 # ─────────────────────────────────────────────────────

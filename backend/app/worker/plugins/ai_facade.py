@@ -134,7 +134,6 @@ class PluginAI:
         user: str,
         *,
         provider: int | str | None = None,
-        provider_hint: int | str | None = None,
         provider_tag: str | None = None,
         tag: str | None = None,
         tags: list[str] | tuple[str, ...] | None = None,
@@ -147,11 +146,19 @@ class PluginAI:
     ) -> AIResult:
         """Call a text LLM through TelePilot's shared LLM runtime.
 
-        ``provider`` accepts an id or provider name. ``provider_hint`` is kept
-        as a compatibility alias. ``provider_tag`` / ``tag`` / first ``tags``
-        item select the cheapest usable provider with that tag.
+        ``provider`` accepts an id or provider name. ``provider_tag`` /
+        ``tag`` / first ``tags`` item select the cheapest usable provider with
+        that tag.
         """
 
+        if tag is not None or tags:
+            import warnings
+
+            warnings.warn(
+                "ctx.ai.complete tag/tags 是兼容别名，新模块请使用 provider_tag",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         system_prompt = str(system or "")
         user_prompt = str(user or "")
         if not system_prompt.strip() and not user_prompt.strip():
@@ -163,7 +170,7 @@ class PluginAI:
             selected_tag = str(tags[0]) if tags[0] else None
         primary, matched_tag = _select_provider(
             providers,
-            provider=provider if provider is not None else provider_hint,
+            provider=provider,
             provider_tag=selected_tag,
         )
         clamped_tokens = self._clamp_max_tokens(max_tokens)
@@ -197,6 +204,7 @@ class PluginAI:
         except LLMCallFailed as exc:
             await plugin_ai_quota.release(quota_ticket, 0)
             raise _facade_error_from_llm_call(exc) from exc
+        # acquire() 抛 PluginAIQuotaExceeded 时 ticket 仍为 None，Redis 计数也未 ZADD，无需 release
         except plugin_ai_quota.PluginAIQuotaExceeded as exc:
             raise AIQuotaError(str(exc)) from exc
         except (LLMError, ValueError) as exc:

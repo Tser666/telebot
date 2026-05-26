@@ -148,6 +148,17 @@ def _scan_builtin_dirs() -> list[Path]:
 # 每次 import loader 时刷新一次；新增 builtin 子目录无需改这里。
 _BUILTIN_MODULES: tuple[str, ...] = tuple(p.name for p in _scan_builtin_dirs())
 
+_SUPPORTED_FACADE_PERMISSIONS: set[str] = {
+    "external_http",
+    "external_http_bypass_proxy",
+    "ai_text",
+}
+_RESERVED_UNSUPPORTED_FACADE_PERMISSIONS: set[str] = {
+    "ai_vision",
+    "ai_image",
+    "ai_stt",
+}
+
 
 def _builtin_plugin_path(plugin_key: str) -> Path | None:
     if not _is_safe_plugin_key(plugin_key):
@@ -1077,6 +1088,21 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
                 account_id=state.account_id,
                 feature_key=af.feature_key,
             )
+        )
+    declared_facade_permissions = plugin_permissions & (
+        _SUPPORTED_FACADE_PERMISSIONS | _RESERVED_UNSUPPORTED_FACADE_PERMISSIONS
+    )
+    unsupported_facade_permissions = (
+        declared_facade_permissions & _RESERVED_UNSUPPORTED_FACADE_PERMISSIONS
+    )
+    for perm in sorted(unsupported_facade_permissions):
+        await _log(
+            redis,
+            state.account_id,
+            "warn",
+            f"manifest 声明权限 {perm} 但当前平台未提供对应 facade，将被忽略",
+            source="system",
+            plugin_key=af.feature_key,
         )
 
     ctx = PluginContext(

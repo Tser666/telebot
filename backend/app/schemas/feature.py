@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
     from ..db.models.feature import Feature
+    from ..db.models.plugin import InstalledPlugin
 
 
 class FeatureInfo(BaseModel):
@@ -27,6 +28,7 @@ class FeatureInfo(BaseModel):
     latest_version: str | None = None
     last_update_check_at: Any | None = None
     last_update_check_error: str | None = None
+    lint_warnings: list[str] = []
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -36,6 +38,7 @@ class FeatureInfo(BaseModel):
         f: Feature,
         remote_plugin: Any | None = None,
         plugin_install: Any | None = None,
+        installed_plugin: InstalledPlugin | None = None,
     ) -> FeatureInfo:
         manifest = getattr(f, "manifest", None) or {}
         source_url = str(getattr(remote_plugin, "source_url", "") or "")
@@ -59,6 +62,12 @@ class FeatureInfo(BaseModel):
         if raw_entries is None:
             raw_entries = schema_meta.get("x-interaction-entries")
         entries = raw_entries if isinstance(raw_entries, list) else []
+        raw_lint_warnings = (
+            getattr(installed_plugin, "lint_warnings", None)
+            if installed_plugin is not None
+            else None
+        )
+        lint_warnings = raw_lint_warnings if isinstance(raw_lint_warnings, list) else []
         return cls(
             key=f.key,
             display_name=f.display_name,
@@ -78,6 +87,7 @@ class FeatureInfo(BaseModel):
             latest_version=getattr(remote_plugin, "latest_version", None),
             last_update_check_at=getattr(remote_plugin, "last_update_check_at", None),
             last_update_check_error=getattr(remote_plugin, "last_update_check_error", None),
+            lint_warnings=[item for item in lint_warnings if isinstance(item, str)],
         )
 
 

@@ -216,3 +216,17 @@ async def test_policy_errors_include_plugin_key() -> None:
 
     with pytest.raises(PluginHTTPPolicyError, match="demo_http"):
         await http.get("https://evil.example.com/v1")
+
+
+@pytest.mark.asyncio
+async def test_policy_error_for_blocked_literal_includes_plugin_key() -> None:
+    http = PluginHTTP(
+        allowed_hosts=["example.com"],
+        plugin_key="demo_plugin",
+        resolver=_public_resolver,
+    )
+
+    with pytest.raises(PluginHTTPPolicyError) as exc:
+        await http.get("http://127.0.0.1/")
+
+    assert "demo_plugin" in str(exc.value)

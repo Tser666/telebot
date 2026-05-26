@@ -428,6 +428,7 @@ export interface FeatureInfo {
   latest_version?: string | null;
   last_update_check_at?: string | null;
   last_update_check_error?: string | null;
+  lint_warnings?: string[];
 }
 export interface AccountFeatureItem {
   feature_key: string;

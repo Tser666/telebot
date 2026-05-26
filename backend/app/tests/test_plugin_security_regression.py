@@ -491,6 +491,32 @@ class TestSandboxClientSecurity:
         with pytest.raises(PermissionError):
             _ = replied.__dict__
 
+    @pytest.mark.asyncio
+    async def test_sandbox_event_message_layer_still_enforces_permissions(self):
+        """嵌套 message 包装层也必须走权限校验。"""
+        from app.worker.plugins.sandbox import SandboxClient, SandboxEvent
+
+        class RawMessage:
+            raw_text = "inner"
+
+            async def reply(self, *_args, **_kwargs):
+                raise AssertionError("should not be called when permission missing")
+
+            async def edit(self, *_args, **_kwargs):
+                raise AssertionError("should not be called when permission missing")
+
+        raw_message = RawMessage()
+        raw_event = SimpleNamespace(message=raw_message, raw_text="outer")
+        sandbox_client = SandboxClient(SimpleNamespace(), [], plugin_key="demo")
+        event = SandboxEvent(raw_event, sandbox_client, plugin_key="demo")
+
+        nested = event.message
+        assert nested.raw_text == "inner"
+        with pytest.raises(PermissionError):
+            await nested.reply("x")
+        with pytest.raises(PermissionError):
+            await nested.edit("x")
+
     def test_sandbox_event_exposes_sandbox_client_not_raw_client(self):
         """event.client 必须返回 SandboxClient，不能暴露原始 Telethon client。"""
         from app.worker.plugins.sandbox import SandboxClient, SandboxEvent

@@ -175,14 +175,15 @@ async def test_complete_accepts_plugin_compat_aliases(monkeypatch) -> None:
         timeout_limit_seconds=30,
     )
 
-    result = await facade.complete(
-        "sys",
-        "messages",
-        tags=["long_context"],
-        override_model="gpt-override",
-        timeout_seconds=12,
-        source="plugin:sum",
-    )
+    with pytest.warns(DeprecationWarning, match="ctx.ai.complete tag/tags"):
+        result = await facade.complete(
+            "sys",
+            "messages",
+            tags=["long_context"],
+            override_model="gpt-override",
+            timeout_seconds=12,
+            source="plugin:sum",
+        )
 
     assert result.provider_id == 2
     assert captured["matched_tag"] == "long_context"

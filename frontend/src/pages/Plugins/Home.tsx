@@ -550,6 +550,58 @@ function FeatureCapabilityBadge({
   );
 }
 
+function ModuleLintWarnings({ warnings }: { warnings?: string[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+  const cleanWarnings = (warnings ?? []).filter((warning) => warning.trim().length > 0);
+
+  if (cleanWarnings.length === 0) return null;
+
+  const visibleWarnings = showAll ? cleanWarnings : cleanWarnings.slice(0, 3);
+
+  return (
+    <div className="mt-2 rounded-md border border-amber-300 bg-amber-50/80 px-2 py-1.5 text-xs text-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-2 text-left"
+        onClick={() => {
+          setExpanded((value) => !value);
+          if (expanded) setShowAll(false);
+        }}
+        aria-expanded={expanded}
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <MetaBadge tone="warn" className="shrink-0">
+            模块 lint
+          </MetaBadge>
+          <span className="truncate">⚠ {cleanWarnings.length} 条 lint 提醒</span>
+        </span>
+        <span className="shrink-0 text-amber-800 dark:text-amber-200">
+          {expanded ? "收起" : "展开"}
+        </span>
+      </button>
+      {expanded ? (
+        <div className="mt-2 space-y-1">
+          {visibleWarnings.map((warning, index) => (
+            <div key={`${warning}-${index}`} className="break-words leading-5">
+              {warning}
+            </div>
+          ))}
+          {cleanWarnings.length > 3 && !showAll ? (
+            <button
+              type="button"
+              className="text-amber-950 underline underline-offset-2 hover:text-amber-800 dark:text-amber-100"
+              onClick={() => setShowAll(true)}
+            >
+              查看全部 {cleanWarnings.length} 条
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function GuideContextCard({
   expanded,
   onToggle,
@@ -698,96 +750,99 @@ function FeatureZone({
               return (
                 <div
                   key={f.key}
-                  className={`flex flex-col gap-3 rounded-md border p-2 sm:flex-row sm:items-center sm:justify-between ${
+                  className={`rounded-md border p-2 ${
                     status === "failed" ? "border-destructive/40 bg-destructive/5" : ""
                   }`}
                 >
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium" title={f.display_name}>
-                      {f.display_name}
-                    </div>
-                    <div className="font-mono text-xs text-muted-foreground">{f.key}</div>
-                    {pluginUsage ? (
-                      <div className="mt-1 flex flex-wrap gap-1 text-[11px] text-muted-foreground">
-                        <span className="rounded-full border bg-muted/40 px-2 py-0.5">
-                          AI {formatCompactNumber(pluginUsage.total_tokens)} tokens
-                        </span>
-                        <span className="rounded-full border bg-muted/40 px-2 py-0.5">
-                          {pluginUsage.request_count} 次调用
-                        </span>
-                        {pluginUsage.failed_count > 0 ? (
-                          <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-amber-800">
-                            失败 {pluginUsage.failed_count}
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium" title={f.display_name}>
+                        {f.display_name}
+                      </div>
+                      <div className="font-mono text-xs text-muted-foreground">{f.key}</div>
+                      {pluginUsage ? (
+                        <div className="mt-1 flex flex-wrap gap-1 text-[11px] text-muted-foreground">
+                          <span className="rounded-full border bg-muted/40 px-2 py-0.5">
+                            AI {formatCompactNumber(pluginUsage.total_tokens)} tokens
                           </span>
-                        ) : null}
-                      </div>
-                    ) : null}
-                    {f.last_update_check_error ? (
-                      <div className="mt-1 text-xs text-destructive">
-                        更新检查失败：{f.last_update_check_error}
-                      </div>
-                    ) : null}
-                    {status === "failed" ? (
-                      <div className="mt-1 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs leading-5 text-destructive">
-                        加载异常{lastError ? `：${lastError}` : "：后端未返回错误详情"}
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="grid max-w-full shrink-0 grid-cols-[154px_142px_50px_auto] items-center gap-2 overflow-x-auto">
-                    <div className="grid w-[154px] grid-cols-[46px_48px_44px] items-center gap-2">
-                      <FeatureCapabilityBadge
-                        show={Boolean(f.update_available)}
-                        tone="success"
-                        title={f.update_available ? moduleUpdateMessage(f) : undefined}
-                        onClick={() => toast.info(moduleUpdateMessage(f))}
-                      >
-                        有更新
-                      </FeatureCapabilityBadge>
-                      <FeatureCapabilityBadge show={Boolean(f.interaction_entries?.length)}>
-                        可交互
-                      </FeatureCapabilityBadge>
-                      <FeatureCapabilityBadge show={Boolean(f.experimental)}>
-                        实验性
-                      </FeatureCapabilityBadge>
+                          <span className="rounded-full border bg-muted/40 px-2 py-0.5">
+                            {pluginUsage.request_count} 次调用
+                          </span>
+                          {pluginUsage.failed_count > 0 ? (
+                            <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-amber-800">
+                              失败 {pluginUsage.failed_count}
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {f.last_update_check_error ? (
+                        <div className="mt-1 text-xs text-destructive">
+                          更新检查失败：{f.last_update_check_error}
+                        </div>
+                      ) : null}
+                      {status === "failed" ? (
+                        <div className="mt-1 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs leading-5 text-destructive">
+                          加载异常{lastError ? `：${lastError}` : "：后端未返回错误详情"}
+                        </div>
+                      ) : null}
                     </div>
-                    <div className="grid w-[142px] grid-cols-[62px_72px] items-center gap-2">
+                    <div className="grid max-w-full shrink-0 grid-cols-[154px_142px_50px_auto] items-center gap-2 overflow-x-auto">
+                      <div className="grid w-[154px] grid-cols-[46px_48px_44px] items-center gap-2">
+                        <FeatureCapabilityBadge
+                          show={Boolean(f.update_available)}
+                          tone="success"
+                          title={f.update_available ? moduleUpdateMessage(f) : undefined}
+                          onClick={() => toast.info(moduleUpdateMessage(f))}
+                        >
+                          有更新
+                        </FeatureCapabilityBadge>
+                        <FeatureCapabilityBadge show={Boolean(f.interaction_entries?.length)}>
+                          可交互
+                        </FeatureCapabilityBadge>
+                        <FeatureCapabilityBadge show={Boolean(f.experimental)}>
+                          实验性
+                        </FeatureCapabilityBadge>
+                      </div>
+                      <div className="grid w-[142px] grid-cols-[62px_72px] items-center gap-2">
+                        <MetaBadge
+                          tone={trustBadge.tone}
+                          className="h-7 justify-center px-0 text-[10px]"
+                          title={`${trustBadge.title} 来源：${moduleSourceLabel(f)}`}
+                        >
+                          {trustBadge.label}
+                        </MetaBadge>
+                        <MetaBadge
+                          mono
+                          tone="outline"
+                          className="h-7 justify-center truncate px-0 text-[10px]"
+                          title={moduleVersionLabel(f.version)}
+                        >
+                          {moduleVersionLabel(f.version)}
+                        </MetaBadge>
+                      </div>
                       <MetaBadge
-                        tone={trustBadge.tone}
-                        className="h-7 justify-center px-0 text-[10px]"
-                        title={`${trustBadge.title} 来源：${moduleSourceLabel(f)}`}
+                        tone={!enabled ? "neutral" : status === "failed" ? "danger" : "success"}
+                        className="h-7 w-[50px] justify-center px-0 text-[10px]"
+                        title={`开关：${enabled ? "已启用" : "未启用"}；运行状态：${runtimeLabel}${lastError ? `；最近错误：${lastError}` : ""}`}
                       >
-                        {trustBadge.label}
+                        {enabled ? "已启用" : "未启用"}
                       </MetaBadge>
-                      <MetaBadge
-                        mono
-                        tone="outline"
-                        className="h-7 justify-center truncate px-0 text-[10px]"
-                        title={moduleVersionLabel(f.version)}
-                      >
-                        {moduleVersionLabel(f.version)}
-                      </MetaBadge>
+                      {canConfigure ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            if (path) {
+                              nav(path);
+                            }
+                          }}
+                        >
+                          配置
+                        </Button>
+                      ) : null}
                     </div>
-                    <MetaBadge
-                      tone={!enabled ? "neutral" : status === "failed" ? "danger" : "success"}
-                      className="h-7 w-[50px] justify-center px-0 text-[10px]"
-                      title={`开关：${enabled ? "已启用" : "未启用"}；运行状态：${runtimeLabel}${lastError ? `；最近错误：${lastError}` : ""}`}
-                    >
-                      {enabled ? "已启用" : "未启用"}
-                    </MetaBadge>
-                    {canConfigure ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          if (path) {
-                            nav(path);
-                          }
-                        }}
-                      >
-                        配置
-                      </Button>
-                    ) : null}
                   </div>
+                  <ModuleLintWarnings warnings={f.lint_warnings} />
                 </div>
               );
             })}

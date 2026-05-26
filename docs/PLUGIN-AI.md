@@ -24,8 +24,7 @@ await event.edit(result.text)
 
 - `provider_tag`：推荐写法。按用途标签选择 provider，平台会在可用 provider 中挑选成本优先的匹配项。
 - `provider`：需要固定 provider 时可传 provider id 或 provider name。
-- `provider_hint`：兼容旧写法的别名；新模块优先使用 `provider` 或 `provider_tag`。
-- `tag` / `tags`：兼容别名；新模块优先使用 `provider_tag`。
+- `tag` / `tags`：兼容别名，已 deprecated；新模块请使用 `provider_tag`。
 
 ## Quota 与脱敏
 
@@ -38,3 +37,27 @@ await event.edit(result.text)
 ## 示例
 
 完整最小示例见 `examples/plugins/with_ai/`。CI 只导入示例并校验 manifest / plugin 元数据，不会执行真实 AI 请求。
+
+## 配额限制
+
+平台从 `system_setting` 的 `plugin_ai_quota` 读取插件 AI 配额配置。示例：
+
+```json
+{
+  "per_minute_tokens": 20000,
+  "daily_tokens": 200000,
+  "plugins": {
+    "sum": {
+      "per_minute_tokens": 5000,
+      "daily_tokens": 50000
+    }
+  }
+}
+```
+
+- `per_minute_tokens` 是每分钟 token 软上限，`daily_tokens` 是自然日 token 软上限。
+- `plugins.{key}` 可覆盖单个插件的全局配置，例如上面的 `sum`。
+- 任一限制设为 `0` 表示不限制。
+- 超限时，插件会收到 `AIQuotaError`；平台同时写入一条 `LLMUsage(success=False, error_type="plugin_quota_exceeded")`，可在 Usage 页排查。
+- Redis 不可用时会降级为 DB 检查，但并发预扣保护会暂时关闭；生产环境建议保留 Redis 可用性监控。
+- token 估算是软上限：当前按 UTF-8 字节数 `// 4` 粗估，中文场景通常会偏低 1.5-2x，并发尖峰也可能瞬时越限。

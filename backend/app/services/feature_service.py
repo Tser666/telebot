@@ -35,7 +35,7 @@ from ..db.models.feature import (
     AccountFeature,
     Feature,
 )
-from ..db.models.plugin import PluginInstall
+from ..db.models.plugin import InstalledPlugin, PluginInstall
 from ..db.models.remote_plugin import RemotePlugin
 from ..redis_client import get_redis
 from ..schemas.feature import (
@@ -355,6 +355,8 @@ async def feature_matrix(db: AsyncSession) -> dict[str, Any]:
     remote_by_name = {row.name: row for row in remote_rows}
     plugin_install_rows = (await db.execute(select(PluginInstall))).scalars().all()
     plugin_install_by_key = {row.key: row for row in plugin_install_rows}
+    installed_plugin_rows = (await db.execute(select(InstalledPlugin))).scalars().all()
+    installed_plugin_by_key = {row.key: row for row in installed_plugin_rows}
 
     # 2) 拿全部账号 + 全部 account_feature
     accounts = (
@@ -397,6 +399,7 @@ async def feature_matrix(db: AsyncSession) -> dict[str, Any]:
                 f,
                 remote_by_name.get(f.key),
                 plugin_install_by_key.get(f.key),
+                installed_plugin_by_key.get(f.key),
             ).model_dump()
             for f in features
         ],

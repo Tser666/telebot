@@ -88,19 +88,19 @@ def _charset_from_headers(headers: Mapping[str, str]) -> str:
     return "utf-8"
 
 
-def normalize_hostname(host: str) -> str:
+def normalize_hostname(host: str, *, plugin_key: str = "?") -> str:
     """Normalize a URL hostname for policy checks."""
 
     clean = str(host or "").strip().rstrip(".").lower()
     if not clean:
-        raise PluginHTTPPolicyError("HTTP 请求缺少 host")
+        raise PluginHTTPPolicyError(_policy_message(plugin_key, "HTTP 请求缺少 host"))
     try:
         return clean.encode("idna").decode("ascii")
     except UnicodeError as exc:
-        raise PluginHTTPPolicyError(f"HTTP host 非法: {host}") from exc
+        raise PluginHTTPPolicyError(_policy_message(plugin_key, f"HTTP host 非法: {host}")) from exc
 
 
-def host_matches_allowed(host: str, allowed_hosts: Sequence[str]) -> bool:
+def host_matches_allowed(host: str, allowed_hosts: Sequence[str], *, plugin_key: str = "?") -> bool:
     """Return whether ``host`` matches exact, ``*.domain`` or ``**.domain`` rules.
 
     Semantics:
@@ -109,9 +109,9 @@ def host_matches_allowed(host: str, allowed_hosts: Sequence[str]) -> bool:
     - ``**.example.com`` matches ``example.com`` and any nested subdomain.
     """
 
-    candidate = normalize_hostname(host)
+    candidate = normalize_hostname(host, plugin_key=plugin_key)
     for raw_pattern in allowed_hosts:
-        pattern = normalize_hostname(str(raw_pattern))
+        pattern = normalize_hostname(str(raw_pattern), plugin_key=plugin_key)
         if pattern.startswith("**."):
             suffix = pattern[3:]
             if candidate == suffix or candidate.endswith(f".{suffix}"):
@@ -150,13 +150,13 @@ def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     )
 
 
-def _assert_public_ip(value: str) -> None:
+def _assert_public_ip(value: str, *, plugin_key: str = "?") -> None:
     try:
         ip = ipaddress.ip_address(value)
     except ValueError as exc:
-        raise PluginHTTPPolicyError(f"DNS 返回了非法 IP: {value}") from exc
+        raise PluginHTTPPolicyError(_policy_message(plugin_key, f"DNS 返回了非法 IP: {value}")) from exc
     if _is_blocked_ip(ip):
-        raise PluginHTTPPolicyError(f"HTTP 目标解析到受保护地址: {value}")
+        raise PluginHTTPPolicyError(_policy_message(plugin_key, f"HTTP 目标解析到受保护地址: {value}"))
 
 
 async def _default_resolver(host: str, port: int) -> Sequence[str]:
@@ -178,6 +178,7 @@ def _network_mode_from_hooks(
     *,
     config: Mapping[str, Any] | None,
     manifest_http: Mapping[str, Any] | None,
+    plugin_key: str = "?",
 ) -> NetworkMode:
     """Resolve the manifest/config hook for direct HTTP.
 
@@ -199,9 +200,9 @@ def _network_mode_from_hooks(
         or "account_proxy"
     )
     if requested not in ("account_proxy", "direct"):
-        raise PluginHTTPPolicyError(f"不支持的 HTTP 出口模式: {requested}")
+        raise PluginHTTPPolicyError(_policy_message(plugin_key, f"不支持的 HTTP 出口模式: {requested}"))
     if requested == "direct" and not bool(manifest_http.get("allow_direct", False)):
-        raise PluginHTTPPolicyError("插件 manifest 未声明 allow_direct，不能绕过账号代理")
+        raise PluginHTTPPolicyError(_policy_message(plugin_key, "插件 manifest 未声明 allow_direct，不能绕过账号代理"))
     return requested
 
 
@@ -229,7 +230,7 @@ class PluginHTTP:
         if timeout_seconds <= 0:
             raise PluginHTTPPolicyError(_policy_message(plugin_key, "timeout_seconds 必须大于 0"))
 
-        self.plugin_key = str(plugin_key or "?")
+        self._plugin_key = str(plugin_key or "?")
         self.allowed_hosts = tuple(allowed_hosts)
         self.account_proxy_url = account_proxy_url
         self.network_mode = network_mode
@@ -257,6 +258,7 @@ class PluginHTTP:
             network_mode = _network_mode_from_hooks(
                 config=getattr(ctx, "config", None),
                 manifest_http=manifest_http,
+                plugin_key=plugin_key,
             )
         except PluginHTTPPolicyError as exc:
             raise PluginHTTPPolicyError(_policy_message(plugin_key, str(exc))) from exc
@@ -289,6 +291,10 @@ class PluginHTTP:
             kwargs["proxy"] = self.account_proxy_url
         return kwargs
 
+    @property
+    def plugin_key(self) -> str:
+        return self._plugin_key
+
     async def _request(self, method: str, url: str, **kwargs: Any) -> PluginHTTPResponse:
         try:
             parsed = httpx.URL(url)
@@ -315,29 +321,29 @@ class PluginHTTP:
         for key, value in kwargs.items():
             if key == "follow_redirects":
                 if value:
-                    raise PluginHTTPPolicyError("ctx.http 不允许自动跟随重定向")
+                    raise self._policy_error("ctx.http 不允许自动跟随重定向")
                 continue
             if key == "timeout":
-                raise PluginHTTPPolicyError("ctx.http timeout 由平台统一控制")
+                raise self._policy_error("ctx.http timeout 由平台统一控制")
             if key not in _REQUEST_KWARG_ALLOWLIST:
-                raise PluginHTTPPolicyError(f"ctx.http 不支持请求参数: {key}")
+                raise self._policy_error(f"ctx.http 不支持请求参数: {key}")
             sanitized[key] = value
         return sanitized
 
     def _policy_error(self, message: str) -> PluginHTTPPolicyError:
-        return PluginHTTPPolicyError(_policy_message(self.plugin_key, message))
+        return PluginHTTPPolicyError(_policy_message(self._plugin_key, message))
 
     async def _validate_url(self, url: httpx.URL) -> None:
         if url.scheme not in ("http", "https"):
-            raise PluginHTTPPolicyError("插件 HTTP 仅允许 http/https URL")
+            raise self._policy_error("插件 HTTP 仅允许 http/https URL")
         if not url.host:
-            raise PluginHTTPPolicyError("HTTP 请求缺少 host")
+            raise self._policy_error("HTTP 请求缺少 host")
 
-        host = normalize_hostname(url.host)
+        host = normalize_hostname(url.host, plugin_key=self._plugin_key)
         if host == "localhost" or host.endswith(".localhost"):
-            raise PluginHTTPPolicyError("插件 HTTP 禁止访问 localhost")
-        if not host_matches_allowed(host, self.allowed_hosts):
-            raise PluginHTTPPolicyError(f"HTTP host 不在 allowed_hosts 内: {host}")
+            raise self._policy_error("插件 HTTP 禁止访问 localhost")
+        if not host_matches_allowed(host, self.allowed_hosts, plugin_key=self._plugin_key):
+            raise self._policy_error(f"HTTP host 不在 allowed_hosts 内: {host}")
 
         port = url.port or (443 if url.scheme == "https" else 80)
         try:
@@ -345,12 +351,12 @@ class PluginHTTP:
         except ValueError:
             answers = await _resolve_with(self._resolver, host, port)
             if not answers:
-                raise PluginHTTPPolicyError(f"HTTP host 无 DNS 解析结果: {host}") from None
+                raise self._policy_error(f"HTTP host 无 DNS 解析结果: {host}") from None
             for answer in answers:
-                _assert_public_ip(str(answer))
+                _assert_public_ip(str(answer), plugin_key=self._plugin_key)
         else:
             if _is_blocked_ip(literal):
-                raise PluginHTTPPolicyError(f"HTTP 目标是受保护地址: {host}")
+                raise self._policy_error(f"HTTP 目标是受保护地址: {host}")
 
     async def _read_capped(self, response: httpx.Response) -> bytes:
         chunks: list[bytes] = []
@@ -362,7 +368,7 @@ class PluginHTTP:
             if total > self.max_response_bytes:
                 raise PluginHTTPResponseTooLarge(
                     _policy_message(
-                        self.plugin_key,
+                        self._plugin_key,
                         f"HTTP 响应超过上限: {total}>{self.max_response_bytes} bytes",
                     )
                 )

@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.db.models.feature import FEATURE_STATE_DISABLED
+from app.db.models.plugin import InstalledPlugin
 from app.schemas.feature import FeatureInfo
 from app.services.feature_service import (
     _seed_local_installed_features,
@@ -274,6 +275,7 @@ async def test_feature_matrix_separates_enabled_switch_from_runtime_state(monkey
         side_effect=[
             Result([]),  # RemotePlugin
             Result([]),  # PluginInstall
+            Result([]),  # InstalledPlugin
             Result([account]),
             Result([account_feature]),
         ],
@@ -284,6 +286,53 @@ async def test_feature_matrix_separates_enabled_switch_from_runtime_state(monkey
     row = data["accounts"][0]
     assert row["features"]["guess_number"] == FEATURE_STATE_DISABLED
     assert row["feature_enabled"]["guess_number"] is True
+
+
+@pytest.mark.asyncio
+async def test_feature_matrix_passes_installed_plugin_lint_warnings(monkeypatch) -> None:
+    """installed_plugin.lint_warnings 要透传到 FeatureInfo，供前端展示。"""
+
+    class Result:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self.rows
+
+    feature = SimpleNamespace(
+        key="linted_plugin",
+        display_name="有 lint 的模块",
+        is_builtin=False,
+        version="1.0.0",
+        manifest={},
+    )
+    installed_plugin = InstalledPlugin(
+        key="linted_plugin",
+        source="zip",
+        lint_warnings=["plugin.py:1: 避免导入 app.db.models", "plugin.py:2: httpx.get 缺少 timeout"],
+    )
+
+    monkeypatch.setattr(
+        "app.services.feature_service.list_features",
+        AsyncMock(return_value=[feature]),
+    )
+    db = AsyncMock()
+    db.execute = AsyncMock(
+        side_effect=[
+            Result([]),  # RemotePlugin
+            Result([]),  # PluginInstall
+            Result([installed_plugin]),  # InstalledPlugin
+            Result([]),  # Account
+            Result([]),  # AccountFeature
+        ],
+    )
+
+    data = await feature_matrix(db)
+
+    assert data["features"][0]["lint_warnings"] == installed_plugin.lint_warnings
 
 
 @pytest.mark.asyncio
