@@ -222,6 +222,7 @@ class SandboxClient:
     """
 
     is_sandbox_client = True
+    _is_sandboxed = True
     __slots__ = ("_real", "_allowed", "_plugin_key", "_perms")
 
     def __init__(
@@ -260,6 +261,8 @@ class SandboxClient:
 
     def __getattribute__(self, name: str) -> Any:
         """元属性访问（__slots__ 字段走此路径）。"""
+        if name == "_is_sandboxed":
+            return type(self)._is_sandboxed
         # 危险属性直接拒绝
         if name in _BLOCKED_ATTRS or name.startswith("_"):
             plugin_key = object.__getattribute__(self, "_plugin_key")

@@ -4,6 +4,8 @@ MVP 设计：
 - 限额配置读取 ``system_setting.plugin_ai_quota``。
 - Redis 可用时，用 Lua 原子预扣 estimated tokens，并在调用结束后按实际用量修正。
 - Redis 不可用时，降级为基于 ``llm_usage`` 的 DB 汇总检查；无法做到并发预扣，但不阻断业务。
+- 跨日边界按 acquire 时的自然日记账：例如 23:59 acquire、00:00 release 时，daily 计数回滚到 acquire 当天，
+  今天的预算不会被这次释放影响。这里是软上限语义，目标是用 quota 防爆，不要求精确到秒。
 """
 
 from __future__ import annotations

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 
 import pytest
 
@@ -65,6 +66,16 @@ class _FakeRedis:
             return [1]
 
 
+class _FrozenDateTime(datetime):
+    current: datetime = datetime(2026, 1, 1, 23, 59, 50, tzinfo=UTC)
+
+    @classmethod
+    def now(cls, tz=None):  # noqa: ANN001
+        if tz is None:
+            return cls.current
+        return cls.current.astimezone(tz)
+
+
 @pytest.mark.asyncio
 async def test_acquire_uses_redis_pre_reservation_for_concurrent_limit(monkeypatch) -> None:
     fake = _FakeRedis()
@@ -94,6 +105,39 @@ async def test_acquire_uses_redis_pre_reservation_for_concurrent_limit(monkeypat
     await plugin_ai_quota.release(tickets[0], actual_tokens=20)
     assert fake.values[tickets[0].minute_key] == 20
     assert fake.values[tickets[0].daily_key] == 20
+
+
+@pytest.mark.asyncio
+async def test_release_uses_acquire_day_across_midnight(monkeypatch) -> None:
+    fake = _FakeRedis()
+
+    async def _limits(_plugin_key: str):
+        return {"per_minute": 100, "daily": 1000}
+
+    async def _noop_usage(*_args, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(plugin_ai_quota, "get_redis", lambda: fake)
+    monkeypatch.setattr(plugin_ai_quota, "_load_quota_limits", _limits)
+    monkeypatch.setattr(plugin_ai_quota, "_write_quota_error_usage", _noop_usage)
+    monkeypatch.setattr(plugin_ai_quota, "datetime", _FrozenDateTime)
+
+    _FrozenDateTime.current = datetime(2026, 1, 1, 23, 59, 50, tzinfo=UTC)
+    ticket = await plugin_ai_quota.acquire("demo", 7, 60)
+    assert ticket.daily_key == "plugin_ai_quota:7:demo:d:20260101"
+    assert fake.values[ticket.daily_key] == 60
+
+    _FrozenDateTime.current = datetime(2026, 1, 2, 0, 0, 10, tzinfo=UTC)
+    today_minute_key, today_amount_key, today_daily_key = plugin_ai_quota._quota_keys("demo", 7)
+    assert today_daily_key == "plugin_ai_quota:7:demo:d:20260102"
+
+    await plugin_ai_quota.release(ticket, actual_tokens=0)
+
+    assert fake.values[ticket.daily_key] == 0
+    assert fake.values.get(today_daily_key, 0) == 0
+    assert today_daily_key not in fake.values
+    assert today_minute_key == ticket.minute_key
+    assert today_amount_key == ticket.minute_amount_key
 
 
 @pytest.mark.asyncio

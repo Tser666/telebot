@@ -226,6 +226,7 @@ docker compose restart web
 | --- | --- | --- |
 | 每天 | `audit_log` 是否有异常 action（login fail 集中、`account.delete`、`humanize.update` 异常） | `psql -c "SELECT ... FROM audit_log WHERE ts > now()-interval '1 day' AND action LIKE '%fail%';"` |
 | 每周 | 备份还原演练（在隔离机器） | `bash deploy/backup.sh && bash deploy/restore.sh` |
+| 按需 | 插件 lint 规则升级后或完成批量插件迁移后，跑一次存量回填 | `python -m app.scripts.lint_existing_plugins --dry-run`（确认 diff）→ `python -m app.scripts.lint_existing_plugins` |
 | 每月 | 跑一次 `bash deploy/backup-keys.sh`，更新异地 .gpg | 把旧 .gpg 销毁前确认新 .gpg 能成功解密 |
 | 每季 | 复盘是否仍接受 §2 中三项风险；V1.5 来了就按计划修 | 在本文件末尾加 changelog |
 

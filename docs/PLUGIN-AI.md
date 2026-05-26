@@ -61,3 +61,4 @@ await event.edit(result.text)
 - 超限时，插件会收到 `AIQuotaError`；平台同时写入一条 `LLMUsage(success=False, error_type="plugin_quota_exceeded")`，可在 Usage 页排查。
 - Redis 不可用时会降级为 DB 检查，但并发预扣保护会暂时关闭；生产环境建议保留 Redis 可用性监控。
 - token 估算是软上限：当前按 UTF-8 字节数 `// 4` 粗估，中文场景通常会偏低 1.5-2x，并发尖峰也可能瞬时越限。
+- 跨午夜的请求按 acquire 当时所属的自然日记账，软上限场景误差可接受。

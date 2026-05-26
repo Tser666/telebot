@@ -1189,10 +1189,10 @@ def _wrap_event_for_context(event: Any, ctx: PluginContext) -> Any:
     if client is None:
         return event
     try:
-        from .sandbox import SandboxClient, SandboxEvent
+        from .sandbox import SandboxEvent
     except Exception:  # noqa: BLE001
         return event
-    if type(client) is SandboxClient or bool(getattr(client, "is_sandbox_client", False)):
+    if bool(getattr(client, "_is_sandboxed", False)) or bool(getattr(client, "is_sandbox_client", False)):
         return SandboxEvent(event, client, plugin_key=ctx.feature_key)
     return event
 

@@ -315,6 +315,28 @@ class TestSandboxClientSecurity:
         assert "禁止访问" in str(ex.value)
 
     @pytest.mark.asyncio
+    async def test_wrap_event_for_context_wraps_sandbox_subclasses(self):
+        """SandboxClient 子类也必须走 SandboxEvent 包装并继续执行权限校验。"""
+        from app.worker.plugins.base import PluginContext
+        from app.worker.plugins.loader import _wrap_event_for_context
+        from app.worker.plugins.sandbox import SandboxClient, SandboxEvent
+
+        class MySandboxClient(SandboxClient):
+            pass
+
+        class RawEvent:
+            async def reply(self, *_args, **_kwargs):
+                return "ok"
+
+        sandbox_client = MySandboxClient(SimpleNamespace(), [], plugin_key="demo")
+        ctx = PluginContext(account_id=7, feature_key="demo", client=sandbox_client)
+        wrapped = _wrap_event_for_context(RawEvent(), ctx)
+
+        assert isinstance(wrapped, SandboxEvent)
+        with pytest.raises(PermissionError):
+            await wrapped.reply("x")
+
+    @pytest.mark.asyncio
     async def test_plugin_command_handler_receives_sandbox_client(self):
         """插件命令 handler 不能收到 dispatcher 传入的原始 Telethon client。"""
         from app.worker.plugins.base import PluginContext
