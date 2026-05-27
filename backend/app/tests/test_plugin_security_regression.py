@@ -256,7 +256,7 @@ class TestRemotePluginSecurity:
             # 超时错误码应该是 GIT_TIMEOUT
             assert "TIMEOUT" in ex.value.code or "超时" in ex.value.message
 
-        asyncio.get_event_loop().run_until_complete(_test())
+        asyncio.run(_test())
 
     def test_run_git_reports_missing_binary(self, monkeypatch):
         """运行环境缺少 git 时必须返回可读错误，而不是冒泡成 500。"""
@@ -268,7 +268,7 @@ class TestRemotePluginSecurity:
             assert ex.value.code == "GIT_NOT_FOUND"
             assert "缺少 git" in ex.value.message
 
-        asyncio.get_event_loop().run_until_complete(_test())
+        asyncio.run(_test())
 
 
 class TestSandboxClientSecurity:

@@ -115,6 +115,13 @@ class CommandTemplateBase(BaseModel):
                     v.pop("delete_after", None)
                 else:
                     v["delete_after"] = dai
+            mode = str(v.get("mode", "forward_native") or "forward_native").strip()
+            if mode not in ("forward_native", "copy_text", "copy_media", "quote", "link_only"):
+                raise ValueError("mode 只能是 forward_native / copy_text / copy_media / quote / link_only")
+            if mode == "forward_native":
+                v.pop("mode", None)
+            else:
+                v["mode"] = mode
         elif t == COMMAND_TYPE_RUN_PLUGIN:
             if not v.get("plugin_key"):
                 raise ValueError("run_plugin 类型必须配置 plugin_key")

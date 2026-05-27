@@ -109,7 +109,7 @@ interface FormState {
   forward_delete_after: string;
   /** forward_to：成功后立即删除指令消息（不等待） */
   forward_delete_immediately: boolean;
-  /** forward_to：转发方式（forward_native/copy_text/quote/link_only） */
+  /** forward_to：转发方式（forward_native/copy_text/copy_media/quote/link_only） */
   forward_mode: string;
   plugin_key: string;
   plugin_method: string;
@@ -1175,6 +1175,7 @@ function CommandEditDialog({
                 >
                   <option value="forward_native">原生转发（携带原作者）</option>
                   <option value="copy_text">复制文本（不显示原作者）</option>
+                  <option value="copy_media">复读媒体（贴纸/图片/文件）</option>
                   <option value="quote">引用包装（带"来自 X"前缀）</option>
                   <option value="link_only">仅发链接（公开群可点）</option>
                 </Select>

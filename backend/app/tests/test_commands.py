@@ -174,6 +174,18 @@ def test_template_forward_to_requires_int_chat_id() -> None:
     assert t4.config["target_chat_id"] == 100
 
 
+def test_template_forward_to_accepts_copy_media_mode() -> None:
+    """forward_to.copy_media 用于复制贴纸/图片/文件等非纯文本消息。"""
+    t = CommandTemplateBase(name="x", type="forward_to", config={"mode": "copy_media"})
+    assert t.config["mode"] == "copy_media"
+
+
+def test_template_forward_to_rejects_unknown_mode() -> None:
+    """forward_to.mode 只允许已实现的转发/复制模式。"""
+    with pytest.raises(ValueError):
+        CommandTemplateBase(name="x", type="forward_to", config={"mode": "bad"})
+
+
 def test_template_forward_to_delete_after() -> None:
     """forward_to.delete_after：必须是 0~3600 整数秒；0 / 缺省被丢弃。"""
     # 缺省 / 0 → 不写入 config
@@ -1347,6 +1359,53 @@ async def test_run_template_forward_to_success() -> None:
     replied.forward_to.assert_awaited_once_with(-1001234567890)
     final_msg = event.edit.call_args[0][0]
     assert "✓" in final_msg
+
+
+@pytest.mark.asyncio
+async def test_run_template_forward_to_copy_media_sends_file() -> None:
+    """copy_media 应复制被回复消息的媒体，适合贴纸/图片/文件复读。"""
+    tpl = {
+        "name": "f",
+        "type": "forward_to",
+        "config": {"target_chat_id": -1001234567890, "mode": "copy_media"},
+    }
+    client = AsyncMock()
+    event = AsyncMock()
+    event.client = AsyncMock()
+    replied = AsyncMock()
+    replied.media = object()
+    replied.text = ""
+    event.get_reply_message = AsyncMock(return_value=replied)
+
+    await wcmd._run_template(client, event, [], tpl, account_id=1)
+
+    event.client.send_file.assert_awaited_once_with(-1001234567890, replied.media)
+    replied.forward_to.assert_not_called()
+    assert "✓" in event.edit.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_run_template_forward_to_copy_media_falls_back_to_text() -> None:
+    """copy_media 遇到纯文本消息时退回普通 send_message。"""
+    tpl = {
+        "name": "f",
+        "type": "forward_to",
+        "config": {"target_chat_id": 42, "mode": "copy_media"},
+    }
+    client = AsyncMock()
+    event = AsyncMock()
+    event.client = AsyncMock()
+    replied = AsyncMock()
+    replied.media = None
+    replied.document = None
+    replied.photo = None
+    replied.text = "hello"
+    event.get_reply_message = AsyncMock(return_value=replied)
+
+    await wcmd._run_template(client, event, [], tpl, account_id=1)
+
+    event.client.send_message.assert_awaited_once_with(42, "hello")
+    event.client.send_file.assert_not_called()
 
 
 @pytest.mark.asyncio

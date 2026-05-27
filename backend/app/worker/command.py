@@ -1125,6 +1125,18 @@ async def _run_template(client, event, args, tpl: dict[str, Any], account_id: in
             elif mode == "copy_text":
                 text = replied.text or "(empty)"
                 await event.client.send_message(target, text)
+            elif mode == "copy_media":
+                media = (
+                    getattr(replied, "media", None)
+                    or getattr(replied, "document", None)
+                    or getattr(replied, "photo", None)
+                )
+                text = getattr(replied, "text", None) or ""
+                if media is not None:
+                    kwargs = {"caption": text} if text else {}
+                    await event.client.send_file(target, media, **kwargs)
+                else:
+                    await event.client.send_message(target, text or "(empty)")
             elif mode == "quote":
                 try:
                     src = await replied.get_chat()
@@ -1170,7 +1182,13 @@ async def _run_template(client, event, args, tpl: dict[str, Any], account_id: in
 
             _aio.create_task(_delete_now())
         else:
-            mode_label = {"forward_native": "转发", "copy_text": "复制文本", "quote": "引用转发", "link_only": "链接"}.get(mode, mode)
+            mode_label = {
+                "forward_native": "转发",
+                "copy_text": "复制文本",
+                "copy_media": "复读",
+                "quote": "引用转发",
+                "link_only": "链接",
+            }.get(mode, mode)
             await event.edit(f"✓ 已{mode_label}到 {target}")
             delete_after_raw = cfg.get("delete_after")
             if delete_after_raw:
