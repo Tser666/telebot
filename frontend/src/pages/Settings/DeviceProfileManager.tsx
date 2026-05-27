@@ -15,14 +15,13 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Spinner } from "@/components/ui/misc";
+import { SectionHeader, SignalPill } from "@/components/ui/status";
 import {
   createDeviceProfile,
   deleteDeviceProfile,
@@ -93,11 +92,17 @@ export function DeviceProfileManager() {
       <CardHeader>
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="min-w-0">
-            <CardTitle className="text-base">设备标识模板</CardTitle>
-            <CardDescription>
-              控制 TG 设备列表里看到的设备名、系统、客户端版本。修改只对**新登录**的
-              session 生效，改了已有账号要重登才会显示新值。
-            </CardDescription>
+            <SectionHeader
+              title="设备标识模板"
+              description="控制 TG 设备列表里看到的设备名、系统、客户端版本。修改只对新登录的 session 生效，改了已有账号要重登才会显示新值。"
+              meta={
+                <SignalPill
+                  tone={(profilesQ.data?.length ?? 0) > 0 ? "primary" : "neutral"}
+                  label="模板数"
+                  value={profilesQ.data?.length ?? 0}
+                />
+              }
+            />
           </div>
           {!showCreate ? (
             <Button size="sm" onClick={() => setShowCreate(true)}>

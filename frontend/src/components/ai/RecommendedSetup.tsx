@@ -3,10 +3,9 @@ import { Sparkles } from "lucide-react";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
+import { SectionHeader } from "@/components/ui/status";
 import { MetaBadge } from "@/components/ui/meta-badge";
 import {
   Table,
@@ -71,13 +70,11 @@ export function RecommendedSetup({ cmdPrefix = ",", defaultOpen = false }: { cmd
       <summary className="cursor-pointer list-none">
         <Card className="transition-colors group-open:border-primary/40">
           <CardHeader className="pb-3">
-            <CardTitle className="inline-flex items-center gap-2 text-base">
-              <Sparkles className="h-4 w-4" />
-              配置示例
-            </CardTitle>
-            <CardDescription>
-              一个 auto 指令搭配几条 fixed 指令，能兼顾省 token、答主力和手动覆盖。
-            </CardDescription>
+            <SectionHeader
+              icon={Sparkles}
+              title="配置示例"
+              description="一个 auto 指令搭配几条 fixed 指令，能兼顾省 token、答主力和手动覆盖。"
+            />
           </CardHeader>
           <CardContent className="hidden space-y-4 group-open:block">
             <Table>

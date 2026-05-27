@@ -22,7 +22,7 @@ import { listRecentLLMUsage } from "@/api/llmUsage";
 import { getSystemSettings } from "@/api/system";
 import type { AccountSummary, CommandTemplateOut, LLMProviderOut } from "@/api/types";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/misc";
 import { MetaBadge } from "@/components/ui/meta-badge";
@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { MeterBar, SectionHeader, SignalPill, StatusSummaryPanel, ToneRailCard } from "@/components/ui/status";
 import { CommandBadge } from "@/components/CommandBadge";
 import { Glossary } from "@/components/ai/Glossary";
 import { HowItWorks } from "@/components/ai/HowItWorks";
@@ -196,53 +197,97 @@ export function AIIndex() {
         onHelpOpenChange={setHelpMenuOpen}
         cmdPrefix={cmdPrefix}
       />
+      <StatusSummaryPanel
+        icon={Sparkles}
+        title="AI 工作台总览"
+        titleLevel="h2"
+        description="把模型供应、指令可用性和近期调用健康度放在同一层，方便快速判断下一步动作。"
+        signals={
+          <>
+            <SignalPill tone={readyCount > 0 ? "success" : "warn"} label="Provider 就绪" value={`${readyCount}/${providerCount}`} />
+            <SignalPill tone={aiTemplates.length > 0 ? "success" : "warn"} label="AI 指令" value={`${aiTemplates.length} 条`} />
+            <SignalPill
+              tone={(usageSummary?.failed_count ?? 0) > 0 ? "warn" : "primary"}
+              label="近期调用"
+              value={usageSummary ? `${usageSummary.request_count} 次` : "暂无"}
+            />
+          </>
+        }
+        aside={
+          <div className="w-full max-w-xs space-y-2 rounded-md border border-border/70 bg-background/80 p-3">
+            <div className="text-xs text-muted-foreground">调用成功率</div>
+            <div className="text-lg font-semibold">
+              {usageSummary && usageSummary.request_count > 0
+                ? `${Math.round((usageSummary.success_count / usageSummary.request_count) * 100)}%`
+                : "暂无"}
+            </div>
+            <MeterBar
+              tone={(usageSummary?.failed_count ?? 0) > 0 ? "warn" : "success"}
+              value={
+                usageSummary && usageSummary.request_count > 0
+                  ? (usageSummary.success_count / usageSummary.request_count) * 100
+                  : null
+              }
+            />
+            <div className="text-xs text-muted-foreground">
+              {usageSummary
+                ? `平均耗时 ${usageSummary.avg_latency_ms}ms`
+                : usageQ.isError
+                  ? "调用摘要暂不可用"
+                  : "触发调用后展示摘要"}
+            </div>
+          </div>
+        }
+      />
 
-      <div className="grid gap-2 md:grid-cols-3">
-        <StatusCard
+      <div className="grid gap-3 md:grid-cols-3">
+        <ToneRailCard
           icon={Package}
-          label="Provider 就绪"
+          title="Provider 就绪"
           value={`${readyCount}/${providerCount}`}
-          hint={providerCount > 0 ? "已可调用 / 总数" : "先添加一个模型提供商"}
-          ready={readyCount > 0}
+          description={providerCount > 0 ? "已可调用 / 总数" : "先添加一个模型提供商"}
+          tone={readyCount > 0 ? "success" : "warn"}
         />
-        <StatusCard
+        <ToneRailCard
           icon={Bot}
-          label="AI 指令数"
+          title="AI 指令数"
           value={aiTemplates.length}
-          hint={aiTemplates.length > 0 ? "type=ai 模板" : "创建第一条 AI 指令模板"}
-          ready={aiTemplates.length > 0}
+          description={aiTemplates.length > 0 ? "type=ai 模板" : "创建第一条 AI 指令模板"}
+          tone={aiTemplates.length > 0 ? "primary" : "warn"}
         />
-        <StatusCard
+        <ToneRailCard
           icon={History}
-          label="近期调用情况"
+          title="近期调用情况"
           value={usageSummary ? `${usageSummary.request_count} 次 / 失败 ${usageSummary.failed_count}` : "暂无"}
-          hint={usageSummary ? `平均耗时 ${usageSummary.avg_latency_ms}ms` : usageQ.isError ? "调用摘要暂不可用" : "触发调用后展示摘要"}
-          ready={(usageSummary?.request_count ?? 0) > 0}
+          description={usageSummary ? `Fallback ${usageSummary.fallback_count} 次` : "触发调用后展示摘要"}
+          tone={(usageSummary?.failed_count ?? 0) > 0 ? "warn" : "neutral"}
         />
       </div>
 
       <Card>
-        <button
-          type="button"
-          className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
-          onClick={() => setQuickStartOpen((v) => !v)}
-          aria-expanded={quickStartOpen}
-        >
-          <span>
-            <span className="flex items-center gap-2 text-base font-semibold">
-              <Sparkles className="h-4 w-4 text-primary" />
-              快速上手
-            </span>
-            <span className="mt-1 block text-sm text-muted-foreground">
-              按顺序完成后，你的 Telegram 账号就能用 AI 指令回复消息。
-            </span>
-          </span>
-          {quickStartOpen ? (
-            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-          ) : (
-            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-          )}
-        </button>
+        <div className="px-4 pb-1 pt-3">
+          <SectionHeader
+            icon={Sparkles}
+            title="快速上手"
+            description="按顺序完成后，你的 Telegram 账号就能用 AI 指令回复消息。"
+            actions={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={() => setQuickStartOpen((v) => !v)}
+                aria-expanded={quickStartOpen}
+              >
+                {quickStartOpen ? (
+                  <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                )}
+              </Button>
+            }
+          />
+        </div>
         {quickStartOpen ? (
           <CardContent className="grid gap-3 pt-0 lg:grid-cols-3">
             <SetupStep
@@ -308,11 +353,11 @@ export function AIIndex() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="inline-flex items-center gap-2 text-base">
-            <FileText className="h-4 w-4 text-primary" />
-            你的 AI 指令
-          </CardTitle>
-          <CardDescription>展示 type=ai 的指令模板；编辑会带 returnTo=/ai 回到总览。</CardDescription>
+          <SectionHeader
+            icon={FileText}
+            title="你的 AI 指令"
+            description="展示 type=ai 的指令模板；编辑会带 returnTo=/ai 回到总览。"
+          />
         </CardHeader>
         <CardContent>
           {aiTemplates.length === 0 ? (
@@ -469,33 +514,6 @@ function AIHelpMenu({
         </div>
       </DropdownMenuContent>
     </DropdownMenu>
-  );
-}
-
-function StatusCard({
-  icon: Icon,
-  label,
-  value,
-  hint,
-  ready,
-}: {
-  icon: typeof Package;
-  label: string;
-  value: string | number;
-  hint: string;
-  ready: boolean;
-}) {
-  return (
-    <Card className={ready ? "border-emerald-500/40 bg-emerald-500/5" : undefined}>
-      <CardHeader className="p-3 pb-1.5">
-        <CardDescription className="inline-flex items-center gap-2">
-          <Icon className="h-4 w-4" />
-          {label}
-        </CardDescription>
-        <CardTitle className="text-lg">{value}</CardTitle>
-      </CardHeader>
-      <CardContent className="px-3 pb-3 text-xs text-muted-foreground">{hint}</CardContent>
-    </Card>
   );
 }
 

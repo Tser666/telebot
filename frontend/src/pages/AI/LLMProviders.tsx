@@ -19,12 +19,11 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { MetaBadge } from "@/components/ui/meta-badge";
 import { Spinner } from "@/components/ui/misc";
+import { SectionHeader, SignalPill } from "@/components/ui/status";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import {
   Dialog,
@@ -353,20 +352,27 @@ export function LLMProviders({
       <Card>
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
-            <div>
-              <CardTitle className="inline-flex items-center gap-2 text-base">
-                <Package className="h-4 w-4 text-primary" />
-                模型提供商
-              </CardTitle>
-              <CardDescription>
-                一行 = 一个模型供应商凭据。配完 API Key + Base URL 后，在编辑里点
-                <strong>「Fetch 模型列表」</strong>就能自动拉取并可手动选择要启用的模型。<br />
-                <span className="text-muted-foreground/80">
-                  modality（模态）+ tags（标签）+ cost_tier（成本档）这三项决定「自动路由」模式下
-                  该模型提供商所配置的模型是否被选中——详见 AI 帮助里的配置示例。
-                </span>
-              </CardDescription>
-            </div>
+            <SectionHeader
+              icon={Package}
+              title="模型提供商"
+              description={
+                <>
+                  一行 = 一个模型供应商凭据。配完 API Key + Base URL 后，在编辑里点
+                  <strong>「Fetch 模型列表」</strong>就能自动拉取并可手动选择要启用的模型。<br />
+                  <span className="text-muted-foreground/80">
+                    modality（模态）+ tags（标签）+ cost_tier（成本档）这三项决定「自动路由」模式下该模型提供商所配置的模型是否被选中——详见 AI 帮助里的配置示例。
+                  </span>
+                </>
+              }
+              meta={
+                <SignalPill
+                  tone={visibleProviders.length > 0 ? "primary" : "warn"}
+                  label="可见 Provider"
+                  value={`${visibleProviders.length}`}
+                />
+              }
+              className="flex-1"
+            />
             <Button size="sm" onClick={() => setEditing({ ...EMPTY_FORM })}>
               <Plus className="mr-1 h-4 w-4" /> 新建
             </Button>
@@ -500,11 +506,13 @@ export function LLMProviders({
               </TableBody>
             </Table>
           ) : (
-            <p className="rounded-md border border-dashed py-8 text-center text-xs text-muted-foreground">
-              {isVisionFilter
-                ? "当前没有视觉或多模态模型提供商。可新建一个，或编辑已有 provider 的 modality。"
-                : "尚未配置任何模型提供商。新建一个后，就能在「自定义指令」里创建 AI 类型指令"}
-            </p>
+            <div className="rounded-md border border-dashed bg-muted/20 px-4 py-8 text-center">
+              <p className="text-sm text-muted-foreground">
+                {isVisionFilter
+                  ? "当前没有视觉或多模态模型提供商。可新建一个，或编辑已有 provider 的 modality。"
+                  : "尚未配置任何模型提供商。新建一个后，就能在「自定义指令」里创建 AI 类型指令"}
+              </p>
+            </div>
           )}
         </CardContent>
       </Card>

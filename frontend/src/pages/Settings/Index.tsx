@@ -39,6 +39,7 @@ import {
 import { Spinner } from "@/components/ui/misc";
 import { PageHeader, PageShell } from "@/components/layout/PageScaffold";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { SectionHeader, SignalPill } from "@/components/ui/status";
 import {
   getGlobalLimits,
   getSystemSettings,
@@ -295,7 +296,26 @@ export function SettingsIndex() {
 
       <Card className="border-dashed">
         <CardHeader>
-          <CardTitle className="text-base">猜你想要？</CardTitle>
+          <SectionHeader
+            icon={Sparkles}
+            title="猜你想要？"
+            description="常用入口和当前设置风险放在一起，先处理最可能要做的事。"
+            meta={
+              <div className="flex flex-wrap items-center justify-end gap-1.5">
+                <SignalPill tone="primary" label="当前标签" value={tab} />
+                <SignalPill
+                  tone={(accountsQ.data?.length ?? 0) > 0 ? "success" : "warn"}
+                  label="账号数"
+                  value={accountsQ.data?.length ?? 0}
+                />
+                <SignalPill
+                  tone={killQ.data?.enabled ? "danger" : "success"}
+                  label="总闸"
+                  value={killQ.data?.enabled ? "已开启" : "已关闭"}
+                />
+              </div>
+            }
+          />
         </CardHeader>
         <CardContent className="flex flex-col gap-3 lg:flex-row lg:items-center">
           <Button asChild variant="outline" size="sm">

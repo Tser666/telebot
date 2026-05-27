@@ -12,11 +12,10 @@ import { Switch } from "@/components/ui/switch";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/misc";
+import { SectionHeader, SignalPill } from "@/components/ui/status";
 import {
   createRateTemplate,
   deleteRateTemplate,
@@ -60,11 +59,17 @@ export function RateTemplates() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">风控模板</CardTitle>
-        <CardDescription>
-          一组阈值（每秒 / 每分钟 / 每小时 / 每日 API 调用上限）。被账号绑定后作为默认起点；
-          单条规则的精细调整在账号详情 → 风控基础。
-        </CardDescription>
+        <SectionHeader
+          title="风控模板"
+          description="一组阈值（每秒 / 每分钟 / 每小时 / 每日 API 调用上限）。被账号绑定后作为默认起点；单条规则的精细调整在账号详情 → 风控基础。"
+          meta={
+            <SignalPill
+              tone={(templatesQ.data?.length ?? 0) > 0 ? "primary" : "neutral"}
+              label="模板数"
+              value={templatesQ.data?.length ?? 0}
+            />
+          }
+        />
       </CardHeader>
       <CardContent className="space-y-4">
         {/* 新建表单 */}

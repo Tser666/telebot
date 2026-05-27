@@ -18,23 +18,32 @@ import {
   Card,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import {
+  MeterBar,
+  SectionHeader,
+  SignalPill,
+  StatusSummaryPanel,
+  ToneRailCard,
+  type VisualTone,
+  toneClasses,
+} from "@/components/ui/status";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { AccountSummaryCard } from "@/components/AccountSummaryCard";
-import { PageHeader, PageShell } from "@/components/layout/PageScaffold";
+import { PageShell } from "@/components/layout/PageScaffold";
 import { Spinner } from "@/components/ui/misc";
 import { listAccounts } from "@/api/accounts";
 import { listLLMProviders } from "@/api/commands";
 import { getResourceDashboard } from "@/api/system";
 import type { ResourceDashboard } from "@/api/types";
+import { cn } from "@/lib/utils";
 
 export function Dashboard() {
   const nav = useNavigate();
@@ -80,29 +89,21 @@ export function Dashboard() {
 
   return (
     <PageShell className="pb-24 md:space-y-6">
-      <PageHeader
-        title="概览"
-        description="集中查看 TelePilot 的账号、模块、AI 和资源运行情况。"
-        icon={LayoutDashboard}
-        size="hero"
-        actions={
-          <>
-          <Button
-            variant="outline"
-            className={guideActive ? "siri-glow" : undefined}
-            onClick={() => setGuideActive(!guideActive)}
-          >
-            <Sparkles className="mr-2 h-4 w-4 text-primary" />
-            新手指引
-          </Button>
-          <Button asChild>
-            <Link to="/accounts/new">
-              <Plus className="mr-2 h-4 w-4" />
-              新增账号
-            </Link>
-          </Button>
-          </>
-        }
+      <DashboardHero
+        activeAccounts={activeAccounts}
+        totalAccounts={accounts.length}
+        readyProviders={readyProviders}
+        totalProviders={providers.length}
+        workerValue={workerValue}
+        providerValue={providerValue}
+        accountsLoading={accountsQ.isLoading}
+        providersLoading={providersQ.isLoading}
+        logErrorCount={resourceQ.data?.logs.last_5m_error ?? 0}
+        logWarnCount={resourceQ.data?.logs.last_5m_warn ?? 0}
+        logsLoading={resourceQ.isLoading}
+        sampledAt={resourceQ.data?.host.sampled_at}
+        guideActive={guideActive}
+        onGuideToggle={() => setGuideActive(!guideActive)}
       />
 
       {guideActive ? (
@@ -117,6 +118,7 @@ export function Dashboard() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <AccountWorkerTile
           value={workerValue}
+          tone={overviewTone(activeAccounts, accounts.length, accountsQ.isLoading)}
           accounts={accounts}
           isLoading={accountsQ.isLoading}
           open={accountsOpen}
@@ -132,6 +134,7 @@ export function Dashboard() {
           title="AI"
           value={providerValue}
           description="可调用模型 / 已配置模型"
+          tone={overviewTone(readyProviders, providers.length, providersQ.isLoading)}
           to="/ai?tab=providers"
         />
         <OverviewTile
@@ -139,6 +142,7 @@ export function Dashboard() {
           title="模块中心"
           value="指令与插件"
           description="管理指令和自动化"
+          tone="primary"
           to="/plugins"
         />
         <OverviewTile
@@ -146,6 +150,7 @@ export function Dashboard() {
           title="5 分钟日志"
           value={logValue}
           description={`错误 ${resourceQ.data?.logs.last_5m_error ?? 0} / 警告 ${resourceQ.data?.logs.last_5m_warn ?? 0}`}
+          tone={logTone(resourceQ.data)}
           to="/logs"
         />
       </div>
@@ -161,14 +166,107 @@ export function Dashboard() {
   );
 }
 
+function DashboardHero({
+  activeAccounts,
+  totalAccounts,
+  readyProviders,
+  totalProviders,
+  workerValue,
+  providerValue,
+  accountsLoading,
+  providersLoading,
+  logErrorCount,
+  logWarnCount,
+  logsLoading,
+  sampledAt,
+  guideActive,
+  onGuideToggle,
+}: {
+  activeAccounts: number;
+  totalAccounts: number;
+  readyProviders: number;
+  totalProviders: number;
+  workerValue: string;
+  providerValue: string;
+  accountsLoading: boolean;
+  providersLoading: boolean;
+  logErrorCount: number;
+  logWarnCount: number;
+  logsLoading: boolean;
+  sampledAt?: number | null;
+  guideActive: boolean;
+  onGuideToggle: () => void;
+}) {
+  const sampledLabel = sampledAt
+    ? new Date(sampledAt * 1000).toLocaleTimeString()
+    : "等待采样";
+  const accountTone = overviewTone(activeAccounts, totalAccounts, accountsLoading);
+  const providerTone = overviewTone(readyProviders, totalProviders, providersLoading);
+  const logStatusTone: VisualTone = logsLoading
+    ? "neutral"
+    : logErrorCount > 0
+      ? "danger"
+      : logWarnCount > 0
+        ? "warn"
+        : "success";
+
+  return (
+    <StatusSummaryPanel
+      icon={LayoutDashboard}
+      title="概览"
+      description="集中查看 TelePilot 的账号、模块、AI 和资源运行情况；优先暴露需要处理的信号。"
+      signals={
+        <>
+          <SignalPill tone={accountTone} label="账号运行" value={workerValue} />
+          <SignalPill tone={providerTone} label="模型就绪" value={providerValue} />
+          <SignalPill
+            tone={logStatusTone}
+            label="日志信号"
+            value={logsLoading ? "采样中" : `${logErrorCount} 错误 / ${logWarnCount} 警告`}
+          />
+        </>
+      }
+      aside={
+        sampledLabel ? (
+          <div className="rounded-lg border border-border/70 bg-background/80 p-3 shadow-sm">
+            <div className="text-xs font-medium text-muted-foreground">资源采样</div>
+            <div className="mt-1 text-lg font-semibold tracking-tight">{sampledLabel}</div>
+            <div className="mt-1 text-[11px] text-muted-foreground">自动每 15 秒刷新</div>
+          </div>
+        ) : null
+      }
+      actions={
+        <>
+          <Button
+            variant="outline"
+            className={guideActive ? "siri-glow" : undefined}
+            onClick={onGuideToggle}
+          >
+            <Sparkles className="mr-2 h-4 w-4 text-primary" />
+            新手指引
+          </Button>
+          <Button asChild>
+            <Link to="/accounts/new">
+              <Plus className="mr-2 h-4 w-4" />
+              新增账号
+            </Link>
+          </Button>
+        </>
+      }
+    />
+  );
+}
+
 function AccountWorkerTile({
   value,
+  tone,
   accounts,
   isLoading,
   open,
   onOpenChange,
 }: {
   value: string;
+  tone: VisualTone;
   accounts: Awaited<ReturnType<typeof listAccounts>>;
   isLoading: boolean;
   open: boolean;
@@ -180,12 +278,13 @@ function AccountWorkerTile({
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
-        <button type="button" className="block min-w-0 text-left">
+        <button type="button" className="block w-full min-w-0 text-left">
           <TileCard
             icon={Users}
             title="账号 Worker"
             value={value}
             description="运行中 / 总账号，点击查看全部账号"
+            tone={tone}
           />
         </button>
       </DropdownMenuTrigger>
@@ -279,6 +378,7 @@ function OverviewTile({
   title,
   value,
   description,
+  tone = "neutral",
   to,
   onClick,
   asButton = false,
@@ -287,17 +387,18 @@ function OverviewTile({
   title: string;
   value: string;
   description: string;
+  tone?: VisualTone;
   to?: string;
   onClick?: () => void;
   asButton?: boolean;
 }) {
   const content = (
-    <TileCard icon={Icon} title={title} value={value} description={description} />
+    <TileCard icon={Icon} title={title} value={value} description={description} tone={tone} />
   );
 
   if (asButton) {
     return (
-      <button type="button" className="block min-w-0 text-left" onClick={onClick}>
+      <button type="button" className="block w-full min-w-0 text-left" onClick={onClick}>
         {content}
       </button>
     );
@@ -402,29 +503,22 @@ function TileCard({
   title,
   value,
   description,
+  tone = "neutral",
 }: {
   icon: LucideIcon;
   title: string;
   value: string;
   description: string;
+  tone?: VisualTone;
 }) {
   return (
-    <Card className="h-full transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_1px_2px_hsl(220_20%_20%/0.04),0_22px_54px_hsl(220_20%_20%/0.09)]">
-      <CardHeader className="flex-row items-start justify-between space-y-0">
-        <div className="min-w-0">
-          <CardTitle className="inline-flex max-w-full items-center gap-2 truncate">
-            <Icon className="h-4 w-4 shrink-0 text-primary" />
-            <span className="truncate">{title}</span>
-          </CardTitle>
-          <CardDescription className="mt-3 text-sm leading-5">
-            {description}
-          </CardDescription>
-        </div>
-      </CardHeader>
-      <CardFooter className="pt-0">
-        <div className="truncate text-2xl font-bold tracking-tight">{value}</div>
-      </CardFooter>
-    </Card>
+    <ToneRailCard
+      icon={Icon}
+      title={title}
+      value={value}
+      description={description}
+      tone={tone}
+    />
   );
 }
 
@@ -439,23 +533,17 @@ function ResourceUsageCard({
 }) {
   return (
     <Card>
-      <CardHeader className="pb-2">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <CardTitle className="inline-flex items-center gap-2">
-              <Activity className="h-4 w-4 text-primary" />
-              资源占用
-            </CardTitle>
-            <CardDescription className="mt-1">
-              上方是 TelePilot 应用占用；下方是宿主机/服务器整体资源。
-            </CardDescription>
-          </div>
-          {data?.host.sampled_at ? (
+      <CardHeader className="border-b border-border/70 pb-4">
+        <SectionHeader
+          icon={Activity}
+          title="资源占用"
+          description="上方是 TelePilot 应用占用；下方是宿主机/服务器整体资源。"
+          meta={data?.host.sampled_at ? (
             <span className="shrink-0 text-xs text-muted-foreground">
               {new Date(data.host.sampled_at * 1000).toLocaleTimeString()}
             </span>
           ) : null}
-        </div>
+        />
       </CardHeader>
       <CardContent className="space-y-4">
         {isLoading ? (
@@ -474,20 +562,37 @@ function ResourceUsageCard({
                 label="应用总 CPU"
                 value={percent(data.project_total.cpu_percent)}
                 hint={processScopeHint(data)}
+                meterValue={data.project_total.cpu_percent}
+                tone={resourceTone(data.project_total.cpu_percent)}
               />
               <ProcessMemoryCard data={data} />
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <Metric label="服务器 CPU" value={percent(data.host.cpu_percent)} />
+            <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+              <Metric
+                label="服务器 CPU"
+                value={percent(data.host.cpu_percent)}
+                meterValue={data.host.cpu_percent}
+                tone={resourceTone(data.host.cpu_percent)}
+              />
               <Metric
                 label="服务器内存"
                 value={hostMemoryLabel(
                   data.host.memory_used_percent,
                   data.host.memory_total_mb,
                 )}
+                meterValue={data.host.memory_used_percent}
+                tone={resourceTone(data.host.memory_used_percent)}
               />
-              <Metric label="服务器磁盘使用" value={percent(data.host.disk_used_percent)} />
-              <Metric label="服务器磁盘剩余" value={gb(data.host.disk_free_gb)} />
+              <Metric
+                label="服务器磁盘使用"
+                value={percent(data.host.disk_used_percent)}
+                meterValue={data.host.disk_used_percent}
+                tone={resourceTone(data.host.disk_used_percent)}
+              />
+              <Metric
+                label="服务器磁盘剩余"
+                value={gb(data.host.disk_free_gb)}
+              />
             </div>
           </>
         )}
@@ -501,19 +606,25 @@ function MetricCard({
   label,
   value,
   hint,
+  meterValue,
+  tone = "neutral",
 }: {
   icon: LucideIcon;
   label: string;
   value: string;
   hint: string;
+  meterValue?: number | null;
+  tone?: VisualTone;
 }) {
+  const toneClass = toneClasses(tone);
   return (
     <div className="rounded-xl border border-border/70 bg-muted/35 p-4">
       <div className="mb-3 flex items-center justify-between gap-3">
         <p className="text-xs font-medium uppercase text-muted-foreground">{label}</p>
-        <Icon className="h-4 w-4 text-primary" />
+        <Icon className={cn("h-4 w-4", toneClass.icon)} />
       </div>
       <p className="text-2xl font-bold tracking-tight">{value}</p>
+      <MeterBar value={meterValue} tone={tone} className="mt-3" />
       <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{hint}</p>
     </div>
   );
@@ -522,18 +633,24 @@ function MetricCard({
 function ProcessMemoryCard({ data }: { data: ResourceDashboard }) {
   const memoryMb = processMemoryMb(data.project_total);
   const totalMb = saneMemoryTotalMb(data.host.memory_total_mb);
+  const memoryPercent =
+    typeof memoryMb === "number" && typeof totalMb === "number" && totalMb > 0
+      ? (memoryMb / totalMb) * 100
+      : undefined;
   const rows = buildProcessMemoryRows(data);
   const compactOverlay = useCompactOverlay();
 
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
-        <button type="button" className="block min-w-0 text-left">
+        <button type="button" className="block w-full min-w-0 text-left">
           <MetricCard
             icon={Activity}
             label="应用总内存"
             value={formatMb(memoryMb)}
             hint={projectMemoryHint(memoryMb, totalMb, data)}
+            meterValue={memoryPercent}
+            tone={resourceTone(memoryPercent)}
           />
         </button>
       </DropdownMenuTrigger>
@@ -582,6 +699,28 @@ function ProcessMemoryCard({ data }: { data: ResourceDashboard }) {
       </DropdownMenuContent>
     </DropdownMenu>
   );
+}
+
+function overviewTone(current: number, total: number, loading: boolean): VisualTone {
+  if (loading) return "neutral";
+  if (total === 0) return "warn";
+  if (current === total) return "success";
+  if (current === 0) return "danger";
+  return "warn";
+}
+
+function logTone(data: ResourceDashboard | undefined): VisualTone {
+  if (!data) return "neutral";
+  if (data.logs.last_5m_error > 0) return "danger";
+  if (data.logs.last_5m_warn > 0) return "warn";
+  return "success";
+}
+
+function resourceTone(value: number | null | undefined): VisualTone {
+  if (typeof value !== "number") return "neutral";
+  if (value >= 90) return "danger";
+  if (value >= 70) return "warn";
+  return "success";
 }
 
 function percent(v: number | null | undefined): string {
@@ -727,16 +866,21 @@ function hostMemoryLabel(
 function Metric({
   label,
   value,
+  meterValue,
+  tone = "neutral",
   hint,
 }: {
   label: string;
   value: string;
+  meterValue?: number | null;
+  tone?: VisualTone;
   hint?: string;
 }) {
   return (
     <div className="rounded-xl border border-border/70 bg-muted/35 p-3">
       <p className="text-[11px] text-muted-foreground">{label}</p>
       <p className="mt-1 break-words text-sm font-semibold">{value}</p>
+      <MeterBar value={meterValue} tone={tone} className="mt-2" />
       {hint ? <p className="mt-1 text-[11px] text-muted-foreground">{hint}</p> : null}
     </div>
   );

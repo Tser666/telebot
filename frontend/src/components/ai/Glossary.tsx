@@ -3,11 +3,10 @@ import { ListChecks } from "lucide-react";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { MetaBadge } from "@/components/ui/meta-badge";
+import { SectionHeader } from "@/components/ui/status";
 
 export function Glossary({ defaultOpen = false }: { defaultOpen?: boolean }) {
   return (
@@ -15,11 +14,11 @@ export function Glossary({ defaultOpen = false }: { defaultOpen?: boolean }) {
       <summary className="cursor-pointer list-none">
         <Card className="transition-colors group-open:border-primary/40">
           <CardHeader className="pb-3">
-            <CardTitle className="inline-flex items-center gap-2 text-base">
-              <ListChecks className="h-4 w-4" />
-              术语速查
-            </CardTitle>
-            <CardDescription>模态、标签和成本档会一起影响自动路由如何挑模型。</CardDescription>
+            <SectionHeader
+              icon={ListChecks}
+              title="术语速查"
+              description="模态、标签和成本档会一起影响自动路由如何挑模型。"
+            />
           </CardHeader>
           <CardContent className="hidden space-y-4 text-sm group-open:block">
             <section>

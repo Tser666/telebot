@@ -27,6 +27,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader, PageShell } from "@/components/layout/PageScaffold";
 import { Spinner } from "@/components/ui/misc";
+import { SectionHeader, SignalPill } from "@/components/ui/status";
 import { getSystemSettings, listAuditLogs, listRuntimeLogs } from "@/api/system";
 import { listAccounts } from "@/api/accounts";
 import { formatDateTime } from "@/lib/utils";
@@ -100,8 +101,17 @@ export function Logs() {
         <TabsContent value="runtime" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">运行日志过滤</CardTitle>
-              <CardDescription>账号 / 级别 / 模块 / 关键词 / 自动刷新</CardDescription>
+              <SectionHeader
+                title="运行日志过滤"
+                description="账号 / 级别 / 模块 / 关键词 / 自动刷新"
+                meta={(
+                  <SignalPill
+                    tone={runtimeAutoRefresh ? "success" : "neutral"}
+                    label="刷新"
+                    value={runtimeAutoRefresh ? "每 5 秒" : "已暂停"}
+                  />
+                )}
+              />
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5 lg:items-end">
@@ -216,8 +226,11 @@ export function Logs() {
         <TabsContent value="audit" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">审计日志过滤</CardTitle>
-              <CardDescription>用户 / 操作类型 / 关键词（与运行日志过滤独立）</CardDescription>
+              <SectionHeader
+                title="审计日志过滤"
+                description="用户 / 操作类型 / 关键词（与运行日志过滤独立）"
+                meta={<SignalPill tone="neutral" label="窗口" value="最近 100 条" />}
+              />
             </CardHeader>
             <CardContent>
               <AuditFilters
@@ -287,17 +300,23 @@ function RuntimeLogTable({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">
-          {source === "event" ? "消息日志" : source === "plugin" ? "模块日志" : "系统日志"}
-        </CardTitle>
-        <CardDescription className="flex items-center justify-between gap-2">
-          <span>{description}</span>
-          {search.trim() || (source === "plugin" && pluginKey) ? (
-            <span className="shrink-0 text-xs text-muted-foreground">
-              已过滤 <strong className="text-foreground">{showCount}</strong> / {totalCount}
-            </span>
-          ) : null}
-        </CardDescription>
+        <SectionHeader
+          title={source === "event" ? "消息日志" : source === "plugin" ? "模块日志" : "系统日志"}
+          description={description}
+          meta={(
+            <div className="flex flex-wrap items-center justify-end gap-1.5">
+              <SignalPill
+                tone={autoRefresh ? "success" : "neutral"}
+                label="刷新"
+                value={autoRefresh ? "运行中" : "停止"}
+              />
+              <SignalPill tone="neutral" label="窗口" value="100 条" />
+              {(search.trim() || (source === "plugin" && pluginKey)) ? (
+                <SignalPill tone="primary" label="过滤" value={`${showCount} / ${totalCount}`} />
+              ) : null}
+            </div>
+          )}
+        />
       </CardHeader>
       <CardContent>
         {logsQ.isLoading ? (
@@ -453,8 +472,18 @@ function AuditLogTable({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">审计日志</CardTitle>
-        <CardDescription>列：ts / user_id / action / target / detail 摘要</CardDescription>
+        <SectionHeader
+          title="审计日志"
+          description="列：ts / user_id / action / target / detail 摘要"
+          meta={(
+            <div className="flex flex-wrap items-center justify-end gap-1.5">
+              <SignalPill tone="neutral" label="窗口" value="100 条" />
+              {search.trim() || action || userId.trim() ? (
+                <SignalPill tone="primary" label="筛选后" value={`${filtered.length} 条`} />
+              ) : null}
+            </div>
+          )}
+        />
       </CardHeader>
       <CardContent>
         {logsQ.isLoading ? (

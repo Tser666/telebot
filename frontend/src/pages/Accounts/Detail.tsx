@@ -76,6 +76,7 @@ import { getErrMsg } from "@/lib/api";
 import { cn, formatDateTime } from "@/lib/utils";
 import { isExperimentalFeature, isPlatformFeature } from "@/lib/plugin-modes";
 import { Select } from "@/components/ui/select";
+import { SignalPill } from "@/components/ui/status";
 import type { FeatureInfo, HumanizeConfig, ProxyTestResult } from "@/api/types";
 import { actionHint, actionLabel } from "@/lib/rate-actions";
 import { featureConfigPath } from "@/pages/Plugins/_shared/featureConfig";
@@ -235,6 +236,15 @@ export function AccountDetail() {
             (acc.tg_username ? `@${acc.tg_username}` : `#${acc.id}`)}
         </h1>
         <AccountStatusBadge status={acc.status} />
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <SignalPill
+          tone={acc.status === "active" ? "success" : acc.status === "paused" ? "warn" : "neutral"}
+          label="Worker"
+          value={acc.status}
+        />
+        <SignalPill tone="primary" label="已启用模块" value={`${enabledPluginCount} 项`} />
+        <SignalPill tone={idMissing ? "warn" : "success"} label="TG 身份" value={idMissing ? "待同步" : "已同步"} />
       </div>
 
       <Tabs defaultValue={defaultTab}>

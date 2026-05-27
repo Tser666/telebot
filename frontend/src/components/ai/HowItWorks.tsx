@@ -3,10 +3,9 @@ import { BookOpen, ShieldCheck } from "lucide-react";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
+import { SectionHeader } from "@/components/ui/status";
 import { CommandBadge } from "@/components/CommandBadge";
 
 export function HowItWorks({ cmdPrefix = ",", defaultOpen = false }: { cmdPrefix?: string; defaultOpen?: boolean }) {
@@ -15,13 +14,13 @@ export function HowItWorks({ cmdPrefix = ",", defaultOpen = false }: { cmdPrefix
       <summary className="cursor-pointer list-none">
         <Card className="transition-colors group-open:border-primary/40">
           <CardHeader className="pb-3">
-            <CardTitle className="inline-flex items-center gap-2 text-base">
-              <BookOpen className="h-4 w-4" />
-              工作原理
-            </CardTitle>
-            <CardDescription>
-              回复任意 Telegram 消息后发送 <CommandBadge className="mx-1">{cmdPrefix}ai 你的问题</CommandBadge>，worker 会把回答编辑回指令消息。
-            </CardDescription>
+            <SectionHeader
+              icon={BookOpen}
+              title="工作原理"
+              description={
+                <>回复任意 Telegram 消息后发送 <CommandBadge className="mx-1">{cmdPrefix}ai 你的问题</CommandBadge>，worker 会把回答编辑回指令消息。</>
+              }
+            />
           </CardHeader>
           <CardContent className="hidden space-y-3 text-sm group-open:block">
             <ol className="list-decimal space-y-1.5 pl-5 text-muted-foreground">

@@ -10,13 +10,12 @@ import { Select } from "@/components/ui/select";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/misc";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { SectionHeader, SignalPill } from "@/components/ui/status";
 
 import {
   createSudoUser,
@@ -269,10 +268,17 @@ export function SudoManagement() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Sudo 用户管理</CardTitle>
-        <CardDescription>
-          授权其他 Telegram 用户通过独立前缀触发指令。默认不授予任何对话或指令权限。
-        </CardDescription>
+        <SectionHeader
+          title="Sudo 用户管理"
+          description="授权其他 Telegram 用户通过独立前缀触发指令。默认不授予任何对话或指令权限。"
+          meta={
+            <SignalPill
+              tone={(listQ.data?.length ?? 0) > 0 ? "warn" : "neutral"}
+              label="已授权"
+              value={`${listQ.data?.length ?? 0} 人`}
+            />
+          }
+        />
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="rounded-lg border bg-muted/20 p-4">

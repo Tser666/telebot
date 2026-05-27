@@ -15,3 +15,9 @@
 
 - 可能存在用户或其他 agent 的未提交改动。不要 revert、checkout 或 reset 你没有明确负责的改动。
 - 手工编辑文件使用 `apply_patch`。
+
+## 项目级 Agent Playbook
+
+- 处理代码、文档、排障、UI、部署或发布任务时，先阅读并按需使用 `docs/AGENT-PLAYBOOKS.md`。
+- 复杂需求先走基础进入流程；Bug/异常优先使用 Plugin Hunt 的根因定位口径；UI 改动使用 UI Check；部署/远端操作使用 Deploy Check；推版、PR、release 使用 Release Check。
+- Playbook 只用于约束执行和验收，不得覆盖用户当前指令、版本发布规则或工作区安全规则。

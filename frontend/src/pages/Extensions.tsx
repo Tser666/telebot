@@ -47,6 +47,7 @@ import {
 } from "@/components/ui/table";
 import { MetaBadge } from "@/components/ui/meta-badge";
 import { Spinner } from "@/components/ui/misc";
+import { SectionHeader, SignalPill } from "@/components/ui/status";
 import { cn } from "@/lib/utils";
 import { goBackOr } from "@/lib/navigation";
 import { getErrMsg } from "@/lib/api";
@@ -143,12 +144,15 @@ export function Extensions() {
         <Button variant="ghost" size="sm" onClick={() => goBackOr(nav, "/plugins")}>
           <ArrowLeft className="mr-1 h-4 w-4" /> 返回上一页
         </Button>
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">模块安装与管理</h1>
-          <p className="text-sm text-muted-foreground">
-            这里负责安装、更新、卸载远程模块；装好后回模块中心按账号启用和配置。
-          </p>
-        </div>
+        <Card>
+          <CardHeader>
+            <SectionHeader
+              icon={Puzzle}
+              title="模块安装与管理"
+              description="这里负责安装、更新、卸载远程模块；装好后回模块中心按账号启用和配置。"
+            />
+          </CardHeader>
+        </Card>
       </div>
 
       {guideActive ? (
@@ -294,10 +298,11 @@ function RemoteUpdateSettingsCard() {
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-base">远程模块更新检查</CardTitle>
-        <CardDescription>
-          后台只检查是否有新版本，不会自动安装；发现更新后会在模块中心和已安装模块里提示。
-        </CardDescription>
+        <SectionHeader
+          icon={RefreshCw}
+          title="远程模块更新检查"
+          description="后台只检查是否有新版本，不会自动安装；发现更新后会在模块中心和已安装模块里提示。"
+        />
       </CardHeader>
       <CardContent className="flex flex-col gap-3 md:flex-row md:items-end">
         <div className="flex items-center gap-3 rounded-md border px-3 py-2">
@@ -350,10 +355,11 @@ function LocalImportCard() {
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-base">本地导入</CardTitle>
-        <CardDescription>
-          把按开发文档编写好的插件目录放到 <code>plugins/local_imports/</code>，然后在这里一键导入用于本地调试。
-        </CardDescription>
+        <SectionHeader
+          icon={GitFork}
+          title="本地导入"
+          description={<>把按开发文档编写好的插件目录放到 <code>plugins/local_imports/</code>，然后在这里一键导入用于本地调试。</>}
+        />
       </CardHeader>
       <CardContent>
         {localQ.isLoading ? (
@@ -459,10 +465,11 @@ function RemoteInstallCard() {
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-base">模块仓库</CardTitle>
-        <CardDescription>
-          添加 Git 仓库后浏览并安装模块
-        </CardDescription>
+        <SectionHeader
+          icon={GitFork}
+          title="模块仓库"
+          description="添加 Git 仓库后浏览并安装模块"
+        />
       </CardHeader>
       <CardContent className="space-y-4">
         {/* 添加仓库 */}
@@ -699,10 +706,19 @@ function InstalledPluginsSection() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">已安装模块</CardTitle>
-        <CardDescription>
-          这里管理模块包本身；账号级启停和配置统一回模块中心处理。
-        </CardDescription>
+        <SectionHeader
+          icon={Puzzle}
+          title="已安装模块"
+          description="这里管理模块包本身；账号级启停和配置统一回模块中心处理。"
+          meta={(
+            <SignalPill
+              tone="neutral"
+              label="总计"
+              value={builtin.length + thirdParty.length + remote.length}
+              className="h-8"
+            />
+          )}
+        />
       </CardHeader>
       <CardContent>
         {isLoading ? (

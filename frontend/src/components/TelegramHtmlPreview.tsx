@@ -30,10 +30,14 @@ export function TelegramHtmlPreview({
   value,
   mode,
   title = "TelePilot",
+  caption,
+  hints,
 }: {
   value: string;
   mode?: "html" | "markdown" | "plain";
   title?: string;
+  caption?: string;
+  hints?: Array<{ label: string; value: string }>;
 }) {
   const content = value || "预览内容为空。";
   const rendered =
@@ -48,8 +52,16 @@ export function TelegramHtmlPreview({
       />
     );
 
+  const modeLabel = mode === "markdown" ? "Markdown" : mode === "plain" ? "Plain" : "HTML";
+
   return (
     <div className="rounded-2xl border bg-gradient-to-b from-sky-50 to-emerald-50 p-4 text-xs dark:from-sky-950/30 dark:to-emerald-950/20">
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px]">
+        <span className="rounded-full border bg-background/80 px-2 py-0.5 font-medium text-muted-foreground">
+          解析：{modeLabel}
+        </span>
+        {caption ? <span className="text-muted-foreground">{caption}</span> : null}
+      </div>
       <div className="space-y-2.5">
         <div className="w-fit max-w-[78%] rounded-2xl rounded-bl-lg border bg-card px-3.5 py-2.5 text-foreground shadow-sm sm:max-w-[66%]">
           <div className="font-medium text-[11px] text-muted-foreground">示例用户</div>
@@ -64,6 +76,16 @@ export function TelegramHtmlPreview({
           </div>
         </div>
       </div>
+      {hints && hints.length > 0 ? (
+        <div className="mt-3 grid gap-1.5 rounded-xl border border-border/70 bg-background/75 p-2.5 text-[11px]">
+          {hints.map((hint) => (
+            <div key={`${hint.label}-${hint.value}`} className="flex items-start gap-1.5">
+              <span className="text-muted-foreground">{hint.label}</span>
+              <code className="font-mono text-foreground">{hint.value}</code>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

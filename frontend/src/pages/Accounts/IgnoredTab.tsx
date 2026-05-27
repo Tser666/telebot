@@ -5,7 +5,6 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
@@ -14,6 +13,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/misc";
+import { SectionHeader, SignalPill } from "@/components/ui/status";
 import {
   addIgnoredPeer,
   listIgnoredPeers,
@@ -220,27 +220,19 @@ function RecentCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">最近活跃会话</CardTitle>
-        <CardDescription className="flex items-center gap-2">
-          worker 内存中最近 50 个 incoming 会话；已加入允许会话的不再出现在这里
-          {!loading ? (
-            workerAlive ? (
-              <Badge
-                variant="outline"
-                className="border-emerald-300 text-emerald-700 dark:border-emerald-800 dark:text-emerald-300"
-              >
-                worker 在线
-              </Badge>
-            ) : (
-              <Badge
-                variant="outline"
-                className="border-destructive/40 text-destructive"
-              >
-                worker 离线
-              </Badge>
-            )
-          ) : null}
-        </CardDescription>
+        <SectionHeader
+          title="最近活跃会话"
+          description="worker 内存中最近 50 个 incoming 会话；已加入允许会话的不再出现在这里"
+          meta={
+            !loading ? (
+              workerAlive ? (
+                <SignalPill tone="success" label="状态" value="worker 在线" />
+              ) : (
+                <SignalPill tone="danger" label="状态" value="worker 离线" />
+              )
+            ) : null
+          }
+        />
       </CardHeader>
       <CardContent>
         {loading ? (

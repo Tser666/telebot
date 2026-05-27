@@ -13,10 +13,9 @@ import { Label } from "@/components/ui/label";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
+import { SectionHeader, SignalPill } from "@/components/ui/status";
 import { fetchMe } from "@/lib/auth";
 import { api, getErrMsg } from "@/lib/api";
 
@@ -88,25 +87,26 @@ export function UserAccount() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2">
-          <KeyRound className="h-4 w-4" /> 当前用户
-        </CardTitle>
-        <CardDescription>
-          {meQ.data ? (
-            <>
-              当前已登录：<span className="font-mono">{meQ.data.username}</span>
-              {meQ.data.has_totp ? (
-                <span className="ml-2 inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-300">
-                  <ShieldCheck className="h-3.5 w-3.5" /> 动态验证码（TOTP）已启用
-                </span>
-              ) : (
-                <span className="ml-2 text-amber-700 dark:text-amber-300">动态验证码（TOTP）未启用</span>
-              )}
-            </>
-          ) : (
-            "加载中…"
-          )}
-        </CardDescription>
+        <SectionHeader
+          icon={KeyRound}
+          title="当前用户"
+          description={
+            meQ.data ? (
+              <>当前已登录：<span className="font-mono">{meQ.data.username}</span></>
+            ) : (
+              "加载中…"
+            )
+          }
+          meta={
+            meQ.data ? (
+              <SignalPill
+                tone={meQ.data.has_totp ? "success" : "warn"}
+                label="TOTP"
+                value={meQ.data.has_totp ? "已启用" : "未启用"}
+              />
+            ) : null
+          }
+        />
       </CardHeader>
       <CardContent className="space-y-6">
         {/* 修改密码 */}

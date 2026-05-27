@@ -26,10 +26,16 @@ import type { AccountFeatureItem, FeatureInfo } from "@/api/types";
 import type { PluginInstallOut } from "@/api/plugins";
 import type { PluginLLMUsageSummaryItem } from "@/api/llmUsage";
 import { CommandBadge } from "@/components/CommandBadge";
-import { PageHeader, PageShell } from "@/components/layout/PageScaffold";
+import { PageShell } from "@/components/layout/PageScaffold";
 import { Spinner } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { MetaBadge } from "@/components/ui/meta-badge";
+import {
+  SectionHeader,
+  SignalPill,
+  StatusSummaryPanel,
+  ToneRailCard,
+} from "@/components/ui/status";
 import {
   Card,
   CardContent,
@@ -296,11 +302,17 @@ export function PluginsHome() {
         </Card>
       ) : null}
 
-      <PageHeader
+      <StatusSummaryPanel
+        icon={Boxes}
         title="模块中心"
         description="先在这里沉淀一套好用的指令、消息和 AI 模板，再按账号启用复用；新账号不用从零重配。"
-        icon={Boxes}
-        size="hero"
+        signals={(
+          <>
+            <SignalPill tone="primary" label="模块总数" value={features.length} />
+            <SignalPill tone="success" label="账号数量" value={accounts.length} />
+            <SignalPill tone="neutral" label="当前账号" value={selectedAccount?.name ?? "未选择"} />
+          </>
+        )}
       />
 
       <Card>
@@ -378,37 +390,43 @@ export function PluginsHome() {
             </Button>
           </div>
           <div className="rounded-lg border px-4 py-3">
-            <div className="inline-flex items-center gap-2 text-sm font-medium">
-              <Sparkles className="h-4 w-4 text-primary" />
-              AI 模块入口
-            </div>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">
-              AI 属于模块配置：先配置模型凭据，再创建指令模板，最后按账号启用；调用记录与排障集中在同一个工作台。
-            </p>
+            <SectionHeader
+              icon={Sparkles}
+              title="AI 模块入口"
+              description="AI 属于模块配置：先配置模型凭据，再创建指令模板，最后按账号启用；调用记录与排障集中在同一个工作台。"
+            />
             <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-              <ModuleAction
-                icon={<Sparkles className="h-4 w-4" />}
+              <ToneRailCard
+                icon={Sparkles}
                 title="AI 工作台"
-                desc="总览模型、指令模板和启用状态"
-                onClick={() => nav("/ai")}
+                value={<Button size="sm" variant="outline" onClick={() => nav("/ai")}>打开</Button>}
+                valueClassName="flex flex-wrap gap-2"
+                description="总览模型、指令模板和启用状态"
+                tone="primary"
               />
-              <ModuleAction
-                icon={<Package className="h-4 w-4" />}
+              <ToneRailCard
+                icon={Package}
                 title="模型提供商"
-                desc="配置 OpenAI、Anthropic、Ollama 等"
-                onClick={() => nav("/ai?tab=providers")}
+                value={<Button size="sm" variant="outline" onClick={() => nav("/ai?tab=providers")}>配置</Button>}
+                valueClassName="flex flex-wrap gap-2"
+                description="配置 OpenAI、Anthropic、Ollama 等"
+                tone="neutral"
               />
-              <ModuleAction
-                icon={<History className="h-4 w-4" />}
+              <ToneRailCard
+                icon={History}
                 title="近期调用"
-                desc="查看成功率、耗时和错误原因"
-                onClick={() => nav("/ai?tab=usage")}
+                value={<Button size="sm" variant="outline" onClick={() => nav("/ai?tab=usage")}>查看</Button>}
+                valueClassName="flex flex-wrap gap-2"
+                description="查看成功率、耗时和错误原因"
+                tone="success"
               />
-              <ModuleAction
-                icon={<BookOpen className="h-4 w-4" />}
+              <ToneRailCard
+                icon={BookOpen}
                 title="帮助与示例"
-                desc="浮层查看原理、示例和术语"
-                onClick={() => nav("/ai?help=1")}
+                value={<Button size="sm" variant="outline" onClick={() => nav("/ai?help=1")}>前往</Button>}
+                valueClassName="flex flex-wrap gap-2"
+                description="浮层查看原理、示例和术语"
+                tone="warn"
               />
             </div>
           </div>
@@ -451,10 +469,19 @@ export function PluginsHome() {
         }`}
       >
         <CardHeader>
-          <CardTitle>账号模块启用详情与配置</CardTitle>
-          <CardDescription>
-            先选择要配置的账号，再查看每类模块在该账号上的启用状态与配置入口。
-          </CardDescription>
+          <SectionHeader
+            icon={Package2}
+            title="账号模块启用详情与配置"
+            description="先选择要配置的账号，再查看每类模块在该账号上的启用状态与配置入口。"
+            meta={(
+              <SignalPill
+                tone="neutral"
+                label="分类"
+                value={(Object.keys(CATEGORY_META) as ModuleCategory[]).length}
+                className="h-8"
+              />
+            )}
+          />
         </CardHeader>
         <CardContent className="space-y-4">
           {accountFeaturesQ.isError ? (
@@ -492,7 +519,6 @@ export function PluginsHome() {
                 key={category}
                 title={CATEGORY_META[category].title}
                 hint={CATEGORY_META[category].hint}
-                icon={CATEGORY_META[category].icon}
                 features={grouped[category]}
                 selectedAccountId={selectedAccount?.id}
                 selectedFeatures={selectedAccount?.features ?? {}}
@@ -665,39 +691,9 @@ function GuideContextCard({
   );
 }
 
-function ModuleAction({
-  icon,
-  title,
-  desc,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  desc: string;
-  onClick: () => void;
-}) {
-  return (
-    <Button
-      type="button"
-      variant="outline"
-      className="h-full min-h-[76px] justify-start whitespace-normal px-3 py-2 text-left"
-      onClick={onClick}
-    >
-      <span className="flex min-w-0 items-start gap-2">
-        <span className="mt-0.5 shrink-0 text-primary">{icon}</span>
-        <span className="min-w-0">
-          <span className="block text-sm font-medium">{title}</span>
-          <span className="mt-1 block text-xs leading-5 text-muted-foreground">{desc}</span>
-        </span>
-      </span>
-    </Button>
-  );
-}
-
 function FeatureZone({
   title,
   hint,
-  icon,
   features,
   selectedAccountId,
   selectedFeatures,
@@ -708,7 +704,6 @@ function FeatureZone({
 }: {
   title: string;
   hint: string;
-  icon: React.ReactNode;
   features: FeatureInfo[];
   selectedAccountId?: number;
   selectedFeatures: Record<string, string>;
@@ -722,12 +717,16 @@ function FeatureZone({
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-base">
-          {icon}
-          {title}
-          <MetaBadge>{features.length}</MetaBadge>
-        </CardTitle>
-        <CardDescription>{hint}</CardDescription>
+        <SectionHeader
+          title={title}
+          description={hint}
+          meta={(
+            <div className="flex items-center gap-2">
+              <MetaBadge>{features.length}</MetaBadge>
+              <SignalPill tone="neutral" label="模块" value={features.length} className="h-8" />
+            </div>
+          )}
+        />
       </CardHeader>
       <CardContent>
         {features.length === 0 ? (

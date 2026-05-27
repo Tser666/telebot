@@ -37,6 +37,7 @@ import { Select } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/misc";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { SignalPill } from "@/components/ui/status";
 import {
   Table,
   TableBody,
@@ -766,6 +767,11 @@ export function BotTab({ aid }: { aid: number }) {
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap gap-2">
+        <SignalPill tone={bot.enabled ? "success" : "warn"} label="管理 Bot" value={bot.enabled ? "已启用" : "未启用"} />
+        <SignalPill tone={interactionReady ? "primary" : "neutral"} label="互动规则" value={interactionReady ? "可执行" : "待配置"} />
+        <SignalPill tone={interactionRunning ? "success" : "neutral"} label="互动运行态" value={interactionRunning ? "运行中" : "未运行"} />
+      </div>
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
         <Card>
           <CardHeader>

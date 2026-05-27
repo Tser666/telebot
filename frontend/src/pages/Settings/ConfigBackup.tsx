@@ -18,10 +18,9 @@ import { Select } from "@/components/ui/select";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
+import { SectionHeader, SignalPill } from "@/components/ui/status";
 import { api } from "@/lib/api";
 import { getErrMsg } from "@/lib/api";
 import {
@@ -256,8 +255,17 @@ export function ConfigBackup() {
     <>
       <Card>
       <CardHeader>
-        <CardTitle className="text-base">备份与恢复</CardTitle>
-        <CardDescription>导出或导入系统配置（可选是否包含敏感数据）</CardDescription>
+        <SectionHeader
+          title="备份与恢复"
+          description="导出或导入系统配置（可选是否包含敏感数据）"
+          meta={
+            <SignalPill
+              tone={selected.size > 0 ? "primary" : "neutral"}
+              label="已选分类"
+              value={`${selected.size}/${CATEGORIES.length}`}
+            />
+          }
+        />
       </CardHeader>
       <CardContent className="space-y-6">
         {/* 导出区域 */}
@@ -386,11 +394,10 @@ export function ConfigBackup() {
 
       <Card>
       <CardHeader>
-        <CardTitle className="text-base">账号配置包（Config Bundle）</CardTitle>
-        <CardDescription>
-          大白话：把 A 账号的规则、模块配置、自定义指令绑定、允许会话打包成一个 JSON 文件，再拿去给 B 账号套用。
-          上传后会先演练对比，不会立刻改数据；只有点“确认写入”才会真正保存到目标账号。
-        </CardDescription>
+        <SectionHeader
+          title="账号配置包（Config Bundle）"
+          description="把 A 账号的规则、模块配置、自定义指令绑定、允许会话打包成 JSON，再给 B 账号套用；上传后会先演练对比，确认写入才会真正落库。"
+        />
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="space-y-3 rounded-md border bg-muted/30 px-3 py-3">

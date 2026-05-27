@@ -8,17 +8,9 @@ import { getErrMsg } from "@/lib/api";
 import { Spinner } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { MetaBadge } from "@/components/ui/meta-badge";
+import { MeterBar, SectionHeader, SignalPill, ToneRailCard } from "@/components/ui/status";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-
-function SummaryTile({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="rounded-xl border bg-muted/20 p-3">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-1 text-lg font-semibold">{value}</p>
-    </div>
-  );
-}
 
 export function RecentUsageContent() {
   const providersQ = useQuery({
@@ -97,20 +89,46 @@ export function RecentUsageContent() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="inline-flex items-center gap-2">
-          <History className="h-4 w-4" /> 近期调用
-        </CardTitle>
-        <CardDescription>展示最近 100 条 LLM 调用记录与核心摘要。</CardDescription>
+        <SectionHeader
+          icon={History}
+          title="近期调用"
+          description="展示最近 100 条 LLM 调用记录与核心摘要。"
+        />
       </CardHeader>
       <CardContent className="space-y-4">
         {summary && (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-            <SummaryTile label="请求数" value={summary.request_count} />
-            <SummaryTile label="成功" value={summary.success_count} />
-            <SummaryTile label="失败" value={summary.failed_count} />
-            <SummaryTile label="Fallback" value={summary.fallback_count} />
-            <SummaryTile label="总 Token" value={summary.total_tokens} />
-            <SummaryTile label="平均耗时" value={`${summary.avg_latency_ms}ms`} />
+          <div className="space-y-3">
+            <div className="flex flex-wrap gap-2">
+              <SignalPill tone="primary" label="请求数" value={summary.request_count} />
+              <SignalPill tone="success" label="成功" value={summary.success_count} />
+              <SignalPill tone={summary.failed_count > 0 ? "warn" : "neutral"} label="失败" value={summary.failed_count} />
+              <SignalPill tone="neutral" label="Fallback" value={summary.fallback_count} />
+              <SignalPill tone="neutral" label="总 Token" value={summary.total_tokens} />
+              <SignalPill tone="primary" label="平均耗时" value={`${summary.avg_latency_ms}ms`} />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <ToneRailCard
+                icon={History}
+                title="成功率"
+                value={`${summary.request_count > 0 ? Math.round((summary.success_count / summary.request_count) * 100) : 0}%`}
+                description={<MeterBar value={summary.request_count > 0 ? (summary.success_count / summary.request_count) * 100 : 0} tone={summary.failed_count > 0 ? "warn" : "success"} className="mt-2" />}
+                tone={summary.failed_count > 0 ? "warn" : "success"}
+              />
+              <ToneRailCard
+                icon={History}
+                title="失败占比"
+                value={`${summary.request_count > 0 ? Math.round((summary.failed_count / summary.request_count) * 100) : 0}%`}
+                description={<MeterBar value={summary.request_count > 0 ? (summary.failed_count / summary.request_count) * 100 : 0} tone={summary.failed_count > 0 ? "warn" : "neutral"} className="mt-2" />}
+                tone={summary.failed_count > 0 ? "warn" : "neutral"}
+              />
+              <ToneRailCard
+                icon={History}
+                title="Fallback 占比"
+                value={`${summary.request_count > 0 ? Math.round((summary.fallback_count / summary.request_count) * 100) : 0}%`}
+                description={<MeterBar value={summary.request_count > 0 ? (summary.fallback_count / summary.request_count) * 100 : 0} tone="primary" className="mt-2" />}
+                tone="primary"
+              />
+            </div>
           </div>
         )}
 

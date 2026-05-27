@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { CommandBadge } from "@/components/CommandBadge";
 import { Spinner } from "@/components/ui/misc";
 import { AccountSummaryCard } from "@/components/AccountSummaryCard";
+import { SectionHeader, SignalPill } from "@/components/ui/status";
 import {
   deleteAccount,
   listAccounts,
@@ -130,8 +131,17 @@ export function AccountManagementPanel({
     <div className={className}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-          <p className="text-sm text-muted-foreground">{description}</p>
+          <SectionHeader
+            title={title}
+            description={description}
+            meta={
+              <SignalPill
+                tone={(data?.length ?? 0) > 0 ? "primary" : "neutral"}
+                label="账号数"
+                value={data?.length ?? 0}
+              />
+            }
+          />
         </div>
         <div className="relative flex w-full flex-col items-stretch gap-2 sm:w-auto sm:items-end">
           <div className="flex flex-wrap gap-2">

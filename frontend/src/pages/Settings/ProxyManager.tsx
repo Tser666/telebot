@@ -20,15 +20,14 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/misc";
+import { SectionHeader, SignalPill } from "@/components/ui/status";
 import {
   createProxy,
   deleteProxy,
@@ -231,10 +230,17 @@ export function ProxyManager() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">网络代理模板</CardTitle>
-        <CardDescription>
-          公用代理池：在绑定 TG 账号或账号详情中可选用其中一个；带「测试」按钮验证连通性 + 出口归属地
-        </CardDescription>
+        <SectionHeader
+          title="网络代理模板"
+          description="公用代理池：在绑定 TG 账号或账号详情中可选用其中一个；带「测试」按钮验证连通性 + 出口归属地"
+          meta={
+            <SignalPill
+              tone={(proxiesQ.data?.length ?? 0) > 0 ? "primary" : "neutral"}
+              label="代理数"
+              value={proxiesQ.data?.length ?? 0}
+            />
+          }
+        />
       </CardHeader>
       <CardContent className="space-y-4">
         {/* 新建 */}

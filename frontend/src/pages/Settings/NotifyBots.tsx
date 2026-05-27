@@ -9,11 +9,10 @@ import { Switch } from "@/components/ui/switch";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/misc";
+import { SectionHeader, SignalPill } from "@/components/ui/status";
 import {
   createNotifyBot,
   deleteNotifyBot,
@@ -95,10 +94,17 @@ export function NotifyBots() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">通知 Bot</CardTitle>
-        <CardDescription>
-          用 Telegram Bot API 发项目通知。Bot token 会加密保存，列表不会返回明文。
-        </CardDescription>
+        <SectionHeader
+          title="通知 Bot"
+          description="用 Telegram Bot API 发项目通知。Bot token 会加密保存，列表不会返回明文。"
+          meta={
+            <SignalPill
+              tone={(listQ.data?.length ?? 0) > 0 ? "success" : "neutral"}
+              label="已配置"
+              value={`${listQ.data?.length ?? 0} 个`}
+            />
+          }
+        />
       </CardHeader>
       <CardContent className="space-y-5">
         <div className="grid gap-3 md:grid-cols-4">

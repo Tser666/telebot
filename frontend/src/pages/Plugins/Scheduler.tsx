@@ -1,7 +1,9 @@
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, CalendarClock } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Card, CardHeader } from "@/components/ui/card";
+import { SectionHeader } from "@/components/ui/status";
 import { goBackOr } from "@/lib/navigation";
 import { SchedulerConfig } from "@/pages/Plugins/configs/Scheduler";
 
@@ -13,6 +15,15 @@ export function PluginsSchedulerPage() {
       <Button variant="ghost" size="sm" onClick={() => goBackOr(nav, "/plugins")}>
         <ArrowLeft className="mr-1 h-4 w-4" /> 返回上一页
       </Button>
+      <Card>
+        <CardHeader>
+          <SectionHeader
+            icon={CalendarClock}
+            title="定时任务"
+            description="按账号编排定时动作与调度策略，和模块中心启用状态保持一致。"
+          />
+        </CardHeader>
+      </Card>
       <SchedulerConfig />
     </div>
   );

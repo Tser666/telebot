@@ -22,6 +22,8 @@ import { RoutingFields } from "@/components/ai/RoutingFields";
 import { WebSearchFields } from "@/components/ai/WebSearchFields";
 import { CommandBadge } from "@/components/CommandBadge";
 import { Spinner } from "@/components/ui/misc";
+import { TelegramHtmlPreview } from "@/components/TelegramHtmlPreview";
+import { SignalPill } from "@/components/ui/status";
 import {
   Card,
   CardContent,
@@ -95,6 +97,10 @@ const AI_MODE_DEFAULTS: Record<
 const DEFAULT_AI_TEMPERATURE = AI_MODE_DEFAULTS.chat.temperature;
 const DEFAULT_AI_REASONING_EFFORT = AI_MODE_DEFAULTS.chat.reasoning_effort;
 const DEFAULT_AI_TIMEOUT_SECONDS = AI_MODE_DEFAULTS.chat.timeout_seconds;
+const REPLY_TEXT_PREVIEW_VALUES = {
+  args: "帮我把这句话翻译成英文并保留语气",
+  cmd: "translate",
+};
 
 interface FormState {
   id?: number;
@@ -201,6 +207,13 @@ function applyAiModeDefaults(form: FormState, nextMode: AiCommandMode): Partial<
         ? nextDefaults.timeout_seconds
         : form.ai_timeout_seconds,
   };
+}
+
+function renderReplyTextPreview(template: string): string {
+  const source = template || "hello {args}";
+  return source
+    .replace(/\{args\}/g, REPLY_TEXT_PREVIEW_VALUES.args)
+    .replace(/\{cmd\}/g, REPLY_TEXT_PREVIEW_VALUES.cmd);
 }
 
 function formFromTemplate(t: CommandTemplateOut): FormState {
@@ -1133,7 +1146,7 @@ function CommandEditDialog({
 
           {/* 按 type 切不同子表单 */}
           {form.type === "reply_text" && (
-            <div className="space-y-1.5">
+            <div className="space-y-3">
               <Label>回复文本 *</Label>
               <Textarea
                 value={form.text}
@@ -1144,6 +1157,21 @@ function CommandEditDialog({
               <p className="text-xs text-muted-foreground">
                 支持 `{"{args}"}` 占位符，会被指令后跟的参数替换
               </p>
+              <div className="flex flex-wrap gap-1.5">
+                <SignalPill tone="neutral" label="可用占位符" value="{args}" />
+                <SignalPill tone="neutral" label="示例参数" value={REPLY_TEXT_PREVIEW_VALUES.args} />
+              </div>
+              <TelegramHtmlPreview
+                value={renderReplyTextPreview(form.text)}
+                mode="html"
+                title={`${
+                  cmdPrefix
+                }${form.name || "reply_text"}`}
+                caption="最终会按 Telegram 消息样式发送"
+                hints={[
+                  { label: "{args}", value: REPLY_TEXT_PREVIEW_VALUES.args },
+                ]}
+              />
             </div>
           )}
 
@@ -1618,6 +1646,14 @@ function CommandEditDialog({
               <p className="text-xs text-muted-foreground">
                 调用流程：用户在 TG 中回复某消息并发 <CommandBadge>{cmdPrefix}{form.name || "ai"} 问题</CommandBadge>，worker 将「被回复消息正文 + 问题」拼成用户提示词，把回答编辑回原消息
               </p>
+              <div className="flex flex-wrap gap-1.5">
+                <SignalPill tone="primary" label="输出模式" value={form.ai_output_format} />
+                <SignalPill
+                  tone={form.ai_output_template.trim() ? "success" : "neutral"}
+                  label="模板"
+                  value={form.ai_output_template.trim() ? "已自定义" : "默认简洁"}
+                />
+              </div>
             </div>
           )}
         </div>
