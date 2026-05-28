@@ -716,6 +716,9 @@ async def _handle_interaction_update(aid: int, token: str, update: dict[str, Any
     if incoming is None:
         return
     async with AsyncSessionLocal() as db:
+        cfg = await account_bot_service.get_transfer_notice_config(db, incoming.account_id)
+        if incoming.user_id is not None and _int_or_none(cfg.get("interaction_bot_id")) == incoming.user_id:
+            return
         if await _try_handle_transfer_notice(db, incoming):
             return
         if await _try_handle_interaction_rule_command_or_keyword(db, incoming):
@@ -814,7 +817,7 @@ def _compact_rendered_template(text: str) -> str:
     return "\n".join(line.rstrip() for line in text.splitlines() if line.strip())
 
 
-def _render_transfer_bot_notice(
+def _render_transfer_bot_notice_with_error(
     template: str,
     payer_name: str,
     receiver_name: str,
@@ -823,7 +826,9 @@ def _render_transfer_bot_notice(
     payer_user_id: int | None = None,
     receiver_user_id: int | None = None,
     escape_html: bool = True,
-) -> str:
+) -> tuple[str, Exception | None]:
+    render_error: Exception | None = None
+
     def _value(value: Any) -> str:
         text = str(value)
         return account_bot_service.html_text(text) if escape_html else text
@@ -844,12 +849,35 @@ def _render_transfer_bot_notice(
     raw_template = str(template or "").strip() or DEFAULT_TRANSFER_NOTICE_TEMPLATE
     try:
         rendered = raw_template.format_map(values)
-    except Exception:
+    except Exception as exc:
+        render_error = exc
         rendered = DEFAULT_TRANSFER_NOTICE_TEMPLATE.format_map(values)
     rendered = _compact_rendered_template(rendered)
     if rendered:
-        return rendered[:4000]
-    return _compact_rendered_template(DEFAULT_TRANSFER_NOTICE_TEMPLATE.format_map(values))[:4000]
+        return rendered[:4000], render_error
+    return _compact_rendered_template(DEFAULT_TRANSFER_NOTICE_TEMPLATE.format_map(values))[:4000], render_error
+
+
+def _render_transfer_bot_notice(
+    template: str,
+    payer_name: str,
+    receiver_name: str,
+    amount: int,
+    *,
+    payer_user_id: int | None = None,
+    receiver_user_id: int | None = None,
+    escape_html: bool = True,
+) -> str:
+    rendered, _render_error = _render_transfer_bot_notice_with_error(
+        template,
+        payer_name,
+        receiver_name,
+        amount,
+        payer_user_id=payer_user_id,
+        receiver_user_id=receiver_user_id,
+        escape_html=escape_html,
+    )
+    return rendered
 
 
 def _interaction_chat_matches(cfg: dict[str, Any], chat_id: int) -> bool:
@@ -1207,6 +1235,31 @@ async def _load_account_holder_label(account_id: int) -> str:
         return f"账号 #{int(account_id)}"
 
 
+async def _resolve_payout_mode(account_id: int, chat_id: int | None) -> str:
+    """根据当前聊天是否纳入自动发奖监听范围，决定公告文案。"""
+
+    if chat_id is None:
+        return "manual"
+    try:
+        async with AsyncSessionLocal() as db:
+            cfg = await account_bot_service.get_transfer_notice_config(db, account_id)
+    except Exception:  # noqa: BLE001
+        log.debug("resolve payout mode failed aid=%s chat_id=%s", account_id, chat_id, exc_info=True)
+        return "manual"
+    if not bool(cfg.get("enabled")):
+        return "manual"
+    for rule in _interaction_rules(cfg):
+        action = str(rule.get("action") or "")
+        module_key = str(rule.get("module_key") or "").strip()
+        if action not in {"math10", "module"}:
+            continue
+        if action == "module" and module_key not in {"game24", "math10"}:
+            continue
+        if _rule_chat_matches(rule, int(chat_id)):
+            return "auto"
+    return "manual"
+
+
 async def _interaction_paid_threshold_message(db: Any, incoming: Incoming, rule: dict[str, Any]) -> str:
     rule_name = str(rule.get("name") or rule.get("id") or "该规则").strip()
     amount = rule.get("amount")
@@ -1367,7 +1420,9 @@ def _trusted_transfer_notice_sender_matches(cfg: dict[str, Any], sender_id: int 
         for value in (cfg.get("trusted_bot_id"), cfg.get("transfer_bot_id"))
         if value not in (None, "")
     }
-    return not trusted_ids or int(sender_id) in trusted_ids
+    if not trusted_ids:
+        return False
+    return int(sender_id) in trusted_ids
 
 
 async def _is_account_user_sender(db: Any, account_id: int, user_id: int) -> bool:
@@ -1472,6 +1527,12 @@ async def _execute_interaction_rule(
     event_type: str = "payment_confirmed",
 ) -> bool:
     if rule.get("action") == "math10":
+        log.warning(
+            "deprecated interaction rule action=math10 used aid=%s chat_id=%s rule=%s; use action=module module_key=math10 instead",
+            incoming.account_id,
+            incoming.chat_id,
+            rule.get("id"),
+        )
         await _start_math_game(incoming, prize=int(rule.get("math_prize") or 123))
         return True
     if rule.get("action") == "module":
@@ -1764,13 +1825,19 @@ async def _try_handle_math_answer(incoming: Incoming) -> bool:
         return True
     winner = account_bot_service.html_text(incoming.display_name or str(incoming.user_id or "未知用户"))
     account_holder = await _load_account_holder_label(incoming.account_id)
+    payout_mode = await _resolve_payout_mode(incoming.account_id, incoming.chat_id)
+    payout_line = (
+        f"奖金将由 {account_holder} 账号自动发放。"
+        if payout_mode == "auto"
+        else f"请由 {account_holder} 人工回复赢家发放奖金。"
+    )
     await _send(
         incoming,
         (
             f"答对了：{winner}\n"
             f"题目：{state.question} = {state.answer}\n"
             f"奖金：{state.prize}\n"
-            f"请由 {account_holder} 人工回复赢家发放奖金。"
+            f"{payout_line}"
         ),
         reply_to_message_id=incoming.message_id,
     )
@@ -1852,6 +1919,7 @@ async def _interaction_module_payload_async(
 ) -> dict[str, Any]:
     data = _interaction_module_payload(incoming, rule, parsed, event_type=event_type)
     data["payout_account_label"] = await _load_account_holder_label(incoming.account_id)
+    data["payout_mode"] = await _resolve_payout_mode(incoming.account_id, incoming.chat_id)
     return data
 
 
@@ -2070,14 +2138,31 @@ async def _try_handle_transfer_command(db: Any, incoming: Incoming) -> bool:
 
     payer = incoming.display_name or str(incoming.user_id)
     receiver = str(receiver_info["receiver_name"])
-    notice = _render_transfer_bot_notice(
-        str(cfg.get("transfer_notice_template") or DEFAULT_TRANSFER_NOTICE_TEMPLATE),
+    raw_notice_template = str(cfg.get("transfer_notice_template") or DEFAULT_TRANSFER_NOTICE_TEMPLATE)
+    notice, render_error = _render_transfer_bot_notice_with_error(
+        raw_notice_template,
         payer,
         receiver,
         amount,
         payer_user_id=incoming.user_id,
         receiver_user_id=_int_or_none(receiver_info.get("receiver_user_id")),
     )
+    if render_error is not None:
+        error_text = f"{type(render_error).__name__}: {render_error}"
+        log.warning(
+            "transfer notice template render failed aid=%s chat_id=%s error=%s template=%r",
+            incoming.account_id,
+            incoming.chat_id,
+            error_text,
+            raw_notice_template[:500],
+        )
+        await _write_interaction_runtime_log(
+            incoming,
+            LEVEL_WARN,
+            "转账通知模板渲染失败，已回退默认模板",
+            error=error_text,
+            template=raw_notice_template[:1000],
+        )
     result = await account_bot_service.send_message(transfer_token, incoming.chat_id, notice)
     log.info(
         "transfer command emitted notice aid=%s chat_id=%s payer=%r receiver=%r amount=%s",
@@ -2191,31 +2276,6 @@ async def _try_handle_transfer_notice(db: Any, incoming: Incoming) -> bool:
         parsed.get("amount"),
     )
     return True
-
-
-async def handle_transfer_notice_probe(
-    db: Any,
-    *,
-    account_id: int,
-    token: str,
-    chat_id: int,
-    sender_id: int,
-    text: str,
-    message_id: int | None = None,
-) -> bool:
-    """用测试发送接口拿到的 Abot 消息，主动跑一遍联动检查。"""
-
-    incoming = Incoming(
-        account_id=account_id,
-        token=token,
-        update_id=0,
-        user_id=sender_id,
-        chat_id=chat_id,
-        message_id=message_id,
-        text=text,
-        display_name=None,
-    )
-    return await _try_handle_transfer_notice(db, incoming)
 
 
 async def _audit_transfer_notice(db: Any, incoming: Incoming, parsed: dict[str, Any]) -> None:

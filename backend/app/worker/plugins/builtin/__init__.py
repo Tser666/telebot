@@ -10,5 +10,6 @@ __all__ = [
     "codex_image",
     "forward",
     "game24",
+    "math10",
     "scheduler",
 ]

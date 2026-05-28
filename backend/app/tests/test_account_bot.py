@@ -4,16 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
+from app.api import account_bots
 from app.db.models.account import Account
 from app.db.models.account_bot import AccountBot
 from app.db.models.log import RuntimeLog
-from app.schemas.account_bot import AccountBotConfigUpdate
-from app.services import account_bot_runtime, account_bot_service
+from app.schemas.account_bot import AccountBotConfigUpdate, AccountBotTestRequest
+from app.services import account_bot_runtime, account_bot_service, audit
 from app.worker.plugins import loader as plugin_loader
 from app.worker.plugins.builtin.chatgpt_image.manifest import MANIFEST as CHATGPT_IMAGE_MANIFEST
 from app.worker.plugins.builtin.codex_image.manifest import MANIFEST as CODEX_IMAGE_MANIFEST
@@ -132,6 +134,38 @@ def test_account_bot_token_payload_trims_whitespace() -> None:
     assert payload.bot_token == "123456:secret-token"
 
 
+@pytest.mark.asyncio
+async def test_account_bot_test_with_token_override_relies_on_polling(monkeypatch) -> None:
+    monkeypatch.setattr(
+        account_bot_service,
+        "send_message",
+        AsyncMock(return_value={"message_id": 123, "from": {"id": 456}}),
+    )
+    monkeypatch.setattr(account_bot_service, "sanitize_bot_error", lambda exc, *, token: str(exc))
+    monkeypatch.setattr(audit, "write", AsyncMock())
+
+    class _DB:
+        async def commit(self):
+            return None
+
+    user = SimpleNamespace(id=100)
+    resp = await account_bots.test_account_bot(
+        1,
+        AccountBotTestRequest(
+            chat_id=-100123,
+            text="测试联动消息",
+            bot_token_override="123456:override-token",
+        ),
+        _DB(),
+        user,
+    )
+
+    assert resp.ok is True
+    assert resp.sent == 1
+    assert "Bbot 将通过 polling 自然接收并触发联动" in (resp.message or "")
+    account_bot_service.send_message.assert_awaited_once()
+
+
 def test_account_bot_remote_plugin_policy_defaults_closed() -> None:
     policy = account_bot_service.normalize_remote_plugin_policy(None)
     assert policy == {
@@ -189,6 +223,7 @@ async def test_clear_transfer_bot_token_also_clears_detected_bot_id() -> None:
     row = SimpleNamespace(
         value={
             "enabled": True,
+            "trusted_bot_id": 456,
             "transfer_bot_token_enc": "old-token",
             "transfer_bot_id": 456,
             "rules": [
@@ -228,6 +263,78 @@ async def test_clear_transfer_bot_token_also_clears_detected_bot_id() -> None:
     assert row.value["transfer_bot_id"] is None
     assert out["transfer_bot_id"] is None
     assert out["has_transfer_bot_token"] is False
+
+
+@pytest.mark.asyncio
+async def test_update_transfer_notice_requires_trusted_bot_for_payment_rules(monkeypatch) -> None:
+    class _DB:
+        async def get(self, *_args):  # noqa: ANN002
+            return None
+
+        def add(self, _row):  # noqa: ANN001
+            return None
+
+        async def flush(self):
+            return None
+
+    monkeypatch.setattr(account_bot_service, "ensure_account", AsyncMock())
+
+    with pytest.raises(Exception) as exc_info:
+        await account_bot_service.update_transfer_notice_config(
+            _DB(),
+            1,
+            {
+                "enabled": True,
+                "rules": [
+                    {
+                        "id": "paid",
+                        "enabled": True,
+                        "trigger_mode": "payment",
+                        "trigger_texts": ["转账成功"],
+                    }
+                ],
+            },
+        )
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["code"] == "TRUSTED_BOT_ID_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_interaction_service_requires_trusted_bot_for_payment_rules(monkeypatch) -> None:
+    from app.services import interaction_bot_service
+
+    class _DB:
+        async def get(self, *_args):  # noqa: ANN002
+            return None
+
+        def add(self, _row):  # noqa: ANN001
+            return None
+
+        async def flush(self):
+            return None
+
+    monkeypatch.setattr(account_bot_service, "ensure_account", AsyncMock())
+
+    with pytest.raises(Exception) as exc_info:
+        await interaction_bot_service.update_transfer_notice_config(
+            _DB(),
+            1,
+            {
+                "enabled": True,
+                "rules": [
+                    {
+                        "id": "paid",
+                        "enabled": True,
+                        "trigger_mode": "both",
+                        "trigger_texts": ["转账成功"],
+                    }
+                ],
+            },
+        )
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["code"] == "TRUSTED_BOT_ID_REQUIRED"
 
 
 def test_account_bot_interaction_rules_normalize_and_sync_first_rule() -> None:
@@ -370,6 +477,102 @@ def test_account_bot_transfer_notice_parser() -> None:
     assert account_bot_runtime._parse_transfer_notice("转账成功：金额：100") is None
 
 
+def test_trusted_transfer_notice_sender_requires_configured_sender() -> None:
+    assert account_bot_runtime._trusted_transfer_notice_sender_matches({}, 12345) is False
+    assert account_bot_runtime._trusted_transfer_notice_sender_matches({"trusted_bot_id": 12345}, 12345) is True
+    assert account_bot_runtime._trusted_transfer_notice_sender_matches({"trusted_bot_id": 12345}, 12346) is False
+    assert account_bot_runtime._trusted_transfer_notice_sender_matches({"transfer_bot_id": 12345}, 12345) is True
+
+
+@pytest.mark.asyncio
+async def test_transfer_notice_hard_rejects_when_trusted_bot_ids_are_empty(monkeypatch) -> None:
+    start_math = AsyncMock()
+    monkeypatch.setattr(account_bot_runtime, "_start_math_game", start_math)
+    monkeypatch.setattr(
+        account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(
+            return_value={
+                "enabled": True,
+                "trusted_bot_id": None,
+                "transfer_bot_id": None,
+                "rules": [
+                    {
+                        "id": "paid",
+                        "enabled": True,
+                        "chat_ids": [-100123],
+                        "trigger_mode": "payment",
+                        "trigger_texts": ["转账成功"],
+                        "receiver_text": "BBB",
+                        "amount": 100,
+                        "action": "math10",
+                    }
+                ],
+            }
+        ),
+    )
+
+    handled = await account_bot_runtime._try_handle_transfer_notice(
+        SimpleNamespace(),
+        account_bot_runtime.Incoming(
+            account_id=1,
+            token="bbot-token",
+            update_id=1,
+            user_id=999999,
+            chat_id=-100123,
+            message_id=10,
+            text="转账成功\nAAA 射出 100\nBBB 接收 100",
+        ),
+    )
+
+    assert handled is False
+    start_math.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_interaction_update_ignores_message_from_interaction_bot_itself(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    transfer_notice = AsyncMock(return_value=False)
+    command_or_keyword = AsyncMock(return_value=False)
+    module_message = AsyncMock(return_value=False)
+    math_answer = AsyncMock(return_value=False)
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(
+        account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(return_value={"enabled": True, "interaction_bot_id": 8807483916}),
+    )
+    monkeypatch.setattr(account_bot_runtime, "_try_handle_transfer_notice", transfer_notice)
+    monkeypatch.setattr(account_bot_runtime, "_try_handle_interaction_rule_command_or_keyword", command_or_keyword)
+    monkeypatch.setattr(account_bot_runtime, "_try_handle_interaction_module_message", module_message)
+    monkeypatch.setattr(account_bot_runtime, "_try_handle_math_answer", math_answer)
+
+    await account_bot_runtime._handle_interaction_update(
+        1,
+        "bbot-token",
+        {
+            "update_id": 88,
+            "message": {
+                "message_id": 880,
+                "text": "转账成功\n奖金：888",
+                "from": {"id": 8807483916, "is_bot": True, "first_name": "Bbot"},
+                "chat": {"id": -100123, "type": "supergroup"},
+            },
+        },
+    )
+
+    transfer_notice.assert_not_awaited()
+    command_or_keyword.assert_not_awaited()
+    module_message.assert_not_awaited()
+    math_answer.assert_not_awaited()
+
+
 def test_account_bot_transfer_notice_template_renders_parseable_notice() -> None:
     template = account_bot_service.default_transfer_notice_config()["transfer_notice_template"]
 
@@ -390,6 +593,82 @@ def test_account_bot_transfer_notice_template_renders_parseable_notice() -> None
         "amount": 88,
         "receiver_user_id": 9988,
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("template", "error_type"),
+    [
+        ("转账成功\n付款人：{payer_name}\n金额：{amount:.2f}\n收款人：{receiver_name}", "ValueError"),
+        ("转账成功\n付款人：{payer_name\n收款人：{receiver_name}\n金额：{amount}", "ValueError"),
+    ],
+)
+async def test_transfer_command_template_render_failure_falls_back_and_logs(
+    monkeypatch,
+    caplog,
+    template: str,
+    error_type: str,
+) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    send = AsyncMock(return_value={})
+    runtime_log = AsyncMock()
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(account_bot_service, "send_message", send)
+    monkeypatch.setattr(account_bot_service, "get_transfer_bot_token", AsyncMock(return_value="abot-token"))
+    monkeypatch.setattr(account_bot_runtime, "_write_interaction_runtime_log", runtime_log)
+    monkeypatch.setattr(
+        account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(
+            return_value={
+                "enabled": True,
+                "chat_ids": [-100123],
+                "transfer_notice_template": template,
+            }
+        ),
+    )
+
+    with caplog.at_level(logging.WARNING, logger=account_bot_runtime.__name__):
+        await account_bot_runtime._handle_transfer_test_update(
+            1,
+            "bbot-token",
+            {
+                "update_id": 5,
+                "message": {
+                    "message_id": 50,
+                    "text": "+123",
+                    "from": {"id": 999, "first_name": "PayoutUser"},
+                    "chat": {"id": -100123, "type": "supergroup"},
+                    "reply_to_message": {
+                        "message_id": 49,
+                        "from": {"id": 111, "first_name": "Winner"},
+                        "text": "6",
+                    },
+                },
+            },
+        )
+
+    assert send.await_count == 1
+    assert send.await_args.args[:3] == (
+        "abot-token",
+        -100123,
+        "转账成功\n付款人：PayoutUser\n付款人ID：999\n收款人：Winner\n金额：123\n收款人ID：111",
+    )
+    assert runtime_log.await_count == 1
+    assert runtime_log.await_args.args[1:] == (
+        "warn",
+        "转账通知模板渲染失败，已回退默认模板",
+    )
+    assert runtime_log.await_args.kwargs["error"].startswith(f"{error_type}:")
+    assert runtime_log.await_args.kwargs["template"] == template
+    assert "transfer notice template render failed aid=1 chat_id=-100123" in caplog.text
+    assert error_type in caplog.text
 
 
 def test_interaction_rule_keywords_match_exact_text_or_notice_line() -> None:
@@ -427,6 +706,91 @@ def test_interaction_payment_payload_preserves_payer_user_id() -> None:
     assert payload["payer_name"] == "AAA"
     assert payload["sender_user_id"] == 456
     assert payload["event"]["data"]["payer_user_id"] == 111
+
+
+@pytest.mark.asyncio
+async def test_resolve_payout_mode_accepts_math10_module_rule(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(
+        account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(
+            return_value={
+                "enabled": True,
+                "rules": [
+                    {
+                        "enabled": True,
+                        "action": "module",
+                        "module_key": "math10",
+                        "chat_ids": [-100123],
+                    }
+                ],
+            }
+        ),
+    )
+
+    assert await account_bot_runtime._resolve_payout_mode(1, -100123) == "auto"
+
+
+@pytest.mark.asyncio
+async def test_interaction_payload_sets_auto_payout_mode_for_math10_module(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, model, key):  # noqa: ANN001
+            if model is account_bot_runtime.Account and key == 1:
+                return SimpleNamespace(tg_username="owner")
+            return None
+
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="bbot-token",
+        update_id=10,
+        user_id=456,
+        chat_id=-100123,
+        message_id=70,
+        text="10",
+        display_name="AAA",
+    )
+    rule = {
+        "id": "math10-ticket",
+        "action": "module",
+        "module_key": "math10",
+        "module_action": "start_math10",
+        "chat_ids": [-100123],
+    }
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(
+        account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(
+            return_value={
+                "enabled": True,
+                "rules": [rule],
+            }
+        ),
+    )
+
+    payload = await account_bot_runtime._interaction_module_payload_async(
+        incoming,
+        rule,
+        None,
+        event_type="message",
+    )
+
+    assert payload["payout_account_label"] == "@owner"
+    assert payload["payout_mode"] == "auto"
 
 
 @pytest.mark.asyncio
@@ -2775,7 +3139,7 @@ async def test_game24_winner_notice_replies_to_winning_answer(monkeypatch) -> No
             [
                 {
                     "type": "send_message",
-                    "text": "答对了：AAA\n题目：24 点 [1 5 5 5]\n答案：5*(5-1/5) = 24\n奖金：888\n请由 @owner 人工回复赢家发放奖金。",
+                    "text": "答对了：AAA\n题目：24 点 [1 5 5 5]\n答案：5*(5-1/5) = 24\n奖金：888\n奖金将由 @owner 账号自动发放。",
                     "reply_to_message_id": 99,
                 }
             ],
@@ -2829,11 +3193,12 @@ async def test_game24_winner_notice_replies_to_winning_answer(monkeypatch) -> No
     assert payload["event_type"] == "message"
     assert payload["message_text"] == "5*(5-1/5)"
     assert payload["payout_account_label"] == "@owner"
+    assert payload["payout_mode"] == "auto"
     assert send.await_count == 1
     assert send.await_args.args[:3] == (
         "bbot-token",
         -100123,
-        "答对了：AAA\n题目：24 点 [1 5 5 5]\n答案：5*(5-1/5) = 24\n奖金：888\n请由 @owner 人工回复赢家发放奖金。",
+        "答对了：AAA\n题目：24 点 [1 5 5 5]\n答案：5*(5-1/5) = 24\n奖金：888\n奖金将由 @owner 账号自动发放。",
     )
     assert send.await_args.kwargs["reply_to_message_id"] == 99
 
@@ -2971,6 +3336,7 @@ async def test_math_winner_notice_replies_to_winning_answer(monkeypatch) -> None
     send = AsyncMock()
     monkeypatch.setattr(account_bot_service, "send_message", send)
     monkeypatch.setattr(account_bot_runtime, "_load_account_holder_label", AsyncMock(return_value="@owner"))
+    monkeypatch.setattr(account_bot_runtime, "_resolve_payout_mode", AsyncMock(return_value="manual"))
     account_bot_runtime._MATH_GAMES[(1, -100123)] = account_bot_runtime.MathGameState(
         account_id=1,
         chat_id=-100123,
@@ -2998,6 +3364,43 @@ async def test_math_winner_notice_replies_to_winning_answer(monkeypatch) -> None
         "bbot-token",
         -100123,
         "答对了：&lt;AAA &amp; BBB&gt;\n题目：7 - 1 = 6\n奖金：123\n请由 @owner 人工回复赢家发放奖金。",
+    )
+    assert send.await_args.kwargs["reply_to_message_id"] == 66
+
+
+@pytest.mark.asyncio
+async def test_math_winner_notice_uses_auto_payout_copy(monkeypatch) -> None:
+    send = AsyncMock()
+    monkeypatch.setattr(account_bot_service, "send_message", send)
+    monkeypatch.setattr(account_bot_runtime, "_load_account_holder_label", AsyncMock(return_value="@owner"))
+    monkeypatch.setattr(account_bot_runtime, "_resolve_payout_mode", AsyncMock(return_value="auto"))
+    account_bot_runtime._MATH_GAMES[(1, -100123)] = account_bot_runtime.MathGameState(
+        account_id=1,
+        chat_id=-100123,
+        question="7 - 1",
+        answer=6,
+        prize=123,
+    )
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="bbot-token",
+        update_id=5,
+        user_id=111,
+        chat_id=-100123,
+        message_id=66,
+        text="6",
+        chat_type="supergroup",
+        display_name="AAA",
+    )
+
+    handled = await account_bot_runtime._try_handle_math_answer(incoming)
+
+    assert handled is True
+    assert send.await_count == 1
+    assert send.await_args.args[:3] == (
+        "bbot-token",
+        -100123,
+        "答对了：AAA\n题目：7 - 1 = 6\n奖金：123\n奖金将由 @owner 账号自动发放。",
     )
     assert send.await_args.kwargs["reply_to_message_id"] == 66
 

@@ -180,6 +180,12 @@ def check_answer(expr: str, target_numbers: list[int]) -> bool:
     return check_answer_detailed(expr, target_numbers).ok
 
 
+def _interaction_payout_line(payout_account_display: str, payout_mode: str | None) -> str:
+    if str(payout_mode or "").strip().lower() == "auto":
+        return f"奖金将由 {payout_account_display} 账号自动发放。"
+    return f"请由 {payout_account_display} 人工回复赢家发放奖金。"
+
+
 # ─────────────────────────────────────────────────────
 # 配置、事件与游戏状态
 # ─────────────────────────────────────────────────────
@@ -550,6 +556,7 @@ class Game24Plugin(Plugin):
         payout_account = str(payload.get("payout_account_label") or "账号持有者").strip()
         winner_display = html.escape(winner)
         payout_account_display = html.escape(payout_account)
+        payout_line = _interaction_payout_line(payout_account_display, payload.get("payout_mode"))
         nums_disp = " ".join(str(item) for item in state.numbers)
         await self._log(
             ctx,
@@ -570,7 +577,7 @@ class Game24Plugin(Plugin):
                     f"题目：24 点 [{nums_disp}]\n"
                     f"答案：{result.normalized_expr} = 24\n"
                     f"奖金：{state.prize}\n"
-                    f"请由 {payout_account_display} 人工回复赢家发放奖金。"
+                    f"{payout_line}"
                 ),
                 "reply_to_message_id": _int_payload(payload.get("message_id") or event.get("message_id")),
             },

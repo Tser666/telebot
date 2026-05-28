@@ -443,6 +443,21 @@ def normalize_interaction_rules(raw: Any) -> list[dict[str, Any]]:
     return out
 
 
+def _requires_trusted_transfer_notice_sender(data: dict[str, Any]) -> bool:
+    if not data.get("enabled"):
+        return False
+    for rule in data.get("rules") or []:
+        if not rule.get("enabled", True):
+            continue
+        if str(rule.get("trigger_mode") or "payment") in {"payment", "both"}:
+            return True
+    return False
+
+
+def _has_trusted_transfer_notice_sender(data: dict[str, Any]) -> bool:
+    return any(data.get(key) not in (None, "") for key in ("trusted_bot_id", "transfer_bot_id"))
+
+
 async def get_transfer_notice_config(db: AsyncSession, aid: int) -> dict[str, Any]:
     await ensure_account(db, aid)
     row = await db.get(SystemSetting, transfer_notice_setting_key(aid))
@@ -523,6 +538,12 @@ async def update_transfer_notice_config(
     ):
         incoming.pop(transient_key, None)
     data = normalize_transfer_notice_config({**current, **incoming})
+    if _requires_trusted_transfer_notice_sender(data) and not _has_trusted_transfer_notice_sender(data):
+        raise _bad(
+            "TRUSTED_BOT_ID_REQUIRED",
+            "启用转账触发的规则前，必须配置可信通知 Bot ID（测试 Abot 或官方通知 Bot）",
+            422,
+        )
     if row is None:
         row = SystemSetting(key=setting_key, value=data)
         db.add(row)

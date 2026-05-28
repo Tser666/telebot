@@ -108,18 +108,11 @@ async def test_account_bot(
     """
 
     token: str
-    account_token: str | None = None
     if payload.bot_token_override:
         token = payload.bot_token_override
-        try:
-            row = await account_bot_service.get_bot_config(db, aid, create=False)
-            account_token = account_bot_service.decrypt_bot_token(row)
-        except Exception:  # noqa: BLE001
-            account_token = None
     else:
         row = await account_bot_service.get_bot_config(db, aid, create=False)
         token = account_bot_service.decrypt_bot_token(row)
-        account_token = token
 
     text = payload.text or "✅ TelePilot 账号 Bot 测试消息发送成功。"
     sent = 0
@@ -127,29 +120,8 @@ async def test_account_bot(
 
     if payload.chat_id is not None:
         try:
-            result = await account_bot_service.send_message(token, int(payload.chat_id), text)
+            await account_bot_service.send_message(token, int(payload.chat_id), text)
             sent = 1
-            from_user = result.get("from") if isinstance(result, dict) else None
-            sender_id = (
-                int(from_user["id"])
-                if isinstance(from_user, dict) and from_user.get("id") is not None
-                else None
-            )
-            message_id = (
-                int(result["message_id"])
-                if isinstance(result, dict) and result.get("message_id") is not None
-                else None
-            )
-            if payload.bot_token_override and account_token and sender_id is not None:
-                await interaction_bot_runtime.handle_transfer_notice_probe(
-                    db,
-                    account_id=aid,
-                    token=account_token,
-                    chat_id=int(payload.chat_id),
-                    sender_id=sender_id,
-                    text=text,
-                    message_id=message_id,
-                )
         except Exception as exc:  # noqa: BLE001
             last_error = account_bot_service.sanitize_bot_error(exc, token=token)
     else:
@@ -196,7 +168,11 @@ async def test_account_bot(
     return AccountBotTestResponse(
         ok=True,
         sent=sent,
-        message="测试消息已发送到指定会话" if payload.chat_id is not None else "测试消息已发送",
+        message=(
+            "测试消息已发送到指定会话，Bbot 将通过 polling 自然接收并触发联动。"
+            if payload.chat_id is not None
+            else "测试消息已发送，Bbot 将通过 polling 自然接收并触发联动。"
+        ),
     )
 
 

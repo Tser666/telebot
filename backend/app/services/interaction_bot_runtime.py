@@ -30,27 +30,6 @@ async def restart_interaction_bot(aid: int) -> None:
     await account_bot_runtime.restart_interaction_bot(aid)
 
 
-async def handle_transfer_notice_probe(
-    db: Any,
-    *,
-    account_id: int,
-    token: str,
-    chat_id: int,
-    sender_id: int,
-    text: str,
-    message_id: int | None = None,
-) -> bool:
-    return await account_bot_runtime.handle_transfer_notice_probe(
-        db,
-        account_id=account_id,
-        token=token,
-        chat_id=chat_id,
-        sender_id=sender_id,
-        text=text,
-        message_id=message_id,
-    )
-
-
 async def _handle_interaction_update(aid: int, token: str, update: dict[str, Any]) -> None:
     await account_bot_runtime._handle_interaction_update(aid, token, update)
 

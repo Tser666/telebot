@@ -122,12 +122,13 @@ async def test_game24_on_interaction_handles_three_event_types(monkeypatch) -> N
             "message_id": 99,
             "sender_name": "AAA",
             "payout_account_label": "@owner",
+            "payout_mode": "auto",
         },
     )
     assert answer_actions == [
         {
             "type": "send_message",
-            "text": "答对了：AAA\n题目：24 点 [1 5 5 5]\n答案：5*(5-1/5) = 24\n奖金：888\n请由 @owner 人工回复赢家发放奖金。",
+            "text": "答对了：AAA\n题目：24 点 [1 5 5 5]\n答案：5*(5-1/5) = 24\n奖金：888\n奖金将由 @owner 账号自动发放。",
             "reply_to_message_id": 99,
         },
         {"type": "end_session"},

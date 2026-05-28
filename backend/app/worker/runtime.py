@@ -73,7 +73,7 @@ log = logging.getLogger(__name__)
 
 _CONFIG_RECONCILE_SECONDS = max(30, int(app_settings.worker_reconcile_seconds or 180))
 _ACCOUNT_BOT_AUTO_AWARD_DEDUPE_PREFIX = "account_bot:auto_award:"
-_ACCOUNT_BOT_AUTO_AWARD_DEDUPE_TTL_SECONDS = 3600
+_ACCOUNT_BOT_AUTO_AWARD_DEDUPE_TTL_SECONDS = 86400
 
 
 def _httpx_proxy_url_from_proxy(proxy: Proxy | None) -> str | None:
@@ -134,8 +134,12 @@ async def _load_account_bot_auto_award_config(account_id: int) -> dict[str, Any]
         )
     if not bool(cfg.get("enabled")):
         return None
+    try:
+        bot_id = int(cfg.get("interaction_bot_id"))
+    except (TypeError, ValueError):
+        bot_id = None
     bot_username = _normalize_tg_username(str(cfg.get("interaction_bot_username") or ""))
-    if not bot_username:
+    if bot_id is None and not bot_username:
         return None
     math_chat_ids: list[int] = []
     raw_rules = cfg.get("rules")
@@ -145,7 +149,7 @@ async def _load_account_bot_auto_award_config(account_id: int) -> dict[str, Any]
                 continue
             action = str(rule.get("action") or "")
             module_key = str(rule.get("module_key") or "")
-            if action == "math10" or (action == "module" and module_key == "game24"):
+            if action == "math10" or (action == "module" and module_key in {"game24", "math10"}):
                 raw_rule_chat_ids = rule.get("chat_ids") or cfg.get("chat_ids")
                 if isinstance(raw_rule_chat_ids, list):
                     for item in raw_rule_chat_ids:
@@ -157,6 +161,7 @@ async def _load_account_bot_auto_award_config(account_id: int) -> dict[str, Any]
                             math_chat_ids.append(chat_id)
     if math_chat_ids:
         return {
+            "bot_id": bot_id,
             "bot_username": bot_username,
             "chat_ids": math_chat_ids,
         }
@@ -176,6 +181,7 @@ async def _load_account_bot_auto_award_config(account_id: int) -> dict[str, Any]
     if not chat_ids:
         return None
     return {
+        "bot_id": bot_id,
         "bot_username": bot_username,
         "chat_ids": chat_ids,
     }
@@ -208,12 +214,30 @@ async def _try_account_bot_auto_award(client: Any, redis: Any, account_id: int, 
             sender = await event.get_sender()
         except Exception:  # noqa: BLE001
             sender = None
+    message_id = getattr(event, "id", None) or getattr(getattr(event, "message", None), "id", None)
+    try:
+        sender_id = int(getattr(sender, "id", None))
+    except (TypeError, ValueError):
+        sender_id = None
+    try:
+        cfg_bot_id = int(cfg.get("bot_id"))
+    except (TypeError, ValueError):
+        cfg_bot_id = None
     sender_username = _normalize_tg_username(getattr(sender, "username", None))
-    if sender_username is None or sender_username != cfg.get("bot_username"):
+    cfg_username = cfg.get("bot_username")
+    if cfg_bot_id is not None:
+        if sender_id != cfg_bot_id:
+            return False
+    elif cfg_username is not None:
+        if sender_username != cfg_username:
+            return False
+    else:
         return False
 
-    message_id = getattr(event, "id", None) or getattr(getattr(event, "message", None), "id", None)
-    dedupe_key = f"{_ACCOUNT_BOT_AUTO_AWARD_DEDUPE_PREFIX}{account_id}:{chat_id}:{reply_to_msg_id}:{prize}"
+    dedupe_key = (
+        f"{_ACCOUNT_BOT_AUTO_AWARD_DEDUPE_PREFIX}"
+        f"{account_id}:{chat_id}:{message_id}:{reply_to_msg_id}:{prize}"
+    )
     try:
         acquired = await redis.set(
             dedupe_key,

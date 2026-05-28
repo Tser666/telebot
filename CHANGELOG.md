@@ -14,6 +14,22 @@
 
 ## [Unreleased]
 
+## [0.25.0-rc.7] — 2026-05-28 · rc · 交互 Bot 联动修复与优化
+
+### Added
+- 新增内置 `math10` 交互 Bot 模块，支持转账命中或关键词开局、群内答题、中奖公告和会话清理，并保留旧 `action=math10` 兼容路径。
+- 设计文档补充三角联动中 UserBot 的职责边界，说明低频 outgoing、必要 incoming 订阅、Bbot 不碰钱和 UserBot 发奖的分工。
+
+### Changed
+- `interaction_bot_service` 收敛为 `account_bot_service` 的 façade，避免转账联动配置、归一化和 token 读取逻辑双份漂移。
+- 测试发送不再通过 in-process 转账探针直连触发联动，改为提示 Bbot 通过 polling 自然接收并触发。
+- game24、math10 中奖公告会根据自动发奖状态切换“自动发放”或“人工回复”提示，减少群内认知割裂。
+
+### Fixed
+- 转账通知可信来源改为默认拒绝；启用转账触发规则时必须配置可信通知 Bot ID，避免任意用户伪造付款文本触发模块。
+- UserBot 自动发奖改为优先校验 Bot ID，并把公告消息 ID 纳入 24 小时去重 key，降低误发和重启重复发奖风险。
+- 转账通知模板包含坏占位符或格式错误时，Bbot 会回退到默认通知模板继续发送，并把渲染失败写入 warning 与 runtime log，便于在 GUI 中定位配置问题。
+
 ## [0.25.0-rc.6] — 2026-05-28 · rc · 前端状态视觉推广与协作流程沉淀
 
 ### Added

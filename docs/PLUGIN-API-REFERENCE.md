@@ -222,6 +222,7 @@ MANIFEST = Manifest(
 | auto_reply | 规则通过 Rules API 管理 | `rules` fallback | 已有 |
 | autorepeat | ✅ trigger / repeat / chat 配置 | `rules` | 已有 |
 | game24 | ✅ command, timeout | `single` | 已补 |
+| math10 | ✅ interaction_entries.start_math_game / prize | `single` | 交互 Bot 可启动 |
 | codex_image | ✅ command, access_token, model, message_template, image_size/aspect_ratio/image_format, timeout/status/output/instructions | `single` | 内置图片模块 |
 | scheduler | ✅ default_notify, max_tasks | `platform` | 已迁移为平台基础能力 |
 
@@ -248,6 +249,14 @@ version_pattern = r"^\d+\.\d+\.\d+"
 交互 Bot 用来承接群内高频互动，不能直接复用 UserBot 插件命令作为启动入口；否则高频游戏又会回到 UserBot 账号身上，违背风控隔离目标。后续模块要支持“转账命中后启动”，应通过 Manifest 声明一个或多个交互入口，并实现 `on_interaction` 返回平台标准动作。
 
 推荐在 `manifest.py` 顶层声明 `category` 和 `interaction_entries`；旧写法也兼容 `config_schema["x-category"]` 与 `config_schema["x-interaction-entries"]`。这是声明式协议，不要求模块自己解析转账通知、Bot Token 或群消息格式。
+
+### 三角联动里的 UserBot 角色
+
+这里的三角联动，指的是 `Bbot` 负责群内公告和规则触发，交互 Bot 负责承接高频互动，`UserBot` 负责最后一段账号动作。`UserBot` 不是拿来跑高频游戏的，也不是拿来直接接收所有群消息的，它只需要稳定监听 `Bbot` 的公告和命中结果，在需要发奖或补发时按公告去回复即可。
+
+`outgoing` 的频率控制，指的是当前 `UserBot` 账号自己发出的消息要保持低频、可解释、可回溯，避免把大量游戏交互都压回账号本身。`incoming` 订阅则只表示这个账号愿意看见哪些外部消息，用来做公告监听、状态同步和必要的自动回复，不表示这些消息都能直接触发指令，更不表示可以绕过风控做批量互动。
+
+原则上，`Bbot` 不碰钱，只负责公告、命中、对账提示和规则事件；真正的奖金发放仍由 `UserBot` 根据 `Bbot` 公告去回复完成。模块如果要做发奖、结算或红包类动作，也应把钱相关动作留在 `UserBot` 侧，不要把转账、发奖、催付这些动作混进交互 Bot 的高频入口里。
 
 模块分类只保留三类，前端会按中文分组展示：
 
@@ -544,8 +553,8 @@ class Game24Plugin(Plugin):
 
 1. 原模块本体不得为了交互 Bot 直接改写 `commands` / `on_message` 语义；UserBot 入口和交互 Bot 入口是两套边界。
 2. 可以把纯业务逻辑抽到共享函数，例如题目生成、答案校验、渲染模板；UserBot 插件和交互 Bot 适配器共同调用这些纯函数。
-3. 模块不处理 Bot Token、Abot 通知格式、转账过滤、发奖账号；这些都属于平台层职责。
-4. 交互 Bot 中奖公告必须引用赢家的答案消息，方便 UserBot 账号按公告自动回复发奖。
+3. 模块不处理 Bot Token、Bbot 通知格式、转账过滤、发奖账号；这些都属于平台层职责，钱相关动作也不该放进交互 Bot 的高频入口。
+4. 交互 Bot 中奖公告必须引用赢家的答案消息，方便 `UserBot` 账号按 `Bbot` 公告自动回复发奖或补发奖金。
 5. 若模块未声明 `x-interaction-entries`，前端不应把它展示为可由交互 Bot 启动的模块。
 
 ---
