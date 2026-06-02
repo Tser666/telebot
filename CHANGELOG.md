@@ -14,6 +14,12 @@
 
 ## [Unreleased]
 
+## [0.27.2] — 2026-06-02 · patch · PWA 写请求与缓存修复
+
+### Fixed
+- 前端请求层现在会在每次请求拦截器里强制补齐 `X-Requested-With: telepilot-ui`，并在 CSRF token 失效或缺失时自动刷新 token 后重试一次写请求，降低移动端 PWA 旧状态导致“缺少或非法请求头”的概率。
+- 生产前端 Nginx 对 `index.html`、`sw.js`、`manifest.webmanifest` 等 PWA 入口文件改为禁用缓存，避免手机已安装 PWA 长时间持有旧入口或旧 service worker；带 hash 的静态资源继续使用长期缓存。
+
 ## [0.27.1] — 2026-05-31 · patch · 消息模板实验室同步与预览修复
 
 ### Fixed

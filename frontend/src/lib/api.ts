@@ -3,8 +3,14 @@ import axios, { AxiosHeaders, type AxiosError, type InternalAxiosRequestConfig }
 
 const CSRF_COOKIE = "csrf_token";
 const CSRF_HEADER = "X-CSRF-Token";
+const REQUESTED_WITH_HEADER = "X-Requested-With";
+const REQUESTED_WITH_VALUE = "telepilot-ui";
 
 let csrfFetch: Promise<string | null> | null = null;
+
+type CsrfRetryConfig = InternalAxiosRequestConfig & {
+  _csrfRetry?: boolean;
+};
 
 function readCookie(name: string): string | null {
   if (typeof document === "undefined") return null;
@@ -21,8 +27,20 @@ function needsCsrf(config: InternalAxiosRequestConfig) {
   return !["GET", "HEAD", "OPTIONS"].includes(method);
 }
 
-async function ensureCsrfToken(): Promise<string | null> {
-  const existing = readCookie(CSRF_COOKIE);
+function writeRequestHeaders(config: InternalAxiosRequestConfig): AxiosHeaders {
+  const headers = AxiosHeaders.from(config.headers);
+  headers.set(REQUESTED_WITH_HEADER, REQUESTED_WITH_VALUE);
+  config.headers = headers;
+  return headers;
+}
+
+function clearCookie(name: string) {
+  if (typeof document === "undefined") return;
+  document.cookie = `${name}=; Max-Age=0; path=/; SameSite=Lax`;
+}
+
+async function ensureCsrfToken(forceRefresh = false): Promise<string | null> {
+  const existing = forceRefresh ? null : readCookie(CSRF_COOKIE);
   if (existing) return existing;
   if (!csrfFetch) {
     csrfFetch = api.get("/api/auth/csrf", { timeout: 5000 })
@@ -39,16 +57,16 @@ export const api = axios.create({
   withCredentials: true,
   timeout: 15000,
   headers: {
-    "X-Requested-With": "telepilot-ui",
+    [REQUESTED_WITH_HEADER]: REQUESTED_WITH_VALUE,
   },
 });
 
 api.interceptors.request.use(async (config) => {
+  const headers = writeRequestHeaders(config);
   if (needsCsrf(config)) {
     const token = await ensureCsrfToken();
     if (token) {
-      config.headers = AxiosHeaders.from(config.headers);
-      config.headers.set(CSRF_HEADER, token);
+      headers.set(CSRF_HEADER, token);
     }
   }
   return config;
@@ -56,8 +74,26 @@ api.interceptors.request.use(async (config) => {
 
 api.interceptors.response.use(
   (r) => r,
-  (err: AxiosError) => {
+  async (err: AxiosError) => {
     const status = err.response?.status;
+    const code = getErrCode(err);
+    const config = err.config as CsrfRetryConfig | undefined;
+    if (
+      status === 403
+      && config
+      && needsCsrf(config)
+      && !config._csrfRetry
+      && (code === "CSRF_TOKEN_REQUIRED" || code === "CSRF_HEADER_REQUIRED")
+    ) {
+      config._csrfRetry = true;
+      clearCookie(CSRF_COOKIE);
+      const token = await ensureCsrfToken(true);
+      const headers = writeRequestHeaders(config);
+      if (token) {
+        headers.set(CSRF_HEADER, token);
+      }
+      return api.request(config);
+    }
     if (status === 401 && !location.pathname.startsWith("/login")) {
       location.href = "/login";
     }
