@@ -1110,7 +1110,7 @@ def _rule_state_key(account_id: int, rule: dict[str, Any], chat_id: int | None) 
 
 
 def _interaction_session_scope(rule: dict[str, Any], chat_id: int | None, user_id: int | None) -> str:
-    scope = str(rule.get("concurrency") or "chat")
+    scope = str(rule.get("module_session_scope") or rule.get("concurrency") or "chat")
     if scope == "none":
         return "global"
     if scope == "user":
@@ -1225,7 +1225,7 @@ async def _save_interaction_session(
 
 async def _load_interaction_session(incoming: Incoming, rule: dict[str, Any]) -> dict[str, Any] | None:
     keys = [_interaction_session_key(incoming.account_id, rule, incoming.chat_id, incoming.user_id)]
-    if str(rule.get("concurrency") or "chat") == "user":
+    if str(rule.get("module_session_scope") or rule.get("concurrency") or "chat") == "user":
         keys.append(_interaction_session_key(incoming.account_id, rule, incoming.chat_id, None))
     try:
         redis = get_redis()
@@ -1247,7 +1247,7 @@ async def _load_interaction_session(incoming: Incoming, rule: dict[str, Any]) ->
 
 
 async def _interaction_session_keys_for_rule(account_id: int, rule: dict[str, Any], chat_id: int | None) -> list[str]:
-    if str(rule.get("concurrency") or "chat") != "user":
+    if str(rule.get("module_session_scope") or rule.get("concurrency") or "chat") != "user":
         return [_interaction_session_key(account_id, rule, chat_id)]
 
     prefix = _interaction_session_key(account_id, rule, chat_id, None).rsplit(":", 1)[0] + ":"
@@ -1316,7 +1316,7 @@ async def _clear_loaded_interaction_session(
     *,
     incoming_user_id: int | None = None,
 ) -> int:
-    if str(rule.get("concurrency") or "chat") != "user":
+    if str(rule.get("module_session_scope") or rule.get("concurrency") or "chat") != "user":
         return 1 if await _clear_interaction_session(account_id, rule, chat_id) else 0
 
     user_ids: list[int | None] = []

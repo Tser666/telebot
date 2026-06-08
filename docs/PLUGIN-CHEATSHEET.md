@@ -18,6 +18,9 @@
 - `on_interaction` 用于交互 Bot，按 `entry_key` 和 `payload["event"]["type"]` 分流。
 - 常见事件：`payment_confirmed`、`keyword`、`message`、`session_close`。
 - 常见动作：`send_message`、`send_photo`、`send_file`、`end_session`。
+- `interaction_entries[].session_scope` 必填：群局写 `chat`，个人流程写 `user`，一次性动作写 `none`。
+- 规则 `concurrency=user` 只表示每用户 CD/每日上限，不等于模块会话也按用户。
+- 自动回复和交互 Bot 都只是触发器；业务逻辑放插件本体，UserBot 命令和 `on_interaction` 调同一份业务函数。
 - 长表单页要把“使用说明 → 功能总开关 → 配置”拆成三张卡。
 - 有保存字段的页面要放顶部冻结“配置操作”条。
 - 规则驱动页用 `rules`，单配置页用 `single`，平台能力用 `platform`。
@@ -32,4 +35,3 @@
 - 日志里不要放 token、session、完整路径或完整隐私消息。
 - 普通指令只由当前账号 outgoing 触发，不能直接让群成员触发管理命令。
 - 需要更多细节时，分别看概览、API、HTTP、安全和远程模块文档。
-

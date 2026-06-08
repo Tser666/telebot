@@ -116,6 +116,7 @@ class AccountBotInteractionRule(BaseModel):
     math_prize: int = Field(default=123, ge=1)
     module_key: str | None = Field(default=None, max_length=64)
     module_action: str | None = Field(default=None, max_length=64)
+    module_session_scope: InteractionConcurrency | None = None
     module_prize: int | None = Field(default=None, ge=1)
     module_config: dict[str, Any] = Field(default_factory=dict)
     module_start_text: str | None = Field(default=None, max_length=500)
@@ -227,6 +228,7 @@ class AccountBotInteractionConfig(BaseModel):
     math_prize: int = Field(default=123, ge=1)
     module_key: str | None = Field(default=None, max_length=64)
     module_action: str | None = Field(default=None, max_length=64)
+    module_session_scope: InteractionConcurrency | None = None
     module_prize: int | None = Field(default=None, ge=1)
     module_config: dict[str, Any] = Field(default_factory=dict)
     module_start_text: str | None = Field(default=None, max_length=500)
@@ -254,6 +256,7 @@ class AccountBotInteractionConfig(BaseModel):
         "transfer_bot_token",
         "module_key",
         "module_action",
+        "module_session_scope",
         "module_start_text",
         "user_cooldown_seconds",
         "disabled_message",

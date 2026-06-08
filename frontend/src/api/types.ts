@@ -186,6 +186,7 @@ export interface AccountBotInteractionRule {
   math_prize: number;
   module_key?: string | null;
   module_action?: string | null;
+  module_session_scope?: "chat" | "user" | "none" | null;
   module_config?: Record<string, unknown> | null;
   module_prize?: number | null;
   module_start_text?: string | null;
@@ -230,6 +231,7 @@ export interface AccountBotInteractionConfig {
   math_prize: number;
   module_key?: string | null;
   module_action?: string | null;
+  module_session_scope?: "chat" | "user" | "none" | null;
   module_config?: Record<string, unknown> | null;
   module_prize?: number | null;
   module_start_text?: string | null;
@@ -268,6 +270,7 @@ export type AccountBotInteractionConfigUpdate = Pick<
   | "math_prize"
   | "module_key"
   | "module_action"
+  | "module_session_scope"
   | "module_config"
   | "module_prize"
   | "module_start_text"

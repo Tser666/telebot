@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -519,6 +520,54 @@ def test_account_bot_interaction_rule_normalizes_module_action() -> None:
     assert rule["module_key"] == "game24"
     assert rule["module_prize"] == 456
     assert rule["module_start_text"] == "正在开启 24 点"
+
+
+def test_interaction_rule_uses_declared_installed_entry_session_scope(monkeypatch, tmp_path) -> None:
+    plugin_dir = tmp_path / "new_game"
+    plugin_dir.mkdir()
+    (plugin_dir / "plugin.json").write_text(
+        json.dumps(
+            {
+                "name": "new_game",
+                "interaction_entries": [
+                    {
+                        "key": "start_new_game",
+                        "title": "开始新游戏",
+                        "session_scope": "chat",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(account_bot_service, "settings", SimpleNamespace(plugins_installed_path=tmp_path))
+
+    cfg = account_bot_service.normalize_transfer_notice_config(
+        {
+            "enabled": True,
+            "rules": [
+                {
+                    "id": "new-game",
+                    "enabled": True,
+                    "trigger_mode": "keyword",
+                    "module_start_keywords": ["开新游戏"],
+                    "action": "module",
+                    "module_key": "new_game",
+                    "module_action": "start_new_game",
+                    "concurrency": "user",
+                    "user_cooldown_seconds": "6h",
+                    "daily_limit_per_user": 2,
+                }
+            ],
+        }
+    )
+
+    rule = cfg["rules"][0]
+    assert rule["concurrency"] == "user"
+    assert rule["module_session_scope"] == "chat"
+    assert rule["user_cooldown_seconds"] == "6h"
+    assert rule["daily_limit_per_user"] == 2
 
 
 def test_account_bot_interaction_rule_strips_rule_owned_module_config() -> None:
@@ -3054,6 +3103,112 @@ async def test_interaction_plain_message_control_action_clears_session(monkeypat
 
     assert session_key not in redis.data
     assert send.await_args.args[:3] == ("bbot-token", -100777, "结束")
+
+
+@pytest.mark.asyncio
+async def test_chat_scoped_module_session_survives_user_usage_limits(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, *_args):  # noqa: ANN002
+            return None
+
+    rule = account_bot_service.normalize_transfer_notice_config(
+        {
+            "enabled": True,
+            "rules": [
+                {
+                    "id": "dice-active",
+                    "enabled": True,
+                    "chat_ids": [-100777],
+                    "trigger_mode": "keyword",
+                    "module_start_keywords": ["我要猜骰"],
+                    "action": "module",
+                    "module_key": "dice_grid_hunt",
+                    "module_action": "start_dice_grid_hunt",
+                    "module_prize": 456,
+                    "valid_seconds": 90,
+                    "concurrency": "user",
+                    "user_cooldown_seconds": "6h",
+                    "daily_limit_per_user": 2,
+                }
+            ],
+        }
+    )["rules"][0]
+    redis = _MemoryRedis()
+    run_entry = AsyncMock(
+        side_effect=[
+            (
+                True,
+                None,
+                [
+                    {
+                        "type": "send_photo",
+                        "photo_base64": base64.b64encode(b"png").decode("ascii"),
+                        "filename": "dice_grid_hunt.png",
+                        "caption": "开局",
+                    }
+                ],
+            ),
+            (True, None, [{"type": "send_message", "text": "答对"}, {"type": "end_session"}]),
+        ]
+    )
+    send_photo = AsyncMock()
+    send = AsyncMock()
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: redis)
+    monkeypatch.setattr(account_bot_runtime, "_run_worker_interaction_entry", run_entry)
+    monkeypatch.setattr(account_bot_service, "send_photo_bytes", send_photo)
+    monkeypatch.setattr(account_bot_service, "send_message", send)
+    monkeypatch.setattr(
+        account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(return_value={"enabled": True, "rules": [rule]}),
+    )
+
+    await account_bot_runtime._handle_interaction_update(
+        1,
+        "bbot-token",
+        {
+            "update_id": 13673,
+            "message": {
+                "message_id": 136730,
+                "text": "我要猜骰",
+                "from": {"id": 111, "first_name": "Starter"},
+                "chat": {"id": -100777, "type": "supergroup"},
+            },
+        },
+    )
+    session_key = account_bot_runtime._interaction_session_key(1, rule, -100777)
+
+    assert rule["concurrency"] == "user"
+    assert rule["module_session_scope"] == "chat"
+    assert session_key in redis.data
+    assert not any(key.startswith("account_bot:interaction_session:") and ":user:" in key for key in redis.data)
+
+    await account_bot_runtime._handle_interaction_update(
+        1,
+        "bbot-token",
+        {
+            "update_id": 13674,
+            "message": {
+                "message_id": 136740,
+                "text": "3",
+                "from": {"id": 222, "first_name": "Player"},
+                "chat": {"id": -100777, "type": "supergroup"},
+            },
+        },
+    )
+
+    assert run_entry.await_count == 2
+    assert run_entry.await_args_list[1].kwargs["payload"]["event_type"] == "message"
+    assert run_entry.await_args_list[1].kwargs["payload"]["sender_user_id"] == 222
+    assert session_key not in redis.data
+    assert send.await_args.args[:3] == ("bbot-token", -100777, "答对")
 
 
 @pytest.mark.asyncio

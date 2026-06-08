@@ -109,11 +109,39 @@ guess_number/
 | `cleanup_mode` | 否 | string | 开发约定字段，建议取 `resource` / `reset` / `no-op`；当前平台不会自动执行该字段对应的清理策略，模块仍需在 `on_shutdown` / 取消 / 超时路径里自行实现幂等清理 |
 | `tags` | 否 | array | 分类搜索标签 |
 | `category` | 推荐 | string | `interactive` / `automation` / `utility`，与 `manifest.py` 保持一致 |
-| `interaction_entries` | 按需 | array | 只有互动娱乐模块才声明；工具/自动化模块保持空或不填 |
+| `interaction_entries` | 按需 | array | 只有需要交互 Bot 触发的模块才声明；工具/自动化模块保持空或不填 |
 | `permissions` | 推荐 | array | 运行时沙箱权限声明 |
 | `config_schema` | 推荐 | object | 配置表单和 API 校验依据 |
 
 `plugin.json` 与 `manifest.py` 中的 `version`、`category`、`interaction_entries` 应保持一致；如果模块进入 Registry，Registry 里的 `version` 也要同步。
+
+`interaction_entries` 是交互 Bot 的兼容声明。每个入口至少要写：
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `key` | 是 | 传给插件 `on_interaction(ctx, entry_key, payload)` 的入口名 |
+| `title` | 推荐 | 前端下拉框和实验室展示名 |
+| `description` | 推荐 | 告诉用户这个入口做什么 |
+| `session_scope` | 是 | `chat` / `user` / `none`，决定平台如何保存会话和路由后续消息 |
+| `events` | 推荐 | 支持的事件，例如 `keyword`、`payment_confirmed`、`message`、`session_close` |
+| `input_schema` | 推荐 | 当前规则可覆盖的入口参数，默认值用于前端预填 |
+
+`session_scope` 必须按业务写准：
+
+- 群局、抢答、抽奖、红包、填空等公共流程用 `chat`。
+- 置顶促销、个人查询、个人表单等每个用户互不影响的流程用 `user`。
+- 一次性执行且不需要平台保存会话的入口用 `none`，并在返回动作里显式返回 `end_session` / `no_session` 更清楚。
+
+不要把 `session_scope` 和交互规则里的 `concurrency` 混在一起。`concurrency=user` 表示“规则按用户限流、冷却、每日次数”；`session_scope=chat` 表示“这个模块是一场群局，其他群友的后续消息也要能进入同一局”。如果群局插件漏写 `session_scope=chat`，用户开启每人 CD 后，后续答题消息可能只会路由给开局者，表现为“联动 Bot 没反应”。
+
+推荐矩阵：
+
+| 模块类型 | `category` | `session_scope` | 说明 |
+| --- | --- | --- | --- |
+| 24 点、九宫格、猜数字、诗词填空 | `interactive` | `chat` | 群内同一时间一局，大家抢答 |
+| 口令红包、彩票下注 | `interactive` | `chat` 或 `none` | 如果后续群消息还要进入入口用 `chat`，只发起一次可用 `none` |
+| PT 置顶促销 | `utility` 或 `automation` | `user` | 群友关键词触发，但执行的是个人请求 |
+| AI/图片/查询工具 | `utility` | 通常不声明 | 只有确实需要交互 Bot 规则触发时才声明 |
 
 远程模块推荐把 `config_schema["x-ui-mode"]` 写成 `single`。需要多条规则 CRUD 时使用 `rules`，系统常驻能力才使用 `platform`。旧 `schema` 仅作为兼容别名，含义是“字段由 schema 提供，入口使用通用单配置独立页”。
 
@@ -176,7 +204,7 @@ MANIFEST = Manifest(
 )
 ```
 
-不是互动娱乐型的模块不要声明 `interaction_entries`：
+不需要交互 Bot 规则触发的模块不要声明 `interaction_entries`：
 
 ```python
 MANIFEST = Manifest(

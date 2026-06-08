@@ -14,6 +14,19 @@
 
 ## [Unreleased]
 
+## [0.27.3] — 2026-06-08 · patch · 交互 Bot 会话作用域兼容修复
+
+### Fixed
+- 修复交互 Bot 规则启用“按用户冷却/每日次数”后，九宫格、24 点、十以内算数等群局模块可能被误存成用户私有会话，导致其他群友回复数字或答案无法进入同一局的问题。
+- 交互 Bot 规则现在会独立保存模块入口会话作用域 `module_session_scope`，并优先读取插件 `plugin.json` / `manifest.py` 中声明的 `interaction_entries[].session_scope`，避免后续插件再次把用户限流作用域和模块会话作用域混用。
+
+### Changed
+- 前端交互 Bot 规则表单选择模块入口时，会保存入口声明的模块会话作用域，同时保留规则层“并发策略”用于用户冷却和每日次数。
+- 插件开发文档补充交互 Bot、自动回复、UserBot 命令与插件本体的职责边界，明确 `session_scope` 与 `concurrency` 的区别，并更新远程模块联动入口开发规范。
+
+### Tests
+- 新增回归测试覆盖“规则按用户限流但群局模块仍按群保存会话”的场景，以及未来 installed 插件通过 `plugin.json` 声明 `session_scope=chat` 的通用兼容路径。
+
 ## [0.27.2] — 2026-06-02 · patch · PWA 写请求与缓存修复
 
 ### Fixed

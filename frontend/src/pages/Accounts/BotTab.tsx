@@ -182,6 +182,7 @@ type InteractionRuleForm = {
   mathPrize: string;
   moduleKey: string;
   moduleAction: string;
+  moduleSessionScope: NonNullable<AccountBotInteractionRule["module_session_scope"]>;
   moduleConfig: string;
   moduleStartText: string;
   userCooldownSeconds: string;
@@ -213,6 +214,7 @@ function defaultRuleForm(index = 0): InteractionRuleForm {
     mathPrize: "123",
     moduleKey: "game24",
     moduleAction: "",
+    moduleSessionScope: "chat",
     moduleConfig: "{}",
     moduleStartText: DEFAULT_INTERACTION_MODULE_START_TEXT,
     userCooldownSeconds: "",
@@ -363,6 +365,7 @@ function ruleFormFromRule(
     mathPrize: String(prize),
     moduleKey: rule.module_key || "game24",
     moduleAction: rule.module_action || "",
+    moduleSessionScope: rule.module_session_scope || "chat",
     moduleConfig: formatJsonObject(stripRuleControlledModuleConfig(rule.module_config ?? {})),
     moduleStartText: rule.module_start_text ?? "",
     userCooldownSeconds: rule.user_cooldown_seconds ?? "",
@@ -400,6 +403,7 @@ function legacyRuleFromConfig(config: AccountBotInteractionConfig): AccountBotIn
     math_prize: config.math_prize || 123,
     module_key: config.module_key ?? null,
     module_action: config.module_action ?? null,
+    module_session_scope: config.module_session_scope ?? null,
     module_prize: config.module_prize ?? null,
     module_start_text: config.module_start_text ?? null,
     user_cooldown_seconds: config.user_cooldown_seconds ?? null,
@@ -446,6 +450,7 @@ function ruleFromForm(
     math_prize: mathPrize,
     module_key: action === "module" ? form.moduleKey.trim() || "game24" : null,
     module_action: action === "module" ? form.moduleAction.trim() || null : null,
+    module_session_scope: action === "module" ? form.moduleSessionScope : null,
     module_config: moduleConfig,
     module_prize: action === "module"
       ? mathPrize
@@ -1318,10 +1323,10 @@ export function BotTab({ aid }: { aid: number }) {
                                 updateInteractionRule(index, {
                                   moduleKey: selected.featureKey,
                                   moduleAction: selected.entry.key,
-                                  moduleConfig: formatJsonObject(nextModuleConfig),
-                                  concurrency: (selected.entry.session_scope === "user" || selected.entry.session_scope === "none"
+                                  moduleSessionScope: (selected.entry.session_scope === "user" || selected.entry.session_scope === "none"
                                     ? selected.entry.session_scope
-                                    : "chat") as InteractionRuleForm["concurrency"],
+                                    : "chat") as InteractionRuleForm["moduleSessionScope"],
+                                  moduleConfig: formatJsonObject(nextModuleConfig),
                                 });
                               }}
                             >

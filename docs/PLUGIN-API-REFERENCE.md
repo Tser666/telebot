@@ -272,6 +272,31 @@ version_pattern = r"^\d+\.\d+\.\d+"
 
 交互 Bot 运行时采用事件路由模型：Bbot 负责接收群消息、转账通知和规则指令；平台只把命中规则且存在活跃会话的事件投递给对应模块，不会把所有群消息广播给所有模块。模块应在同一个 `on_interaction` 中按 `payload["event"]["type"]` 区分事件。
 
+#### 平台、规则、插件的职责边界
+
+交互 Bot 的核心设计是“触发器和业务分离”。开发插件时先按下面的边界判断代码应该放在哪里：
+
+| 层级 | 负责 | 不负责 |
+| --- | --- | --- |
+| 自动回复 | 轻量关键词/变量触发，把消息转换成普通回复或白名单命令 | 不承载复杂业务状态，不直接实现插件业务 |
+| 交互 Bot 规则 | 匹配群、关键词、转账通知、金额/收款人过滤、每用户冷却、每日次数、开关命令、会话路由 | 不生成题目、不查询 PT、不校验答案、不发奖 |
+| 插件 `on_interaction` | 真正业务逻辑：开局、查询、校验答案、渲染结果、维护模块内部状态 | 不解析 Bot Token、不解析转账通知原文、不自己做规则级冷却/每日次数 |
+| UserBot 命令 | 管理员手动触发同一业务能力，例如 `{prefix}pt 12345` 或 `{prefix}24d 100` | 不承接群友高频互动 |
+
+因此，同一个能力推荐有多个触发器，但只有一份业务实现：
+
+```text
+群友关键词 / 转账通知
+  -> 交互 Bot 规则过滤、限流、路由
+  -> 插件 on_interaction 执行业务
+
+管理员 UserBot 命令
+  -> commands 入口
+  -> 调用同一份插件业务函数
+```
+
+不要把自动回复做成“业务实现”。自动回复可以作为轻量触发器，但 PT 促销、抽奖、游戏、查询这类能力必须沉到插件本体里，再由交互 Bot 或 UserBot 命令调用。
+
 当前标准事件类型：
 
 | event.type | 触发时机 | 说明 |
@@ -414,11 +439,22 @@ class GuessNumberPlugin(Plugin):
 | `reply_to_user_id` / `reply_to_display_name` / `reply_to_username` | 被回复消息的用户身份 |
 | `data` | 事件附加数据；转账事件包含 `payer_name`、`receiver_name`、`amount` 等 |
 
-`interaction_entries` 中的 `session_scope` 建议使用：
+`interaction_entries` 中的 `session_scope` 是模块会话作用域，必须按模块业务形态声明。它和交互规则里的 `concurrency` 不是一回事：
 
-- `chat`：同一个群内同一时间只开一局，适合 24 点这类公共抢答。
-- `user`：同一个用户一条会话，适合个人答题或私聊流程。
-- `none`：模块自己不提供并发隔离，由平台按全局规则限制。
+| 字段 | 归属 | 含义 | 示例 |
+| --- | --- | --- | --- |
+| `interaction_entries[].session_scope` | 插件入口声明 | 模块会话怎么保存和路由后续 `message` 事件 | 九宫格、24 点、猜数字填 `chat` |
+| 交互规则 `concurrency` | 规则层 | 规则的触发/限流对象，用于每用户 CD、每日次数、触发去重 | 群友每天最多置顶 2 次可填 `user` |
+
+可选值：
+
+- `chat`：同一个群内同一时间只开一局，适合 24 点、九宫格、猜数字、诗词填空、红包这类公共抢答或公共流程。
+- `user`：同一个用户一条会话，适合个人查询、个人表单、每个人互不影响的私有流程，例如 `pt_promote.promote_torrent`。
+- `none`：入口本身不需要平台保存会话，适合只执行一次就结束的动作；模块仍可在内部维护自己的长期状态。
+
+后端保存规则时会优先读取 `plugin.json` / `manifest.py` 中声明的 `session_scope`，并写入规则的 `module_session_scope`。这样即使规则为了“每个群友 6 小时 CD、每日 2 次”设置了 `concurrency=user`，九宫格这类 `session_scope=chat` 的群局也仍然会按群保存会话，其他群友回复 `1-9` 才能进入同一局。
+
+如果插件没有声明 `session_scope`，平台只能回退到规则 `concurrency`，这很容易让群局被误判成用户私有会话。所有声明了 `interaction_entries` 的插件都必须显式填写 `session_scope`。
 
 #### 入口参数来源
 
@@ -555,7 +591,9 @@ class Game24Plugin(Plugin):
 2. 可以把纯业务逻辑抽到共享函数，例如题目生成、答案校验、渲染模板；UserBot 插件和交互 Bot 适配器共同调用这些纯函数。
 3. 模块不处理 Bot Token、Bbot 通知格式、转账过滤、发奖账号；这些都属于平台层职责，钱相关动作也不该放进交互 Bot 的高频入口。
 4. 交互 Bot 中奖公告必须引用赢家的答案消息，方便 `UserBot` 账号按 `Bbot` 公告自动回复发奖或补发奖金。
-5. 若模块未声明 `x-interaction-entries`，前端不应把它展示为可由交互 Bot 启动的模块。
+5. 若模块未声明 `interaction_entries`，前端不应把它展示为可由交互 Bot 启动的模块。旧 `config_schema["x-interaction-entries"]` 仅作为兼容入口，新模块不要再用旧字段。
+6. `interaction_entries[].session_scope` 必须和插件内部状态 key 一致：群局状态 key 应包含 `chat_id`，用户私有流程状态 key 应同时包含 `chat_id` 和 `user_id`。
+7. 返回 `end_session` / `close_session` / `no_session` 时，平台会清理规则会话；模块自己的 Redis 状态仍由模块负责清理。
 
 ---
 
@@ -1314,6 +1352,8 @@ class DemoPlugin(Plugin):
 - `module_key` 是否和 `MANIFEST.key` 完全一致，`module_action` 是否等于 `interaction_entries[].key`。
 - 当前群 `chat_id` 是否在规则 `chat_ids` 内；未配置时才表示所有群。
 - 触发模式是否匹配：付费通知走 `payment_confirmed`，免费关键词走 `keyword`，已有会话后的群消息才走 `message`。
+- 群局插件是否声明了 `interaction_entries[].session_scope = "chat"`；如果漏写，规则设置 `concurrency=user` 后，后续群友消息可能找不到会话。
+- 用户私有流程是否声明了 `session_scope = "user"`，并在插件内部状态 key 中包含用户 ID。
 - worker 是否在线；离线时交互 Bot 会返回“模块启动失败：worker 调用超时”。
 - 日志页搜索 `run_interaction_entry`、`interaction module`、`unsupported type`，未知 action type 会写入 runtime log，便于发现返回了平台尚不支持的动作。
 
@@ -1325,6 +1365,7 @@ class DemoPlugin(Plugin):
 | 指令没反应 | feature 未启用或前缀不匹配 | 检查 rule 配置和前缀 |
 | 热重载后旧 handler 还在触发 | generation guard 未生效 | 检查 loader.py 版本 |
 | 远程模块安装失败 | plugin.json 缺必填字段或格式不合法 | 检查 name/description/version/entry |
+| 群友回复数字/答案没反应 | 群局入口漏写 `session_scope=chat`，或规则没有保存活跃会话 | 补齐 `plugin.json` / `manifest.py` 的 `interaction_entries[].session_scope`，检查规则有效期 |
 | cleanup 后模块状态异常 | cleanup 未幂等 | 重复调用测试 |
 
 ---
