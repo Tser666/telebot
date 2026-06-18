@@ -54,6 +54,8 @@ CMD_GET_RECENT_PEERS = "get_recent_peers"
 CMD_EXECUTE_RULE = "execute_rule"
 # RPC：交互 Bot 调用已加载插件声明的交互入口
 CMD_RUN_INTERACTION_ENTRY = "run_interaction_entry"
+# RPC：主进程请求账号 worker 用 userbot 身份执行交互动作（reply / file）
+CMD_RUN_INTERACTION_ACTION = "run_interaction_action"
 
 # ── 事件类型（worker→主） ──────────────────────────────────────
 EVT_STATUS = "status"                      # payload: {status: active|paused|...}

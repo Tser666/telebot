@@ -21,7 +21,7 @@ for import_root in (ROOT, BACKEND_ROOT):
 from app.worker.plugins.base import Plugin  # noqa: E402
 from app.worker.plugins.manifest import Manifest  # noqa: E402
 
-INCLUDED_EXAMPLES = {"with_http", "with_ai"}
+INCLUDED_EXAMPLES = {"with_http", "with_ai", "with_interaction"}
 SKIPPED_EXAMPLES = {
     "translate": "历史示例仍依赖后端私有 LLM 链路，迁移到 ctx.ai 前不纳入稳定 API gate。",
 }
@@ -73,6 +73,12 @@ def _validate_example(name: str) -> None:
         raise AssertionError(f"{name}: plugin.json.version 与 MANIFEST.version 不一致")
     if metadata.get("category") != manifest.category:
         raise AssertionError(f"{name}: plugin.json.category 与 MANIFEST.category 不一致")
+    if metadata.get("interaction_profile") != manifest.interaction_profile:
+        raise AssertionError(
+            f"{name}: plugin.json.interaction_profile 与 MANIFEST.interaction_profile 不一致"
+        )
+    if list(metadata.get("interaction_entries") or []) != list(manifest.interaction_entries):
+        raise AssertionError(f"{name}: plugin.json.interaction_entries 与 MANIFEST.interaction_entries 不一致")
 
     for field in ("permissions", "allowed_hosts"):
         expected = list(metadata.get(field) or [])

@@ -42,10 +42,16 @@ class _Redis:
 
 def test_math10_manifest_declares_interaction_entry() -> None:
     assert MANIFEST.category == "interactive"
+    assert MANIFEST.interaction_profile == "session_game"
     assert MANIFEST.interaction_entries
     entry = MANIFEST.interaction_entries[0]
     assert entry["key"] == "start_math_game"
+    assert entry["interaction_profile"] == "session_game"
+    assert entry["launch_mode"] == "bridge"
+    assert entry["preserve_command_trigger"] is True
     assert set(entry["events"]) >= {"payment_confirmed", "keyword", "message", "session_close"}
+    assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply", "bbot_notice"]
+    assert "settlement" in entry
     assert "prize" in entry["input_schema"]["properties"]
 
 
@@ -115,6 +121,29 @@ async def test_math10_on_interaction_start_answer_and_close(monkeypatch) -> None
             "text": "答对了：AAA\n题目：3 + 4 = 7\n奖金：888\n请由 @owner 人工回复赢家发放奖金。",
             "reply_to_message_id": 99,
         },
+        {
+            "type": "result",
+            "success": True,
+            "result": {
+                "status": "winner",
+                "winner_user_id": None,
+                "winner_name": "AAA",
+                "winner_message_id": 99,
+                "question": "3 + 4",
+                "answer": 7,
+                "prize": 888,
+                "payout_mode": "manual",
+                "payout_account_label": "@owner",
+            },
+            "settlement": {
+                "mode": "announce_only",
+                "amount": 888,
+                "winner_user_id": None,
+                "winner_name": "AAA",
+                "payout_account_label": "@owner",
+                "status": "announced",
+            },
+        },
         {"type": "end_session"},
     ]
     state = json.loads(redis.data[state_key])
@@ -130,6 +159,83 @@ async def test_math10_on_interaction_start_answer_and_close(monkeypatch) -> None
     )
     assert state_key not in redis.data
     assert claim_keys[0] not in redis.data
+
+
+@pytest.mark.asyncio
+async def test_math10_on_interaction_accepts_standard_envelope(monkeypatch) -> None:
+    monkeypatch.setattr(math10_plugin, "_new_math_question", lambda: ("3 + 4", 7))
+    redis = _Redis()
+    plugin = Math10Plugin()
+    ctx = PluginContext(account_id=1, feature_key="math10", redis=redis, log=AsyncMock())
+
+    await plugin.on_interaction(
+        ctx,
+        "start_math_game",
+        {
+            "source": {
+                "type": "keyword",
+                "chat_id": -100123,
+                "update_id": 7,
+                "message_id": 70,
+                "text": "开算数题",
+            },
+            "trigger": {"type": "keyword", "rule_id": "math10", "entry_key": "start_math_game"},
+            "session": {"scope": "chat", "ttl_seconds": 120},
+            "prize": 888,
+            "valid_seconds": 120,
+        },
+    )
+    state = json.loads(redis.data["account_bot:math10:1:-100123"])
+    assert state["source_update_id"] == 7
+    assert state["source_message_id"] == 70
+
+    actions = await plugin.on_interaction(
+        ctx,
+        "start_math_game",
+        {
+            "source": {
+                "type": "message",
+                "chat_id": -100123,
+                "update_id": 8,
+                "message_id": 99,
+                "text": "7",
+            },
+            "actor": {"user_id": 111, "display_name": "AAA"},
+            "settlement": {"mode": "auto", "payout_account_label": "@owner"},
+        },
+    )
+
+    assert actions == [
+        {
+            "type": "send_message",
+            "text": "答对了：AAA\n题目：3 + 4 = 7\n奖金：888\n奖金将由 @owner 账号自动发放。",
+            "reply_to_message_id": 99,
+        },
+        {
+            "type": "result",
+            "success": True,
+            "result": {
+                "status": "winner",
+                "winner_user_id": 111,
+                "winner_name": "AAA",
+                "winner_message_id": 99,
+                "question": "3 + 4",
+                "answer": 7,
+                "prize": 888,
+                "payout_mode": "auto",
+                "payout_account_label": "@owner",
+            },
+            "settlement": {
+                "mode": "auto",
+                "amount": 888,
+                "winner_user_id": 111,
+                "winner_name": "AAA",
+                "payout_account_label": "@owner",
+                "status": "announced",
+            },
+        },
+        {"type": "end_session"},
+    ]
 
 
 @pytest.mark.asyncio
@@ -164,7 +270,51 @@ async def test_math10_auto_payout_announcement(monkeypatch) -> None:
             "text": "答对了：AAA\n题目：6 x 7 = 42\n奖金：123\n奖金将由 @owner 账号自动发放。",
             "reply_to_message_id": 99,
         },
+        {
+            "type": "result",
+            "success": True,
+            "result": {
+                "status": "winner",
+                "winner_user_id": None,
+                "winner_name": "AAA",
+                "winner_message_id": 99,
+                "question": "6 x 7",
+                "answer": 42,
+                "prize": 123,
+                "payout_mode": "auto",
+                "payout_account_label": "@owner",
+            },
+            "settlement": {
+                "mode": "auto",
+                "amount": 123,
+                "winner_user_id": None,
+                "winner_name": "AAA",
+                "payout_account_label": "@owner",
+                "status": "announced",
+            },
+        },
         {"type": "end_session"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_math10_on_interaction_accepts_legacy_entry_key(monkeypatch) -> None:
+    monkeypatch.setattr(math10_plugin, "_new_math_question", lambda: ("3 + 4", 7))
+    redis = _Redis()
+    plugin = Math10Plugin()
+    ctx = PluginContext(account_id=1, feature_key="math10", redis=redis, log=AsyncMock())
+
+    actions = await plugin.on_interaction(
+        ctx,
+        "start_math10",
+        {"event_type": "keyword", "chat_id": -100123, "prize": 321},
+    )
+
+    assert actions == [
+        {
+            "type": "send_message",
+            "text": "算数题测试开始\n题目：3 + 4 = ?\n奖金：321\n直接发送数字答案，答对后我会公告赢家。",
+        }
     ]
 
 

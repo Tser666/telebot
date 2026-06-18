@@ -57,10 +57,23 @@ guess_number/
   "category": "interactive",
   "interaction_entries": [
     {
-      "key": "start_game",
+      "key": "start_guess_number",
       "title": "开始游戏",
       "description": "由交互 Bot 在群内开启一局游戏。",
+      "launch_mode": "hybrid",
       "session_scope": "chat",
+      "events": ["keyword", "payment_confirmed", "message", "session_close"],
+      "preserve_command_trigger": true,
+      "command_fallback": {
+        "enabled": true,
+        "command": "guess",
+        "mode": "hint_only"
+      },
+      "session_policy": {
+        "ttl_seconds": 3600,
+        "duplicate_start": "reject",
+        "close_on": ["winner", "timeout", "session_close"]
+      },
       "input_schema": {
         "type": "object",
         "additionalProperties": false,
@@ -72,6 +85,19 @@ guess_number/
             "minimum": 1
           }
         }
+      },
+      "payload_contract": {
+        "required_envelope": ["source", "actor", "trigger", "session"],
+        "required_event_fields": ["type", "chat_id"]
+      },
+      "result_contract": {
+        "actions": ["send_message", "send_photo", "send_file", "end_session", "result", "settlement"],
+        "send_via": ["interaction_bot", "userbot_reply", "bbot_notice"]
+      },
+      "settlement": {
+        "mode": "announce_only",
+        "winner_field": "actor.user_id",
+        "amount_field": "prize"
       }
     }
   ],
@@ -113,7 +139,7 @@ guess_number/
 | `permissions` | 推荐 | array | 运行时沙箱权限声明 |
 | `config_schema` | 推荐 | object | 配置表单和 API 校验依据 |
 
-`plugin.json` 与 `manifest.py` 中的 `version`、`category`、`interaction_entries` 应保持一致；如果模块进入 Registry，Registry 里的 `version` 也要同步。
+`plugin.json` 与 `manifest.py` 中的 `version`、`category`、`interaction_entries` 应保持一致；如果模块进入 Registry，Registry 里的 `version` 也要同步。交互入口的新规范还要求 `launch_mode`、`events`、`session_scope`、`session_policy`、`payload_contract`、`result_contract`、`settlement`、`command_fallback`、`preserve_command_trigger` 在两处含义一致，不能只写一边。
 
 `interaction_entries` 是交互 Bot 的兼容声明。每个入口至少要写：
 
@@ -122,9 +148,37 @@ guess_number/
 | `key` | 是 | 传给插件 `on_interaction(ctx, entry_key, payload)` 的入口名 |
 | `title` | 推荐 | 前端下拉框和实验室展示名 |
 | `description` | 推荐 | 告诉用户这个入口做什么 |
+| `launch_mode` | 是 | `bridge` / `direct` / `hybrid`，决定交互 Bot 如何启动插件 |
 | `session_scope` | 是 | `chat` / `user` / `none`，决定平台如何保存会话和路由后续消息 |
-| `events` | 推荐 | 支持的事件，例如 `keyword`、`payment_confirmed`、`message`、`session_close` |
+| `events` | 是 | 支持的事件白名单，例如 `keyword`、`payment_confirmed`、`message`、`session_close` |
+| `command_fallback` | 按需 | 交互入口不可用时是否提示或受控回退到原 UserBot 命令 |
+| `preserve_command_trigger` | 是 | 必须为 `true`，表示原有命令触发不受交互入口影响 |
+| `session_policy` | 推荐 | TTL、重复触发、关闭条件、并发策略 |
+| `payload_contract` | 推荐 | 平台提供的 `source` / `actor` / `reply_to` / `trigger` / `session` 信封要求 |
+| `result_contract` | 推荐 | 标准动作类型、`send_via` 白名单和结束语义 |
+| `settlement` | 按需 | 涉及奖金、补发、对账时声明结算责任和字段 |
 | `input_schema` | 推荐 | 当前规则可覆盖的入口参数，默认值用于前端预填 |
+
+推荐额外声明 `interaction_profile`，让平台和前端知道这是什么玩法类型。当前约定值：
+
+| `interaction_profile` | 适用场景 |
+| --- | --- |
+| `session_game` | 群局抢答、竞猜、填空、算题、24 点 |
+| `challenge_game` | 双人/多人对战、轮流操作 |
+| `reward_pool` | 红包、抽奖池、下注开奖 |
+| `utility_trigger` | 只是借交互 Bot 做入口，但后续不是群局互动 |
+
+这只是声明性元数据，不改变插件原有命令触发，也不改变 `on_interaction` 的调用方式。
+
+`launch_mode` 的取值不要随意发明：
+
+| launch_mode | 说明 |
+| --- | --- |
+| `bridge` | 交互 Bot 收到事件，平台组装信封后调用插件 `on_interaction` |
+| `direct` | 只走原命令或模块内部调用，不依赖交互 Bot |
+| `hybrid` | 两种方式都支持，但必须保留原命令触发 |
+
+`command_fallback` 不是改写命令语义的开关，只是“交互入口暂不可用时，平台要不要提示用户去用原命令”。如果模块以前能被 `{prefix}game` 启动，新规范下仍必须能被 `{prefix}game` 启动，不能因为加了 `interaction_entries` 就吞掉原命令。
 
 `session_scope` 必须按业务写准：
 
@@ -145,6 +199,30 @@ guess_number/
 
 远程模块推荐把 `config_schema["x-ui-mode"]` 写成 `single`。需要多条规则 CRUD 时使用 `rules`，系统常驻能力才使用 `platform`。旧 `schema` 仅作为兼容别名，含义是“字段由 schema 提供，入口使用通用单配置独立页”。
 
+交互入口 payload 使用标准信封，不再只是一组平铺字段：
+
+| 信封 | 说明 |
+| --- | --- |
+| `source` | 事件来源和发送通道，例如 `interaction_bot`、`userbot`、`platform` |
+| `actor` | 触发事件的人；答题、中奖、个人限流和审计优先按它判断 |
+| `reply_to` | 应引用的原消息或被回复对象；中奖公告必须尽量保留 |
+| `trigger` | 命中的规则、入口、事件和消息，用于排障与幂等 |
+| `session` | 平台会话标识、作用域、TTL 和是否新建 |
+
+`payload_contract` 声明插件需要哪些信封和事件字段，`input_schema` 只声明规则可覆盖参数。`source` 不代表中奖用户，`actor` 才是行为主体；`reply_to` 不等同于当前消息，通常用于让结果回复原答案；`trigger` 用来还原“为什么这次调用发生”；`session` 要和插件内部状态 key 的粒度一致。
+
+插件返回动作时必须遵守 `result_contract`。`send_via` 是发送者白名单，常见值只有：
+
+| send_via | 说明 |
+| --- | --- |
+| `interaction_bot` | 交互 Bot 发送题面、答复、图片和会话提示 |
+| `userbot_reply` | 当前账号的 userbot 由 worker 代发指定消息 |
+| `bbot_notice` | 通知 Bot 发公告、命中和对账提示 |
+
+未声明 `result_contract.send_via` 时按最小权限处理，只允许 `interaction_bot`。涉及奖金、补发、转账、催付的模块要写 `settlement`，但 `settlement` 只能描述结果和对账字段，不能让交互 Bot 直接拥有发奖权限。钱相关动作仍应由账号 worker 的 userbot 代发或由平台受控结算流程处理。
+
+交互入口不得影响原有命令触发。远程模块可以把业务逻辑抽成共享函数，但 `commands`、`on_command`、`message_channels`、`on_message` 的既有语义必须保持；普通群成员 incoming 消息不能因为 `launch_mode=bridge/hybrid` 或 `command_fallback` 就直接进入 `on_command`。
+
 ### manifest.py
 
 `manifest.py` 是运行阶段的 Manifest，必须导出 `MANIFEST`。运行时真正生效的是这里的 `Manifest`，因此远程模块要在 `plugin.json` 和 `manifest.py` 两处同步声明模块身份。
@@ -161,10 +239,23 @@ MANIFEST = Manifest(
     category="interactive",
     interaction_entries=[
         {
-            "key": "start_game",
+            "key": "start_guess_number",
             "title": "开始游戏",
             "description": "由交互 Bot 在群内开启一局游戏。",
+            "launch_mode": "hybrid",
             "session_scope": "chat",
+            "events": ["keyword", "payment_confirmed", "message", "session_close"],
+            "preserve_command_trigger": True,
+            "command_fallback": {
+                "enabled": True,
+                "command": "guess",
+                "mode": "hint_only",
+            },
+            "session_policy": {
+                "ttl_seconds": 3600,
+                "duplicate_start": "reject",
+                "close_on": ["winner", "timeout", "session_close"],
+            },
             "input_schema": {
                 "type": "object",
                 "additionalProperties": False,
@@ -176,6 +267,19 @@ MANIFEST = Manifest(
                         "minimum": 1,
                     },
                 },
+            },
+            "payload_contract": {
+                "required_envelope": ["source", "actor", "trigger", "session"],
+                "required_event_fields": ["type", "chat_id"],
+            },
+            "result_contract": {
+                "actions": ["send_message", "end_session"],
+                "send_via": ["interaction_bot"],
+            },
+            "settlement": {
+                "mode": "announce_only",
+                "winner_field": "actor.user_id",
+                "amount_field": "prize",
             },
         }
     ],
@@ -346,7 +450,14 @@ plugin.json.config_schema
 - [ ] 模块名、Manifest key、目录名一致。
 - [ ] `plugin.json.version`、`MANIFEST.version`、Registry `version` 一致。
 - [ ] `category` 在 `plugin.json` 与 `manifest.py` 中一致。
-- [ ] 只有互动娱乐型模块声明 `interaction_entries`；工具类和自动化类模块保持空或不填。
+- [ ] 只有需要交互 Bot 规则触发的模块声明 `interaction_entries`；纯工具类和纯自动化类模块保持空或不填。
+- [ ] 交互入口声明了 `launch_mode`，且取值只用 `bridge` / `direct` / `hybrid`。
+- [ ] 交互入口声明了 `events`、`session_scope`、`session_policy`、`payload_contract`、`result_contract`，并与插件实现一致。
+- [ ] `preserve_command_trigger=true`；新增交互入口后，原有 UserBot 命令仍按原指令名、参数和权限触发。
+- [ ] 如声明 `command_fallback`，只做提示或受控回退，不让普通 incoming 消息直接进入 `on_command`。
+- [ ] 返回动作的 `send_via` 都命中 `result_contract.send_via` 白名单。
+- [ ] 涉及奖金/补发/对账的模块声明了 `settlement`，且交互 Bot 只公告结果，不直接执行钱相关动作。
+- [ ] 插件按 `source` / `actor` / `reply_to` / `trigger` / `session` 信封读取输入，不依赖转账通知原文或 Bot Token。
 - [ ] 启动日志或主要交互消息包含当前模块版本，方便确认远程热更新是否生效。
 - [ ] `permissions` 覆盖实际调用的 `ctx.client` 方法。
 - [ ] 指令可触发，指令改名后热重载生效。
@@ -363,13 +474,15 @@ plugin.json.config_schema
 
 ### 示例与 CI 建议
 
-当前 CI 已校验 `examples/plugins/with_http` 和 `examples/plugins/with_ai`，分别用于演示 `ctx.http` / `external_http` / `allowed_hosts` 的最小组合，以及 `ctx.ai` / `ai_text` / 平台统一 LLM 池的推荐接入方式。`examples/plugins/translate` 是历史示例，尚未迁移到受限 `PluginContext` + sandbox 权限模型，因此在示例校验脚本中明确跳过。
+当前 CI 已校验 `examples/plugins/with_http`、`examples/plugins/with_ai` 和 `examples/plugins/with_interaction`，分别用于演示 `ctx.http` / `external_http` / `allowed_hosts` 的最小组合，`ctx.ai` / `ai_text` / 平台统一 LLM 池的推荐接入方式，以及“原命令 + 交互 Bot 入口”双兼容的最小交互契约。`examples/plugins/translate` 是历史示例，尚未迁移到受限 `PluginContext` + sandbox 权限模型，因此在示例校验脚本中明确跳过。
 
 新增示例时请同步更新 `scripts/validate-plugin-examples.py`：
 
-1. 已迁移到公开 API 的示例加入 `INCLUDED_EXAMPLES`，CI 会检查必要文件、`plugin.json`、`MANIFEST`、`PLUGIN_CLASS`、key/version/category/permissions/allowed_hosts 一致性，并实例化插件类。
+1. 已迁移到公开 API 的示例加入 `INCLUDED_EXAMPLES`，CI 会检查必要文件、`plugin.json`、`MANIFEST`、`PLUGIN_CLASS`、key/version/category/interaction_profile/interaction_entries/permissions/allowed_hosts 一致性，并实例化插件类。
 2. 暂时保留的历史示例加入 `SKIPPED_EXAMPLES` 并写清原因；不要让示例通过 import worker 私有实现绕过 `ctx.http` / `ctx.ai` facade。
 3. 示例不得访问网络、真实 LLM Provider、数据库或账号会话；CI 只做静态和 import 级校验。
+
+已接入的 installed 互动插件可额外运行 `python scripts/validate-installed-interaction-plugins.py`，检查 `plugin.json` 与 `manifest.py` 的 `version`、`category`、`interaction_profile`、`interaction_entries` 是否一致，避免安装态和运行态的交互契约慢慢漂移。
 
 ### Registry 机制
 

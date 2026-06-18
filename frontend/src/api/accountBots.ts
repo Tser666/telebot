@@ -4,6 +4,7 @@ import type {
   AccountBotConfigUpdate,
   AccountBotInteractionConfig,
   AccountBotInteractionConfigUpdate,
+  AccountBotInteractionResultItem,
   AccountBotTestRequest,
   AccountBotTestResponse,
   AccountBotUser,
@@ -55,6 +56,17 @@ export async function updateInteractionBotConfig(
   const { data } = await api.put<AccountBotInteractionConfig>(
     `/api/accounts/${aid}/interaction-bot`,
     payload,
+  );
+  return data;
+}
+
+export async function listInteractionResults(
+  aid: number,
+  limit = 12,
+): Promise<AccountBotInteractionResultItem[]> {
+  const { data } = await api.get<AccountBotInteractionResultItem[]>(
+    `/api/accounts/${aid}/interaction-results`,
+    { params: { limit } },
   );
   return data;
 }

@@ -11,13 +11,30 @@ MANIFEST = Manifest(
     author="builtin",
     description="由交互 Bot 开启一局 10 以内算数题，群内第一个答对者获得奖金",
     category="interactive",
+    interaction_profile="session_game",
     interaction_entries=[
         {
             "key": "start_math_game",
             "title": "随机算数题",
             "description": "转账命中或模块关键词触发后，由交互 Bot 开启一局随机算数题。",
+            "interaction_profile": "session_game",
+            "launch_mode": "bridge",
             "session_scope": "chat",
             "events": ["payment_confirmed", "keyword", "message", "session_close"],
+            "preserve_command_trigger": True,
+            "payload_contract": {
+                "required_envelope": ["source", "actor", "trigger", "session"],
+                "required_event_fields": ["type", "chat_id"],
+            },
+            "result_contract": {
+                "actions": ["send_message", "send_photo", "send_file", "end_session", "result", "settlement"],
+                "send_via": ["interaction_bot", "userbot_reply", "bbot_notice"],
+            },
+            "settlement": {
+                "mode": "announce_only",
+                "winner_field": "actor.user_id",
+                "amount_field": "prize",
+            },
             "input_schema": {
                 "type": "object",
                 "additionalProperties": False,

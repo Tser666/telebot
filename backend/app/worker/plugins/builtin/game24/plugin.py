@@ -279,6 +279,65 @@ def _int_payload(value: Any) -> int | None:
         return None
 
 
+def _payload_dict(payload: dict[str, Any], key: str) -> dict[str, Any]:
+    value = payload.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def _interaction_event_type(payload: dict[str, Any], event: dict[str, Any]) -> str:
+    source = _payload_dict(payload, "source")
+    trigger = _payload_dict(payload, "trigger")
+    return str(
+        source.get("type")
+        or trigger.get("type")
+        or event.get("type")
+        or payload.get("event_type")
+        or ""
+    )
+
+
+def _interaction_chat_id(payload: dict[str, Any], event: dict[str, Any]) -> int | None:
+    source = _payload_dict(payload, "source")
+    return _int_payload(payload.get("chat_id") or source.get("chat_id") or event.get("chat_id"))
+
+
+def _interaction_message_text(payload: dict[str, Any], event: dict[str, Any]) -> str:
+    source = _payload_dict(payload, "source")
+    return str(payload.get("message_text") or source.get("text") or event.get("text") or "").strip()
+
+
+def _interaction_message_id(payload: dict[str, Any], event: dict[str, Any]) -> int | None:
+    source = _payload_dict(payload, "source")
+    return _int_payload(payload.get("message_id") or source.get("message_id") or event.get("message_id"))
+
+
+def _interaction_update_id(payload: dict[str, Any], event: dict[str, Any]) -> int | None:
+    source = _payload_dict(payload, "source")
+    return _int_payload(payload.get("source_update_id") or source.get("update_id") or event.get("update_id"))
+
+
+def _interaction_actor_name(payload: dict[str, Any], event: dict[str, Any]) -> str:
+    actor = _payload_dict(payload, "actor")
+    return str(
+        payload.get("sender_name")
+        or actor.get("display_name")
+        or event.get("display_name")
+        or payload.get("payer_name")
+        or "未知用户"
+    )
+
+
+def _interaction_payout_info(payload: dict[str, Any]) -> tuple[str, str]:
+    settlement = _payload_dict(payload, "settlement")
+    payout_account = str(
+        payload.get("payout_account_label")
+        or settlement.get("payout_account_label")
+        or "账号持有者"
+    ).strip()
+    payout_mode = str(payload.get("payout_mode") or settlement.get("mode") or "manual").strip().lower()
+    return payout_account, payout_mode
+
+
 def _interaction_game_key(account_id: int, chat_id: int) -> str:
     return f"{INTERACTION_GAME_PREFIX}{int(account_id)}:{int(chat_id)}"
 
@@ -470,11 +529,11 @@ class Game24Plugin(Plugin):
         entry_key: str,
         payload: dict[str, Any],
     ) -> list[dict[str, Any]] | None:
-        if entry_key != "start_paid_game":
+        if entry_key not in {"start_paid_game", "start_game24"}:
             return None
         event = payload.get("event") if isinstance(payload.get("event"), dict) else {}
-        event_type = str(event.get("type") or payload.get("event_type") or "")
-        chat_id = _int_payload(payload.get("chat_id") or event.get("chat_id"))
+        event_type = _interaction_event_type(payload, event)
+        chat_id = _interaction_chat_id(payload, event)
         if chat_id is None:
             return []
         if event_type in {"payment_confirmed", "keyword"}:
@@ -507,8 +566,8 @@ class Game24Plugin(Plugin):
             timeout=timeout,
             game_id=secrets.token_hex(8),
             created_at=time.time(),
-            source_update_id=_int_payload(payload.get("source_update_id") or event.get("update_id")),
-            source_message_id=_int_payload(payload.get("source_message_id") or event.get("message_id")),
+            source_update_id=_interaction_update_id(payload, event),
+            source_message_id=_interaction_message_id(payload, event),
         )
         await self._save_interaction_state(ctx, state)
         await self._log(
@@ -534,7 +593,7 @@ class Game24Plugin(Plugin):
         if state is None or not state.active:
             return []
 
-        text = str(payload.get("message_text") or event.get("text") or "").strip()
+        text = _interaction_message_text(payload, event)
         result = check_answer_detailed(text, state.numbers)
         if not result.ok:
             await self._log(
@@ -552,11 +611,13 @@ class Game24Plugin(Plugin):
         if not await self._claim_interaction_winner(ctx, state, payload, event):
             return []
 
-        winner = str(payload.get("sender_name") or event.get("display_name") or payload.get("payer_name") or "未知用户")
-        payout_account = str(payload.get("payout_account_label") or "账号持有者").strip()
+        winner = _interaction_actor_name(payload, event)
+        actor = _payload_dict(payload, "actor")
+        winner_user_id = _int_payload(actor.get("user_id"))
+        payout_account, payout_mode = _interaction_payout_info(payload)
         winner_display = html.escape(winner)
         payout_account_display = html.escape(payout_account)
-        payout_line = _interaction_payout_line(payout_account_display, payload.get("payout_mode"))
+        payout_line = _interaction_payout_line(payout_account_display, payout_mode)
         nums_disp = " ".join(str(item) for item in state.numbers)
         await self._log(
             ctx,
@@ -579,7 +640,30 @@ class Game24Plugin(Plugin):
                     f"奖金：{state.prize}\n"
                     f"{payout_line}"
                 ),
-                "reply_to_message_id": _int_payload(payload.get("message_id") or event.get("message_id")),
+                "reply_to_message_id": _interaction_message_id(payload, event),
+            },
+            {
+                "type": "result",
+                "success": True,
+                "result": {
+                    "status": "winner",
+                    "winner_user_id": winner_user_id,
+                    "winner_name": winner,
+                    "winner_message_id": _interaction_message_id(payload, event),
+                    "question": state.numbers,
+                    "answer": result.normalized_expr,
+                    "prize": state.prize,
+                    "payout_mode": payout_mode,
+                    "payout_account_label": payout_account,
+                },
+                "settlement": {
+                    "mode": "announce_only" if payout_mode != "auto" else "auto",
+                    "amount": state.prize,
+                    "winner_user_id": winner_user_id,
+                    "winner_name": winner,
+                    "payout_account_label": payout_account,
+                    "status": "announced",
+                },
             },
             {"type": "end_session"},
         ]
@@ -636,8 +720,8 @@ class Game24Plugin(Plugin):
         if not acquired:
             return False
         state.active = False
-        state.winner_update_id = _int_payload(payload.get("source_update_id") or event.get("update_id"))
-        state.winner_message_id = _int_payload(payload.get("message_id") or event.get("message_id"))
+        state.winner_update_id = _interaction_update_id(payload, event)
+        state.winner_message_id = _interaction_message_id(payload, event)
         await self._save_interaction_state(ctx, state)
         return True
 

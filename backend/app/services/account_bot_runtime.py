@@ -42,6 +42,7 @@ from ..settings import settings
 from ..worker.ipc import (
     CMD_EXECUTE_RULE,
     CMD_RELOAD_CONFIG,
+    CMD_RUN_INTERACTION_ACTION,
     CMD_RUN_INTERACTION_ENTRY,
     GLOBAL_CHANNEL,
     RUNTIME_LOG_STREAM,
@@ -82,7 +83,7 @@ _INTERACTION_USER_COOLDOWN_PREFIX = "account_bot:interaction_user_cooldown:"
 _INTERACTION_USER_DAILY_PREFIX = "account_bot:interaction_user_daily:"
 _INTERACTION_USER_PENDING_PREFIX = "account_bot:interaction_user_pending:"
 _INTERACTION_ENTRY_TIMEOUT_SECONDS = 60.0
-AUTO_PAYOUT_MODULE_KEYS = {"game24", "math10", "dice_grid_hunt"}
+AUTO_PAYOUT_MODULE_KEYS = {"game24", "math10", "dice_grid_hunt", "guess_number", "poetry_blank"}
 
 
 async def _load_command_prefix(db) -> str:
@@ -114,6 +115,7 @@ class Incoming:
     display_name: str | None = None
     username: str | None = None
     reply_to_user_id: int | None = None
+    reply_to_message_id: int | None = None
     reply_to_display_name: str | None = None
     reply_to_username: str | None = None
     reply_to_text: str | None = None
@@ -153,10 +155,12 @@ class InteractionEvent:
     update_id: int
     message_id: int | None
     user_id: int | None
+    chat_type: str | None
     display_name: str | None
     username: str | None
     text: str
     reply_to_user_id: int | None = None
+    reply_to_message_id: int | None = None
     reply_to_display_name: str | None = None
     reply_to_username: str | None = None
     reply_to_text: str | None = None
@@ -1049,6 +1053,21 @@ def _rule_trigger_mode_allows(rule: dict[str, Any], trigger_type: str) -> bool:
     return False
 
 
+def _rule_entry_events(rule: dict[str, Any]) -> list[str]:
+    module_key = str(rule.get("module_key") or "").strip() or None
+    entry_key = str(rule.get("module_action") or "").strip() or None
+    if not module_key or not entry_key:
+        return []
+    return account_bot_service.declared_module_entry_events(module_key, entry_key)
+
+
+def _rule_entry_allows_event(rule: dict[str, Any], event_type: str) -> bool:
+    declared = _rule_entry_events(rule)
+    if not declared:
+        return True
+    return event_type in declared
+
+
 def _rule_keyword_list(rule: dict[str, Any], key: str) -> list[str]:
     raw = rule.get(key)
     if not isinstance(raw, list):
@@ -1451,6 +1470,9 @@ async def _close_active_interaction_games(incoming: Incoming, target_rule: dict[
                 continue
             module_key = str(rule.get("module_key") or "").strip()
             entry_key = str(rule.get("module_action") or "").strip()
+            if not _rule_entry_allows_event(rule, "session_close"):
+                closed += await _clear_interaction_sessions_for_rule(account_id, rule, chat_id)
+                continue
             sessions = await _list_interaction_sessions_for_rule(account_id, rule, chat_id)
             close_targets = sessions or [None]
             for session in close_targets:
@@ -1469,7 +1491,11 @@ async def _close_active_interaction_games(incoming: Incoming, target_rule: dict[
                     payload=payload,
                 )
                 if ok and actions:
-                    await _apply_interaction_actions(incoming, actions)
+                    await _apply_interaction_actions(
+                        incoming,
+                        actions,
+                        context=_interaction_trace_context(payload),
+                    )
             closed += await _clear_interaction_sessions_for_rule(account_id, rule, chat_id)
     except Exception:  # noqa: BLE001
         log.debug("close interaction module sessions failed aid=%s chat_id=%s", account_id, chat_id, exc_info=True)
@@ -1851,6 +1877,15 @@ async def _execute_interaction_rule(
     *,
     event_type: str = "payment_confirmed",
 ) -> bool:
+    if str(rule.get("action") or "") == "module" and not _rule_entry_allows_event(rule, event_type):
+        log.info(
+            "interaction module event ignored by declared entry events aid=%s chat_id=%s rule=%s event=%s",
+            incoming.account_id,
+            incoming.chat_id,
+            rule.get("id"),
+            event_type,
+        )
+        return False
     if rule.get("action") == "math10":
         log.warning(
             "deprecated interaction rule action=math10 used aid=%s chat_id=%s rule=%s; use action=module module_key=math10 instead",
@@ -1987,6 +2022,8 @@ async def _try_handle_interaction_module_message(db: Any, incoming: Incoming) ->
         entry_key = str(rule.get("module_action") or "").strip()
         if not module_key or not entry_key:
             continue
+        if not _rule_entry_allows_event(rule, "message"):
+            continue
         session = await _load_interaction_session(incoming, rule)
         if session is None:
             continue
@@ -2028,7 +2065,11 @@ async def _try_handle_interaction_module_message(db: Any, incoming: Incoming) ->
             continue
         if not actions:
             continue
-        await _apply_interaction_actions(incoming, actions)
+        await _apply_interaction_actions(
+            incoming,
+            actions,
+            context=_interaction_trace_context(payload),
+        )
         if _interaction_actions_request_no_session(actions):
             await _clear_loaded_interaction_session(
                 incoming.account_id,
@@ -2219,10 +2260,12 @@ def _interaction_event_payload(
         update_id=incoming.update_id,
         message_id=incoming.message_id,
         user_id=incoming.user_id,
+        chat_type=incoming.chat_type,
         display_name=incoming.display_name,
         username=incoming.username,
         text=incoming.text,
         reply_to_user_id=incoming.reply_to_user_id,
+        reply_to_message_id=incoming.reply_to_message_id,
         reply_to_display_name=incoming.reply_to_display_name,
         reply_to_username=incoming.reply_to_username,
         reply_to_text=incoming.reply_to_text,
@@ -2230,6 +2273,102 @@ def _interaction_event_payload(
         data=dict(data or {}),
     )
     return asdict(event)
+
+
+def _interaction_source_envelope(incoming: Incoming, event_type: str) -> dict[str, Any]:
+    return {
+        "type": event_type,
+        "account_id": incoming.account_id,
+        "chat_id": incoming.chat_id,
+        "chat_type": incoming.chat_type,
+        "update_id": incoming.update_id,
+        "message_id": incoming.message_id,
+        "text": incoming.text,
+        "entity_languages": list(incoming.entity_languages),
+    }
+
+
+def _interaction_actor_envelope(incoming: Incoming, data: dict[str, Any] | None = None) -> dict[str, Any]:
+    payload = data if isinstance(data, dict) else {}
+    return {
+        "user_id": _int_or_none(payload.get("sender_user_id")) or incoming.user_id,
+        "display_name": str(payload.get("sender_name") or incoming.display_name or "").strip() or None,
+        "username": str(payload.get("sender_username") or incoming.username or "").strip() or None,
+    }
+
+
+def _interaction_reply_to_envelope(incoming: Incoming) -> dict[str, Any] | None:
+    if (
+        incoming.reply_to_user_id is None
+        and not incoming.reply_to_display_name
+        and not incoming.reply_to_username
+        and not incoming.reply_to_text
+    ):
+        return None
+    return {
+        "user_id": incoming.reply_to_user_id,
+        "display_name": incoming.reply_to_display_name,
+        "username": incoming.reply_to_username,
+        "message_id": incoming.reply_to_message_id,
+        "text": incoming.reply_to_text,
+    }
+
+
+def _interaction_trigger_envelope(
+    rule: dict[str, Any],
+    event_type: str,
+    data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "type": event_type,
+        "rule_id": str(rule.get("id") or ""),
+        "rule_name": str(rule.get("name") or ""),
+        "module_key": str(rule.get("module_key") or ""),
+        "entry_key": str(rule.get("module_action") or ""),
+        "payload": dict(data or {}),
+    }
+
+
+def _interaction_session_envelope(
+    incoming: Incoming,
+    rule: dict[str, Any],
+    data: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = data if isinstance(data, dict) else {}
+    session = payload.get("session")
+    session_data = session if isinstance(session, dict) else {}
+    session_user_id = _interaction_session_user_id(incoming, payload)
+    return {
+        "key": _interaction_session_key(incoming.account_id, rule, incoming.chat_id, session_user_id),
+        "scope": str(rule.get("module_session_scope") or rule.get("concurrency") or "chat"),
+        "ttl_seconds": _interaction_session_ttl(rule),
+        "active": True,
+        "data": dict(session_data),
+    }
+
+
+def _interaction_settlement_envelope(
+    data: dict[str, Any],
+    *,
+    prize: int,
+    payout_account_label: str | None = None,
+    payout_mode: str | None = None,
+) -> dict[str, Any]:
+    mode = str(payout_mode or "manual").strip().lower()
+    if mode not in {"auto", "manual"}:
+        mode = "manual"
+    winner_user_id = _int_or_none(data.get("sender_user_id") or data.get("payer_user_id"))
+    winner_name = str(data.get("sender_name") or data.get("payer_name") or "").strip() or None
+    return {
+        "mode": mode,
+        "status": "pending",
+        "amount": prize,
+        "currency": None,
+        "winner_user_id": winner_user_id,
+        "winner_name": winner_name,
+        "payout_account_label": payout_account_label,
+        "data": {},
+    }
 
 
 def _interaction_module_payload(
@@ -2244,9 +2383,20 @@ def _interaction_module_payload(
     prize = int(rule.get("module_prize") or rule.get("math_prize") or 123)
     payer_user_id = _int_or_none(data.get("payer_user_id")) or incoming.user_id
     payer_name = str(data.get("payer_name") or incoming.display_name or "")
+    event = _interaction_event_payload(incoming, rule, event_type, parsed)
+    source = _interaction_source_envelope(incoming, event_type)
+    actor = _interaction_actor_envelope(incoming, data)
+    reply_to = _interaction_reply_to_envelope(incoming)
+    trigger = _interaction_trigger_envelope(rule, event_type, parsed)
+    session = _interaction_session_envelope(incoming, rule, data)
     data.update(
         {
-            "event": _interaction_event_payload(incoming, rule, event_type, parsed),
+            "event": event,
+            "source": source,
+            "actor": actor,
+            "reply_to": reply_to,
+            "trigger": trigger,
+            "session": session,
             "event_type": event_type,
             "account_id": incoming.account_id,
             "chat_id": incoming.chat_id,
@@ -2280,8 +2430,16 @@ async def _interaction_module_payload_async(
     event_type: str = "payment_confirmed",
 ) -> dict[str, Any]:
     data = _interaction_module_payload(incoming, rule, parsed, event_type=event_type)
-    data["payout_account_label"] = await _load_account_holder_label(incoming.account_id)
-    data["payout_mode"] = await _resolve_payout_mode(incoming.account_id, incoming.chat_id)
+    payout_account_label = await _load_account_holder_label(incoming.account_id)
+    payout_mode = await _resolve_payout_mode(incoming.account_id, incoming.chat_id)
+    data["payout_account_label"] = payout_account_label
+    data["payout_mode"] = payout_mode
+    data["settlement"] = _interaction_settlement_envelope(
+        data,
+        prize=int(data.get("prize") or 123),
+        payout_account_label=payout_account_label,
+        payout_mode=payout_mode,
+    )
     return data
 
 
@@ -2330,6 +2488,47 @@ async def _run_worker_interaction_entry(
     return False, "worker 调用超时", []
 
 
+async def _run_worker_interaction_action(
+    incoming: Incoming,
+    *,
+    payload: dict[str, Any],
+) -> tuple[bool, str | None, dict[str, Any]]:
+    reply_channel = f"account_bot:interaction_action:{incoming.account_id}:{secrets.token_hex(8)}"
+    redis = get_redis()
+    pubsub = redis.pubsub()
+    try:
+        await pubsub.subscribe(reply_channel)
+        await redis.publish(
+            cmd_channel(incoming.account_id),
+            make_cmd(
+                CMD_RUN_INTERACTION_ACTION,
+                payload=payload,
+                reply_to=reply_channel,
+            ),
+        )
+        deadline = time.time() + _INTERACTION_ENTRY_TIMEOUT_SECONDS
+        while time.time() < deadline:
+            msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.5)
+            if not msg:
+                continue
+            response = IPCMessage.decode(msg["data"]).payload
+            result = response.get("result") if isinstance(response.get("result"), dict) else {}
+            return bool(response.get("ok")), response.get("error"), result
+    except Exception as exc:  # noqa: BLE001
+        log.warning("interaction action ipc failed aid=%s error=%s", incoming.account_id, exc)
+        return False, f"{type(exc).__name__}: {exc}", {}
+    finally:
+        try:
+            await pubsub.unsubscribe(reply_channel)
+        finally:
+            close = getattr(pubsub, "aclose", None) or getattr(pubsub, "close", None)
+            if close is not None:
+                ret = close()
+                if hasattr(ret, "__await__"):
+                    await ret
+    return False, "worker 调用超时", {}
+
+
 async def _write_interaction_runtime_log(
     incoming: Incoming,
     level: str,
@@ -2349,7 +2548,69 @@ async def _write_interaction_runtime_log(
         log.debug("write interaction runtime log failed aid=%s", incoming.account_id, exc_info=True)
 
 
+def _interaction_log_context(incoming: Incoming) -> dict[str, Any]:
+    return {
+        "chat_id": incoming.chat_id,
+        "message_id": incoming.message_id,
+        "reply_to_message_id": incoming.reply_to_message_id,
+        "user_id": incoming.user_id,
+        "username": incoming.username,
+        "display_name": incoming.display_name,
+    }
+
+
+def _interaction_trace_context(payload: dict[str, Any] | None) -> dict[str, Any]:
+    data = payload if isinstance(payload, dict) else {}
+    trigger = data.get("trigger") if isinstance(data.get("trigger"), dict) else {}
+    session = data.get("session") if isinstance(data.get("session"), dict) else {}
+    return {
+        "rule_id": str(trigger.get("rule_id") or "").strip() or None,
+        "rule_name": str(trigger.get("rule_name") or "").strip() or None,
+        "plugin_key": str(trigger.get("module_key") or "").strip() or None,
+        "entry_key": str(trigger.get("entry_key") or "").strip() or None,
+        "session_key": str(session.get("key") or "").strip() or None,
+        "session_scope": str(session.get("scope") or "").strip() or None,
+    }
+
+
+def _interaction_result_summary_from_log(detail: Any) -> dict[str, Any] | None:
+    if not isinstance(detail, dict):
+        return None
+    result = detail.get("result")
+    if not isinstance(result, dict):
+        return None
+    settlement = result.get("settlement") if isinstance(result.get("settlement"), dict) else None
+    payload = {
+        "chat_id": _int_or_none(detail.get("chat_id")),
+        "message_id": _int_or_none(detail.get("message_id")),
+        "rule_id": str(detail.get("rule_id") or "").strip() or None,
+        "rule_name": str(detail.get("rule_name") or "").strip() or None,
+        "plugin_key": str(detail.get("plugin_key") or "").strip() or None,
+        "entry_key": str(detail.get("entry_key") or "").strip() or None,
+        "session_key": str(detail.get("session_key") or "").strip() or None,
+        "session_scope": str(detail.get("session_scope") or "").strip() or None,
+        "action_type": str(result.get("action_type") or "").strip() or None,
+        "send_via": str(result.get("send_via") or "").strip() or None,
+        "execution": str(result.get("execution") or "").strip() or None,
+        "status": str(result.get("status") or "").strip() or None,
+        "winner_user_id": _int_or_none(result.get("winner_user_id")),
+        "winner_name": str(result.get("winner_name") or "").strip() or None,
+        "winner_message_id": _int_or_none(result.get("winner_message_id")),
+        "delivered_message_id": _int_or_none(result.get("delivered_message_id")),
+        "reply_to_message_id": _int_or_none(result.get("reply_to_message_id")),
+        "amount": _int_or_none(result.get("amount")),
+        "currency": str(result.get("currency") or "").strip() or None,
+        "payout_mode": str(result.get("payout_mode") or "").strip() or None,
+        "payout_account_label": str(result.get("payout_account_label") or "").strip() or None,
+        "delivery_error": str(result.get("delivery_error") or "").strip() or None,
+        "settlement": settlement,
+        "result": result,
+    }
+    return payload
+
+
 _INTERACTION_CONTROL_ACTIONS = {"end_session", "close_session", "no_session"}
+_INTERACTION_SEND_VIA = {"interaction_bot", "userbot_reply", "bbot_notice"}
 
 
 def _interaction_actions_request_no_session(actions: list[dict[str, Any]]) -> bool:
@@ -2367,18 +2628,277 @@ def _interaction_actions_mark_success(actions: list[dict[str, Any]]) -> bool:
     return True
 
 
-async def _apply_interaction_actions(incoming: Incoming, actions: list[dict[str, Any]]) -> None:
+def _interaction_action_send_via(action: dict[str, Any]) -> str:
+    send_via = str(action.get("send_via") or "interaction_bot").strip()
+    return send_via if send_via in _INTERACTION_SEND_VIA else "interaction_bot"
+
+
+async def _resolve_interaction_action_token(incoming: Incoming, send_via: str) -> str | None:
+    if send_via == "interaction_bot":
+        return incoming.token
+    if send_via == "bbot_notice":
+        async with AsyncSessionLocal() as db:
+            return await account_bot_service.get_transfer_bot_token(db, incoming.account_id)
+    return incoming.token
+
+
+def _interaction_result_payload(
+    action: dict[str, Any],
+    *,
+    send_via: str,
+    execution: str,
+    delivered_message_id: int | None = None,
+    delivery_error: str | None = None,
+) -> dict[str, Any] | None:
+    action_type = str(action.get("type") or "").strip()
+    result = action.get("result")
+    if isinstance(result, dict):
+        payload = dict(result)
+    elif action_type == "result":
+        payload = {k: v for k, v in action.items() if k not in {"type", "send_via", "reply_to_message_id", "settlement", "data"}}
+    elif isinstance(action.get("settlement"), dict):
+        settlement = dict(action["settlement"])
+        payload = {
+            "status": settlement.get("status") or "pending",
+            "winner_user_id": settlement.get("winner_user_id"),
+            "winner_name": settlement.get("winner_name"),
+            "amount": settlement.get("amount"),
+            "currency": settlement.get("currency"),
+        }
+    else:
+        return None
+
+    payload["action_type"] = action_type
+    payload["send_via"] = send_via
+    payload["execution"] = execution
+    if delivered_message_id is not None:
+        payload["delivered_message_id"] = delivered_message_id
+    reply_to_message_id = _int_or_none(action.get("reply_to_message_id"))
+    if reply_to_message_id is not None:
+        payload["reply_to_message_id"] = reply_to_message_id
+    if delivery_error:
+        payload["delivery_error"] = delivery_error
+    settlement = action.get("settlement")
+    if isinstance(settlement, dict):
+        payload["settlement"] = dict(settlement)
+    return payload
+
+
+def _interaction_delivery_message_id(result: dict[str, Any] | Any) -> int | None:
+    if not isinstance(result, dict):
+        return None
+    return _int_or_none(result.get("message_id"))
+
+
+def _interaction_delivery_error(result: dict[str, Any] | Any) -> str | None:
+    if not isinstance(result, dict):
+        return None
+    error = result.get("error")
+    if error is None:
+        return None
+    text = str(error).strip()
+    return text or None
+
+
+async def _send_interaction_action_message(
+    incoming: Incoming,
+    text: str,
+    *,
+    reply_to_message_id: int | None,
+    send_via: str,
+) -> tuple[bool, dict[str, Any]]:
+    if incoming.chat_id is None:
+        return False, {}
+    if send_via == "userbot_reply":
+        ok, error, result = await _run_worker_interaction_action(
+            incoming,
+            payload={
+                "action_type": "send_message",
+                "chat_id": incoming.chat_id,
+                "text": text,
+                "reply_to_message_id": reply_to_message_id,
+            },
+        )
+        if not ok:
+            await _write_interaction_runtime_log(
+                incoming,
+                "warn",
+                f"interaction action send_via={send_via} failed",
+                send_via=send_via,
+                error=error,
+                **_interaction_log_context(incoming),
+            )
+            return False, {"error": error}
+        return True, result
+    token = await _resolve_interaction_action_token(incoming, send_via)
+    if not token:
+        await _write_interaction_runtime_log(
+            incoming,
+            "warn",
+            f"interaction action send_via={send_via} ignored: bot token unavailable",
+            send_via=send_via,
+            **_interaction_log_context(incoming),
+        )
+        return False, {"error": "bot token unavailable"}
+    result = await account_bot_service.send_message(
+        token,
+        incoming.chat_id,
+        text,
+        reply_to_message_id=reply_to_message_id,
+    )
+    return True, result
+
+
+async def _send_interaction_action_photo(
+    incoming: Incoming,
+    photo: bytes,
+    *,
+    filename: str,
+    caption: str | None,
+    reply_to_message_id: int | None,
+    send_via: str,
+) -> tuple[bool, dict[str, Any]]:
+    if incoming.chat_id is None:
+        return False, {}
+    if send_via == "userbot_reply":
+        ok, error, result = await _run_worker_interaction_action(
+            incoming,
+            payload={
+                "action_type": "send_photo",
+                "chat_id": incoming.chat_id,
+                "photo_base64": base64.b64encode(photo).decode("ascii"),
+                "filename": filename,
+                "caption": caption,
+                "reply_to_message_id": reply_to_message_id,
+            },
+        )
+        if not ok:
+            await _write_interaction_runtime_log(
+                incoming,
+                "warn",
+                f"interaction media action send_via={send_via} failed",
+                send_via=send_via,
+                error=error,
+                **_interaction_log_context(incoming),
+            )
+            return False, {"error": error}
+        return True, result
+    token = await _resolve_interaction_action_token(incoming, send_via)
+    if not token:
+        await _write_interaction_runtime_log(
+            incoming,
+            "warn",
+            f"interaction media action send_via={send_via} ignored: bot token unavailable",
+            send_via=send_via,
+            **_interaction_log_context(incoming),
+        )
+        return False, {"error": "bot token unavailable"}
+    result = await account_bot_service.send_photo_bytes(
+        token,
+        incoming.chat_id,
+        photo,
+        filename=filename,
+        caption=caption,
+        reply_to_message_id=reply_to_message_id,
+    )
+    return True, result
+
+
+async def _record_interaction_settlement(incoming: Incoming, action: dict[str, Any]) -> None:
+    settlement = action.get("settlement")
+    if not isinstance(settlement, dict) and str(action.get("type") or "").strip() == "settlement":
+        settlement = {k: v for k, v in action.items() if k != "type"}
+    if not isinstance(settlement, dict):
+        return
+    await _write_interaction_runtime_log(
+        incoming,
+        "info",
+        "interaction settlement reported",
+        action_type=str(action.get("type") or ""),
+        settlement=settlement,
+        **_interaction_log_context(incoming),
+        **_interaction_trace_context(action.get("context")),
+    )
+
+
+async def _record_interaction_result(
+    incoming: Incoming,
+    action: dict[str, Any],
+    *,
+    send_via: str,
+    execution: str,
+    delivered_message_id: int | None = None,
+    delivery_error: str | None = None,
+) -> None:
+    payload = _interaction_result_payload(
+        action,
+        send_via=send_via,
+        execution=execution,
+        delivered_message_id=delivered_message_id,
+        delivery_error=delivery_error,
+    )
+    if payload is None:
+        return
+    await _write_interaction_runtime_log(
+        incoming,
+        "info",
+        "interaction result reported",
+        result=payload,
+        **_interaction_log_context(incoming),
+        **_interaction_trace_context(action.get("context")),
+    )
+
+
+def parse_interaction_result_log(row: RuntimeLog) -> dict[str, Any] | None:
+    if row.source != "event" or not isinstance(row.detail, dict):
+        return None
+    return _interaction_result_summary_from_log(row.detail)
+
+
+async def _apply_interaction_actions(
+    incoming: Incoming,
+    actions: list[dict[str, Any]],
+    *,
+    context: dict[str, Any] | None = None,
+) -> None:
     for action in actions[:10]:
+        action = dict(action)
+        if context:
+            action["context"] = dict(context)
         action_type = str(action.get("type") or "").strip()
+        await _record_interaction_settlement(incoming, action)
         if action_type in _INTERACTION_CONTROL_ACTIONS or action_type == "result":
+            if action_type == "result":
+                await _record_interaction_result(
+                    incoming,
+                    action,
+                    send_via=_interaction_action_send_via(action),
+                    execution="local",
+                )
+            continue
+        if action_type == "settlement":
             continue
         raw_reply_to = action.get("reply_to_message_id")
         reply_to_message_id = _int_or_none(raw_reply_to)
+        send_via = _interaction_action_send_via(action)
         if action_type == "send_message":
             text = str(action.get("text") or "").strip()
             if not text:
                 continue
-            await _send(incoming, text, reply_to_message_id=reply_to_message_id)
+            ok, result = await _send_interaction_action_message(
+                incoming,
+                text,
+                reply_to_message_id=reply_to_message_id,
+                send_via=send_via,
+            )
+            await _record_interaction_result(
+                incoming,
+                action,
+                send_via=send_via,
+                execution="userbot" if send_via == "userbot_reply" else "bot",
+                delivered_message_id=_interaction_delivery_message_id(result) if ok else None,
+                delivery_error=_interaction_delivery_error(result) if not ok else None,
+            )
             continue
         if action_type in {"send_photo", "send_file"}:
             raw_photo = str(action.get("photo_base64") or action.get("file_base64") or "").strip()
@@ -2393,13 +2913,21 @@ async def _apply_interaction_actions(incoming: Incoming, actions: list[dict[str,
                 continue
             filename = str(action.get("filename") or "interaction.png").strip() or "interaction.png"
             caption = str(action.get("caption") or action.get("text") or "").strip() or None
-            await account_bot_service.send_photo_bytes(
-                incoming.token,
-                incoming.chat_id or 0,
+            ok, result = await _send_interaction_action_photo(
+                incoming,
                 photo,
                 filename=filename,
                 caption=caption,
                 reply_to_message_id=reply_to_message_id,
+                send_via=send_via,
+            )
+            await _record_interaction_result(
+                incoming,
+                action,
+                send_via=send_via,
+                execution="userbot" if send_via == "userbot_reply" else "bot",
+                delivered_message_id=_interaction_delivery_message_id(result) if ok else None,
+                delivery_error=_interaction_delivery_error(result) if not ok else None,
             )
             continue
         log.info("interaction action ignored: unsupported type=%s aid=%s", action_type, incoming.account_id)
@@ -2409,6 +2937,7 @@ async def _apply_interaction_actions(incoming: Incoming, actions: list[dict[str,
             f"interaction action ignored: unsupported type={action_type}",
             action_type=action_type,
             action=action,
+            **_interaction_log_context(incoming),
         )
 
 
@@ -2428,6 +2957,7 @@ async def _run_interaction_module(
     if start_text:
         await _send(incoming, start_text, reply_to_message_id=incoming.message_id)
     payload = await _interaction_module_payload_async(incoming, rule, parsed, event_type=event_type)
+    trace_context = _interaction_trace_context(payload)
     ok, error, actions = await _run_worker_interaction_entry(
         incoming,
         plugin_key=module_key,
@@ -2441,7 +2971,7 @@ async def _run_interaction_module(
         )
         return False, False
     keep_session = not _interaction_actions_request_no_session(actions)
-    await _apply_interaction_actions(incoming, actions)
+    await _apply_interaction_actions(incoming, actions, context=trace_context)
     return _interaction_actions_mark_success(actions), keep_session
 
 
@@ -2751,6 +3281,7 @@ def _extract_incoming(aid: int, token: str, update: dict[str, Any]) -> Incoming 
         display_name=_format_user_name(from_user),
         username=str(from_user.get("username") or "").strip() or None,
         reply_to_user_id=_int_or_none(reply_from.get("id")),
+        reply_to_message_id=_int_or_none(reply.get("message_id")),
         reply_to_display_name=_format_user_name(reply_from) if reply_from else None,
         reply_to_username=str(reply_from.get("username") or "").strip() or None,
         reply_to_text=reply_text or None,

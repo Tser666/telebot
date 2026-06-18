@@ -1,0 +1,490 @@
+"""已安装互动插件与交互示例的契约测试。"""
+
+from __future__ import annotations
+
+import importlib
+import importlib.util
+import sys
+import time
+import types
+from pathlib import Path
+from types import ModuleType
+from unittest.mock import AsyncMock
+
+import pytest
+
+from app.worker.plugins.base import PluginContext
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+INSTALLED_ROOT = PROJECT_ROOT / "plugins" / "installed"
+
+
+def _load_installed_module(plugin_key: str, filename: str) -> ModuleType:
+    package_root = "plugins.installed"
+    if package_root not in sys.modules:
+        pkg = types.ModuleType(package_root)
+        pkg.__path__ = [str(INSTALLED_ROOT)]  # type: ignore[attr-defined]
+        sys.modules[package_root] = pkg
+
+    package_name = f"{package_root}.{plugin_key}"
+    plugin_dir = INSTALLED_ROOT / plugin_key
+    if package_name not in sys.modules:
+        pkg = types.ModuleType(package_name)
+        pkg.__path__ = [str(plugin_dir)]  # type: ignore[attr-defined]
+        sys.modules[package_name] = pkg
+
+    path = plugin_dir / filename
+    module_name = f"{package_name}.{filename[:-3]}"
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"无法加载模块: {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+class _ReplyRecorder:
+    def __init__(self) -> None:
+        self.replies: list[str] = []
+
+    async def reply(self, text: str) -> None:
+        self.replies.append(text)
+
+
+@pytest.mark.asyncio
+async def test_example_with_interaction_preserves_original_command_trigger() -> None:
+    plugin_module = importlib.import_module("examples.plugins.with_interaction")
+    plugin = plugin_module.PLUGIN_CLASS()
+    ctx = PluginContext(account_id=1, feature_key="with_interaction", log=AsyncMock())
+
+    event = _ReplyRecorder()
+    handled = await plugin.on_command(ctx, "with_interaction", [], event)
+
+    assert handled is True
+    assert event.replies == ["原命令触发仍然可用"]
+
+    ignored = await plugin.on_command(ctx, "other_command", [], event)
+    assert ignored is False
+
+
+@pytest.mark.asyncio
+async def test_installed_interaction_plugins_keep_original_command_handlers() -> None:
+    class _ReplyMsg:
+        def __init__(self) -> None:
+            self.id = 101
+
+    class _CmdEvent:
+        def __init__(self, chat_id: int = -100123) -> None:
+            self.chat_id = chat_id
+            self.replies: list[str] = []
+
+        async def reply(self, text: str, **_kwargs) -> _ReplyMsg:
+            self.replies.append(text)
+            return _ReplyMsg()
+
+        async def edit(self, text: str, **_kwargs) -> _ReplyMsg:
+            self.replies.append(text)
+            return _ReplyMsg()
+
+    guess_module = _load_installed_module("guess_number", "plugin.py")
+    guess_plugin = guess_module.GuessNumberPlugin()
+    guess_event = _CmdEvent()
+    guess_ctx = PluginContext(account_id=1, feature_key="guess_number", log=AsyncMock())
+    await guess_plugin.on_startup(guess_ctx)
+
+    await guess_plugin._cmd_handler(None, guess_event, ["guess", "123"], 1, guess_ctx)
+    assert guess_event.replies, "猜数字原命令仍应能回复"
+
+    poetry_module = _load_installed_module("poetry_blank", "plugin.py")
+    poetry_plugin = poetry_module.PoetryBlankPlugin()
+    poetry_event = _CmdEvent()
+    poetry_ctx = PluginContext(account_id=1, feature_key="poetry_blank", log=AsyncMock())
+    await poetry_plugin.on_startup(poetry_ctx)
+
+    await poetry_plugin._cmd_handler(None, poetry_event, ["poetry", "123"], 1, poetry_ctx)
+    assert poetry_event.replies, "诗词填空原命令仍应能回复"
+
+    dice_module = _load_installed_module("dice_grid_hunt", "plugin.py")
+    dice_plugin = dice_module.DiceGridHuntPlugin()
+    dice_event = _CmdEvent()
+    dice_ctx = PluginContext(account_id=1, feature_key="dice_grid_hunt", log=AsyncMock())
+    await dice_plugin.on_startup(dice_ctx)
+
+    await dice_plugin._cmd_handler(None, dice_event, ["100"], 1, dice_ctx)
+    assert dice_event.replies, "九宫格原命令仍应能回复"
+
+    lottery_module = _load_installed_module("lottery_plus", "plugin.py")
+    lottery_plugin = lottery_module.LotteryPlusPlugin()
+    lottery_event = _CmdEvent()
+    lottery_event.get_sender = AsyncMock(return_value=types.SimpleNamespace(id=111, first_name="AAA"))
+    lottery_ctx = PluginContext(account_id=1, feature_key="lottery_plus", log=AsyncMock())
+    await lottery_plugin.on_startup(lottery_ctx)
+
+    await lottery_plugin._cmd_handler(None, lottery_event, ["帮助"], 1, lottery_ctx)
+    assert lottery_event.replies, "彩票原命令仍应能回复"
+
+    pt_module = _load_installed_module("pt_promote", "plugin.py")
+    pt_plugin = pt_module.PTPromotePlugin()
+    pt_event = _CmdEvent()
+    pt_ctx = PluginContext(account_id=1, feature_key="pt_promote", log=AsyncMock())
+    await pt_plugin.on_startup(pt_ctx)
+
+    await pt_plugin._handle_promote(None, pt_event, [], 1, pt_ctx)
+    assert pt_event.replies, "PT 促销原命令仍应能回复"
+
+
+@pytest.mark.asyncio
+async def test_redpack_original_command_preserves_legacy_core_path(monkeypatch) -> None:
+    redpack_module = _load_installed_module("redpack-byRBQ", "plugin.py")
+    redpack_plugin = redpack_module.RedpackByRBQPlugin()
+    redpack_ctx = PluginContext(account_id=1, feature_key="redpack-byRBQ", log=AsyncMock())
+    await redpack_plugin.on_startup(redpack_ctx)
+
+    command_client = types.SimpleNamespace(get_me=AsyncMock(return_value=types.SimpleNamespace(id=1)))
+    event = types.SimpleNamespace(chat_id=-100123, raw_text=",redpack help")
+    run_legacy = AsyncMock()
+
+    monkeypatch.setattr(redpack_module, "_is_account_command_event", AsyncMock(return_value=True))
+    monkeypatch.setattr(redpack_module.redpack_core, "redpack_command", run_legacy)
+
+    await redpack_plugin._cmd_redpack(command_client, event, ["help"], 1, redpack_ctx)
+
+    assert "redpack" in redpack_plugin.commands
+    run_legacy.assert_awaited_once()
+    message, bot = run_legacy.await_args.args
+    assert message.arguments == "help"
+    assert getattr(message.chat, "id", None) == -100123
+    assert isinstance(bot, redpack_module._NativeClientAdapter)
+
+
+def test_guess_number_manifest_declares_interaction_contract() -> None:
+    manifest_module = _load_installed_module("guess_number", "manifest.py")
+    manifest = manifest_module.MANIFEST
+
+    assert manifest.category == "interactive"
+    entry = manifest.interaction_entries[0]
+    assert entry["key"] == "start_guess_number"
+    assert entry["interaction_profile"] == "session_game"
+    assert entry["launch_mode"] == "hybrid"
+    assert entry["session_scope"] == "chat"
+    assert entry["preserve_command_trigger"] is True
+    assert entry["command_fallback"]["command"] == "guess"
+    assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply", "bbot_notice"]
+    assert "valid_seconds" in entry["input_schema"]["properties"]
+
+
+def test_poetry_blank_manifest_declares_interaction_contract() -> None:
+    manifest_module = _load_installed_module("poetry_blank", "manifest.py")
+    manifest = manifest_module.MANIFEST
+
+    assert manifest.category == "interactive"
+    entry = manifest.interaction_entries[0]
+    assert entry["key"] == "start_poetry_blank"
+    assert entry["interaction_profile"] == "session_game"
+    assert entry["launch_mode"] == "hybrid"
+    assert entry["session_scope"] == "chat"
+    assert entry["preserve_command_trigger"] is True
+    assert entry["command_fallback"]["command"] == "poetry"
+    assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply", "bbot_notice"]
+    assert "valid_seconds" in entry["input_schema"]["properties"]
+
+
+def test_dice_grid_hunt_manifest_declares_interaction_contract() -> None:
+    manifest_module = _load_installed_module("dice_grid_hunt", "manifest.py")
+    manifest = manifest_module.MANIFEST
+
+    assert manifest.category == "interactive"
+    entry = manifest.interaction_entries[0]
+    assert entry["key"] == "start_dice_grid_hunt"
+    assert entry["interaction_profile"] == "session_game"
+    assert entry["launch_mode"] == "hybrid"
+    assert entry["session_scope"] == "chat"
+    assert entry["preserve_command_trigger"] is True
+    assert entry["command_fallback"]["command"] == "dicegrid"
+    assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply", "bbot_notice"]
+    assert "valid_seconds" in entry["input_schema"]["properties"]
+
+
+def test_lottery_plus_manifest_declares_interaction_contract() -> None:
+    manifest_module = _load_installed_module("lottery_plus", "manifest.py")
+    manifest = manifest_module.MANIFEST
+
+    assert manifest.category == "interactive"
+    entry = manifest.interaction_entries[0]
+    assert entry["key"] == "start_lottery_plus"
+    assert entry["interaction_profile"] == "reward_pool"
+    assert entry["launch_mode"] == "hybrid"
+    assert entry["session_scope"] == "chat"
+    assert entry["events"] == ["payment_confirmed", "message", "session_close"]
+    assert entry["preserve_command_trigger"] is True
+    assert entry["command_fallback"]["command"] == "lotto"
+    assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply", "bbot_notice"]
+    assert "message" in entry["input_schema"]["properties"]
+
+
+def test_redpack_manifest_declares_interaction_contract() -> None:
+    manifest_module = _load_installed_module("redpack-byRBQ", "manifest.py")
+    manifest = manifest_module.MANIFEST
+
+    assert manifest.category == "interactive"
+    entry = manifest.interaction_entries[0]
+    assert entry["key"] == "start_redpack"
+    assert entry["interaction_profile"] == "reward_pool"
+    assert entry["launch_mode"] == "hybrid"
+    assert entry["session_scope"] == "chat"
+    assert entry["events"] == ["keyword", "payment_confirmed", "message", "session_close"]
+    assert entry["preserve_command_trigger"] is True
+    assert entry["command_fallback"]["command"] == "redpack"
+    assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply", "bbot_notice"]
+    assert "total_amount" in entry["input_schema"]["properties"]
+    assert "count" in entry["input_schema"]["properties"]
+
+
+def test_pt_promote_manifest_declares_interaction_contract() -> None:
+    manifest_module = _load_installed_module("pt_promote", "manifest.py")
+    manifest = manifest_module.MANIFEST
+
+    assert manifest.category == "utility"
+    entry = manifest.interaction_entries[0]
+    assert entry["key"] == "promote_torrent"
+    assert entry["interaction_profile"] == "utility_trigger"
+    assert entry["launch_mode"] == "hybrid"
+    assert entry["session_scope"] == "user"
+    assert entry["events"] == ["keyword", "payment_confirmed", "message"]
+    assert entry["preserve_command_trigger"] is True
+    assert entry["command_fallback"]["command"] == "pt"
+    assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply"]
+    assert "id" in entry["input_schema"]["properties"]
+    assert "default_options" in entry["input_schema"]["properties"]
+
+
+def test_installed_interaction_plugin_json_matches_manifest_contracts() -> None:
+    for plugin_key in (
+        "guess_number",
+        "poetry_blank",
+        "dice_grid_hunt",
+        "lottery_plus",
+        "redpack-byRBQ",
+        "pt_promote",
+    ):
+        manifest_module = _load_installed_module(plugin_key, "manifest.py")
+        plugin_json = INSTALLED_ROOT / plugin_key / "plugin.json"
+        metadata = importlib.import_module("json").loads(plugin_json.read_text(encoding="utf-8"))
+
+        assert metadata.get("category") == manifest_module.MANIFEST.category
+        assert metadata.get("interaction_profile") == manifest_module.MANIFEST.interaction_profile
+        assert metadata.get("interaction_entries") == manifest_module.MANIFEST.interaction_entries
+
+
+@pytest.mark.asyncio
+async def test_guess_number_on_interaction_accepts_legacy_entry_and_returns_result() -> None:
+    plugin_module = _load_installed_module("guess_number", "plugin.py")
+    plugin = plugin_module.GuessNumberPlugin()
+    ctx = PluginContext(account_id=1, feature_key="guess_number", log=AsyncMock())
+
+    start_actions = await plugin.on_interaction(
+        ctx,
+        "start_game",
+        {
+            "source": {"type": "payment_confirmed", "chat_id": -100123, "message_id": 70},
+            "session": {"scope": "chat", "ttl_seconds": 120},
+            "prize": 321,
+            "valid_seconds": 120,
+        },
+    )
+    assert start_actions == [
+        {
+            "type": "send_message",
+            "text": "猜数字开始\n奖励：+321\n范围：1 ~ 100\n限时：120 秒\n直接发送数字开始竞猜。",
+        }
+    ]
+
+    game = plugin._games[-100123]
+    game.target = 42
+
+    answer_actions = await plugin.on_interaction(
+        ctx,
+        "start_game",
+        {
+            "source": {"type": "message", "chat_id": -100123, "message_id": 99, "text": "42"},
+            "actor": {"user_id": 111, "display_name": "AAA"},
+            "settlement": {"mode": "auto", "payout_account_label": "@owner"},
+        },
+    )
+
+    assert answer_actions == [
+        {
+            "type": "send_message",
+            "text": "答对了：AAA\n题目：猜数字 1 ~ 100\n答案：42\n奖金：321\n奖金将由 @owner 账号自动发放。",
+            "reply_to_message_id": 99,
+        },
+        {
+            "type": "result",
+            "success": True,
+            "result": {
+                "status": "winner",
+                "winner_user_id": 111,
+                "winner_name": "AAA",
+                "winner_message_id": 99,
+                "target": 42,
+                "guess": 42,
+                "range": [1, 100],
+                "attempts": 1,
+                "prize": 321,
+                "payout_mode": "auto",
+                "payout_account_label": "@owner",
+            },
+            "settlement": {
+                "mode": "auto",
+                "amount": 321,
+                "winner_user_id": 111,
+                "winner_name": "AAA",
+                "payout_account_label": "@owner",
+                "status": "announced",
+            },
+        },
+        {"type": "end_session"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_poetry_blank_on_interaction_returns_result_from_standard_envelope() -> None:
+    plugin_module = _load_installed_module("poetry_blank", "plugin.py")
+    plugin = plugin_module.PoetryBlankPlugin()
+    ctx = PluginContext(account_id=1, feature_key="poetry_blank", log=AsyncMock())
+
+    plugin._pick_poem = lambda _chat_id: ("床前明月光", "李白", "静夜思", "床前__光", ["明", "月"])  # type: ignore[method-assign]
+
+    start_actions = await plugin.on_interaction(
+        ctx,
+        "start_poetry_blank",
+        {
+            "source": {"type": "keyword", "chat_id": -100123, "message_id": 70, "text": "开诗词"},
+            "session": {"scope": "chat", "ttl_seconds": 120},
+            "prize": 456,
+            "valid_seconds": 120,
+        },
+    )
+    assert start_actions == [
+        {
+            "type": "send_message",
+            "text": "诗词填空开始\n奖金：+456\n\n床前__光\n\n提示：李白 · 《静夜思》\n请直接发送答案抢答。",
+        }
+    ]
+
+    answer_actions = await plugin.on_interaction(
+        ctx,
+        "start_poetry_blank",
+        {
+            "source": {"type": "message", "chat_id": -100123, "message_id": 99, "text": "明月"},
+            "actor": {"user_id": 111, "display_name": "AAA"},
+            "settlement": {"mode": "manual", "payout_account_label": "@owner"},
+        },
+    )
+
+    assert answer_actions == [
+        {
+            "type": "send_message",
+            "text": "答对了：AAA\n题目：床前__光\n原句：床前明月光\n出处：李白 · 《静夜思》\n奖金：456\n请由 @owner 人工回复赢家发放奖金。",
+            "reply_to_message_id": 99,
+        },
+        {
+            "type": "result",
+            "success": True,
+            "result": {
+                "status": "winner",
+                "winner_user_id": 111,
+                "winner_name": "AAA",
+                "winner_message_id": 99,
+                "full_line": "床前明月光",
+                "author": "李白",
+                "title": "静夜思",
+                "answer": "明月",
+                "prize": 456,
+                "payout_mode": "manual",
+                "payout_account_label": "@owner",
+            },
+            "settlement": {
+                "mode": "announce_only",
+                "amount": 456,
+                "winner_user_id": 111,
+                "winner_name": "AAA",
+                "payout_account_label": "@owner",
+                "status": "announced",
+            },
+        },
+        {"type": "end_session"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_dice_grid_hunt_on_interaction_returns_result_from_standard_envelope() -> None:
+    plugin_module = _load_installed_module("dice_grid_hunt", "plugin.py")
+    plugin = plugin_module.DiceGridHuntPlugin()
+    ctx = PluginContext(account_id=1, feature_key="dice_grid_hunt", log=AsyncMock())
+
+    plugin_module._render_grid_png = lambda _rd: b"png-bytes"  # type: ignore[assignment]
+    plugin._new_round = lambda prize, timeout=None: plugin_module.RoundState(  # type: ignore[method-assign]
+        rolls=[[1, 1, 1, 1, 1, 1]] * 9,
+        sums=[6] * 9,
+        answer_index=6,
+        target_sum=17,
+        prize=prize,
+        started_at=time.monotonic(),
+        timeout=timeout or 90,
+        last_guess_at={},
+    )
+
+    start_actions = await plugin.on_interaction(
+        ctx,
+        "start_dice_grid_hunt",
+        {
+            "source": {"type": "payment_confirmed", "chat_id": -100123, "message_id": 70},
+            "session": {"scope": "chat", "ttl_seconds": 90},
+            "prize": 777,
+            "valid_seconds": 90,
+        },
+    )
+    assert start_actions[0]["type"] == "send_photo"
+    assert start_actions[0]["filename"] == "dice_grid_hunt.png"
+    assert start_actions[0]["reply_to_message_id"] == 70
+
+    answer_actions = await plugin.on_interaction(
+        ctx,
+        "start_dice_grid_hunt",
+        {
+            "source": {"type": "message", "chat_id": -100123, "message_id": 99, "text": "6"},
+            "actor": {"user_id": 111, "display_name": "AAA"},
+            "sender_user_id": 111,
+            "settlement": {"mode": "auto", "payout_account_label": "@owner"},
+        },
+    )
+
+    assert answer_actions[0]["type"] == "send_message"
+    assert "答对了：AAA" in answer_actions[0]["text"]
+    assert answer_actions[0]["reply_to_message_id"] == 99
+    assert answer_actions[1] == {
+        "type": "result",
+        "success": True,
+        "result": {
+            "status": "winner",
+            "winner_user_id": 111,
+            "winner_name": "AAA",
+            "winner_message_id": 99,
+            "target_sum": 17,
+            "answer_index": 6,
+            "prize": 777,
+            "payout_mode": "auto",
+            "payout_account_label": "@owner",
+        },
+        "settlement": {
+            "mode": "auto",
+            "amount": 777,
+            "winner_user_id": 111,
+            "winner_name": "AAA",
+            "payout_account_label": "@owner",
+            "status": "announced",
+        },
+    }
+    assert answer_actions[2] == {"type": "end_session"}

@@ -437,6 +437,39 @@ class TestFeatureInfo:
         assert info.experimental is True
         assert info.config_schema == {"type": "object"}
 
+    def test_from_feature_exposes_interaction_profile_and_entries(self) -> None:
+        feature = MagicMock()
+        feature.key = "dice_grid_hunt"
+        feature.display_name = "九宫格猜骰"
+        feature.is_builtin = True
+        feature.version = "1.2.0"
+        feature.manifest = {
+            "category": "interactive",
+            "interaction_profile": "session_game",
+            "interaction_entries": [
+                {
+                    "key": "start_dice_grid_hunt",
+                    "title": "开始九宫格",
+                    "interaction_profile": "session_game",
+                    "launch_mode": "hybrid",
+                    "session_scope": "chat",
+                }
+            ],
+        }
+
+        info = FeatureInfo.from_feature(feature)
+        assert info.category == "interactive"
+        assert info.interaction_profile == "session_game"
+        assert info.interaction_entries == [
+            {
+                "key": "start_dice_grid_hunt",
+                "title": "开始九宫格",
+                "interaction_profile": "session_game",
+                "launch_mode": "hybrid",
+                "session_scope": "chat",
+            }
+        ]
+
 
 class TestSetPluginGlobalConfig:
     """测试 set_plugin_global_config 函数。"""

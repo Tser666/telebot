@@ -12,6 +12,7 @@ import asyncio
 import gc
 import logging
 import re
+from io import BytesIO
 from typing import Any
 
 from sqlalchemy import select
@@ -49,6 +50,7 @@ from .ipc import (
     CMD_RELOAD_IGNORED,
     CMD_RELOAD_PLUGIN,
     CMD_RESUME,
+    CMD_RUN_INTERACTION_ACTION,
     CMD_RUN_INTERACTION_ENTRY,
     CMD_STOP,
     EVT_ACK,
@@ -74,7 +76,7 @@ log = logging.getLogger(__name__)
 _CONFIG_RECONCILE_SECONDS = max(30, int(app_settings.worker_reconcile_seconds or 180))
 _ACCOUNT_BOT_AUTO_AWARD_DEDUPE_PREFIX = "account_bot:auto_award:"
 _ACCOUNT_BOT_AUTO_AWARD_DEDUPE_TTL_SECONDS = 86400
-_ACCOUNT_BOT_AUTO_AWARD_MODULE_KEYS = {"game24", "math10", "dice_grid_hunt"}
+_ACCOUNT_BOT_AUTO_AWARD_MODULE_KEYS = {"game24", "math10", "dice_grid_hunt", "guess_number", "poetry_blank"}
 
 
 def _httpx_proxy_url_from_proxy(proxy: Proxy | None) -> str | None:
@@ -123,6 +125,65 @@ def _parse_account_bot_winner_notice(text: str) -> int | None:
         return None
     prize = int(match.group(1))
     return prize if prize > 0 else None
+
+
+async def _run_interaction_userbot_action(client: Any, payload: dict[str, Any]) -> dict[str, Any]:
+    """用账号自身的 userbot 身份执行平台交互动作。"""
+
+    action_type = str(payload.get("action_type") or "").strip()
+    try:
+        chat_id = int(payload["chat_id"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("缺少 chat_id") from exc
+
+    reply_to_message_id = payload.get("reply_to_message_id")
+    try:
+        reply_to = int(reply_to_message_id) if reply_to_message_id is not None else None
+    except (TypeError, ValueError) as exc:
+        raise ValueError("reply_to_message_id 非法") from exc
+
+    if action_type == "send_message":
+        text = str(payload.get("text") or "").strip()
+        if not text:
+            raise ValueError("缺少 text")
+        msg = await client.send_message(chat_id, text, reply_to=reply_to, parse_mode="html")
+        return {
+            "message_id": int(getattr(msg, "id", 0) or 0) or None,
+            "chat_id": chat_id,
+        }
+
+    if action_type in {"send_photo", "send_file"}:
+        raw_base64 = str(payload.get("file_base64") or payload.get("photo_base64") or "").strip()
+        if not raw_base64:
+            raise ValueError("缺少媒体内容")
+        import base64
+        import binascii
+
+        try:
+            file_bytes = base64.b64decode(raw_base64, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("媒体 base64 非法") from exc
+        if not file_bytes:
+            raise ValueError("媒体内容为空")
+        filename = str(payload.get("filename") or ("interaction.png" if action_type == "send_photo" else "interaction.bin")).strip()
+        caption = str(payload.get("caption") or payload.get("text") or "").strip() or None
+        file_obj = BytesIO(file_bytes)
+        file_obj.name = filename or "interaction.bin"
+        kwargs: dict[str, Any] = {
+            "reply_to": reply_to,
+        }
+        if caption:
+            kwargs["caption"] = caption[:1024]
+            kwargs["parse_mode"] = "html"
+        if action_type == "send_photo":
+            kwargs["force_document"] = False
+        msg = await client.send_file(chat_id, file_obj, **kwargs)
+        return {
+            "message_id": int(getattr(msg, "id", 0) or 0) or None,
+            "chat_id": chat_id,
+        }
+
+    raise ValueError(f"不支持的交互动作: {action_type}")
 
 
 async def _load_account_bot_auto_award_config(account_id: int) -> dict[str, Any] | None:
@@ -697,6 +758,40 @@ async def _listen_cmd(
                             await redis.publish(
                                 reply_to,
                                 make_cmd(CMD_RUN_INTERACTION_ENTRY, ok=result_ok, error=result_error, actions=actions),
+                            )
+                        except Exception:  # noqa: BLE001
+                            pass
+                    elif cmd.type == CMD_RUN_INTERACTION_ACTION:
+                        # RPC：主进程请求当前账号以 userbot 身份执行交互动作。
+                        reply_to = cmd.payload.get("reply_to")
+                        if not isinstance(reply_to, str) or not reply_to:
+                            continue
+                        result_ok = False
+                        result_error: str | None = None
+                        result_payload: dict[str, Any] = {}
+                        try:
+                            result_payload = await _run_interaction_userbot_action(
+                                client,
+                                dict(cmd.payload.get("payload") or {}),
+                            )
+                            result_ok = True
+                        except Exception as e:  # noqa: BLE001
+                            result_error = f"{type(e).__name__}: {e}"
+                            await _log(
+                                redis,
+                                account_id,
+                                "warn",
+                                f"run_interaction_action 失败: {result_error}",
+                            )
+                        try:
+                            await redis.publish(
+                                reply_to,
+                                make_cmd(
+                                    CMD_RUN_INTERACTION_ACTION,
+                                    ok=result_ok,
+                                    error=result_error,
+                                    result=result_payload,
+                                ),
                             )
                         except Exception:  # noqa: BLE001
                             pass

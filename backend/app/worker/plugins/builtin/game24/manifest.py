@@ -16,12 +16,35 @@ MANIFEST = Manifest(
     author="builtin",
     description="随机生成 24 点题目，群内竞速答题，第一名获得奖金",
     category="interactive",
+    interaction_profile="session_game",
     interaction_entries=[
         {
             "key": "start_paid_game",
             "title": "付费开局",
             "description": "转账命中或模块关键词触发后，由交互 Bot 开启一局 24 点。",
+            "interaction_profile": "session_game",
+            "launch_mode": "hybrid",
+            "events": ["payment_confirmed", "keyword", "message", "session_close"],
             "session_scope": "chat",
+            "preserve_command_trigger": True,
+            "command_fallback": {
+                "enabled": True,
+                "command": "24d",
+                "mode": "hint_only",
+            },
+            "payload_contract": {
+                "required_envelope": ["source", "actor", "trigger", "session"],
+                "required_event_fields": ["type", "chat_id"],
+            },
+            "result_contract": {
+                "actions": ["send_message", "send_photo", "send_file", "end_session", "result", "settlement"],
+                "send_via": ["interaction_bot", "userbot_reply", "bbot_notice"],
+            },
+            "settlement": {
+                "mode": "announce_only",
+                "winner_field": "actor.user_id",
+                "amount_field": "prize",
+            },
             "input_schema": {
                 "type": "object",
                 "additionalProperties": False,

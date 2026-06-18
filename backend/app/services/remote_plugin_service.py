@@ -34,7 +34,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -133,8 +133,11 @@ class PluginMetadataSchema(BaseModel):
     # entry 是可选的，默认为 plugin.py
     entry: str = "plugin.py"
     # permissions 和 config_schema 是可选扩展字段
-    permissions: list[str] = field(default_factory=list)
+    permissions: list[str] = Field(default_factory=list)
     config_schema: dict[str, Any] | None = None
+    category: str | None = None
+    interaction_profile: str | None = None
+    interaction_entries: list[dict[str, Any]] = Field(default_factory=list)
     min_telepilot_version: str | None = None
     # 0.15 rename 前的旧字段，继续作为兼容别名解析。
     min_telebot_version: str | None = None
@@ -172,6 +175,18 @@ class PluginMetadataSchema(BaseModel):
             raise ValueError("author 字段过长（最大 255 字符）")
         return v
 
+    @field_validator("category")
+    @classmethod
+    def _validate_category(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        value = str(v).strip()
+        if not value:
+            return None
+        if value not in {"interactive", "automation", "utility"}:
+            raise ValueError("category 只能是 interactive / automation / utility")
+        return value
+
     @model_validator(mode="after")
     def _fill_name_from_key(self) -> PluginMetadataSchema:
         if self.name is None and self.key is not None:
@@ -191,6 +206,9 @@ class PluginMetadata:
     entry: str = "plugin.py"
     permissions: list[str] = field(default_factory=list)
     config_schema: dict[str, Any] | None = None
+    category: str | None = None
+    interaction_profile: str | None = None
+    interaction_entries: list[dict[str, Any]] = field(default_factory=list)
     min_telepilot_version: str | None = None
     min_telebot_version: str | None = None
 
@@ -326,6 +344,12 @@ def _feature_manifest_from_meta(meta: PluginMetadata) -> dict[str, Any] | None:
     manifest: dict[str, Any] = {}
     if meta.config_schema:
         manifest["config_schema"] = meta.config_schema
+    if meta.category:
+        manifest["category"] = meta.category
+    if meta.interaction_profile:
+        manifest["interaction_profile"] = meta.interaction_profile
+    if meta.interaction_entries:
+        manifest["interaction_entries"] = [item for item in meta.interaction_entries if isinstance(item, dict)]
     if meta.permissions:
         manifest["permissions"] = list(meta.permissions)
     if meta.min_telepilot_version:
@@ -583,6 +607,9 @@ def _read_plugin_metadata(plugin_dir: Path, *, fallback_name: str) -> PluginMeta
         entry=str(validated.entry or "plugin.py"),
         permissions=list(validated.permissions or []),
         config_schema=validated.config_schema,
+        category=validated.category,
+        interaction_profile=validated.interaction_profile,
+        interaction_entries=[item for item in validated.interaction_entries if isinstance(item, dict)],
         min_telepilot_version=validated.min_telepilot_version,
         min_telebot_version=validated.min_telebot_version,
     )
@@ -745,6 +772,42 @@ def lint_plugin_metadata_files(plugin_dir: Path) -> list[str]:
             continue
         warnings.extend(_lint_python_source_file(path, plugin_dir))
 
+    plugin_json_path = plugin_dir / "plugin.json"
+    if plugin_json_path.is_file():
+        try:
+            data = json.loads(plugin_json_path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            data = None
+        if isinstance(data, dict):
+            entries = data.get("interaction_entries")
+            if isinstance(entries, list) and entries:
+                for idx, raw_entry in enumerate(entries, start=1):
+                    if not isinstance(raw_entry, dict):
+                        continue
+                    key = str(raw_entry.get("key") or "").strip()
+                    if not key:
+                        warnings.append(f"plugin.json interaction_entries[{idx}] 缺少 key")
+                    if raw_entry.get("preserve_command_trigger", True) is not True:
+                        warnings.append(f"plugin.json interaction_entries[{idx}] 建议显式声明 preserve_command_trigger=true")
+                    session_scope = str(raw_entry.get("session_scope") or "").strip()
+                    if session_scope not in {"chat", "user", "none"}:
+                        warnings.append(f"plugin.json interaction_entries[{idx}] session_scope 必须是 chat / user / none")
+                    raw_events = raw_entry.get("events")
+                    if not isinstance(raw_events, list) or not any(str(item or "").strip() for item in raw_events):
+                        warnings.append(f"plugin.json interaction_entries[{idx}] 建议显式声明 events")
+                    result_contract = raw_entry.get("result_contract")
+                    if isinstance(result_contract, dict):
+                        send_via = result_contract.get("send_via")
+                        if isinstance(send_via, list) and send_via and any(
+                            str(item).strip() not in {"interaction_bot", "userbot_reply", "bbot_notice"}
+                            for item in send_via
+                        ):
+                            warnings.append(f"plugin.json interaction_entries[{idx}] result_contract.send_via 含有未支持值")
+                    else:
+                        warnings.append(f"plugin.json interaction_entries[{idx}] 建议声明 result_contract")
+                    if not raw_entry.get("interaction_profile"):
+                        warnings.append(f"plugin.json interaction_entries[{idx}] 建议声明 interaction_profile")
+
     # 去重并限制数量，避免一个坏模板刷屏。
     unique: list[str] = []
     for item in warnings:
@@ -765,6 +828,12 @@ def _manifest_json_from_remote_meta(meta: PluginMetadata) -> dict[str, Any]:
     }
     if meta.config_schema is not None:
         data["config_schema"] = meta.config_schema
+    if meta.category:
+        data["category"] = meta.category
+    if meta.interaction_profile:
+        data["interaction_profile"] = meta.interaction_profile
+    if meta.interaction_entries:
+        data["interaction_entries"] = [item for item in meta.interaction_entries if isinstance(item, dict)]
     if meta.min_telepilot_version:
         data["min_telepilot_version"] = meta.min_telepilot_version
     if meta.min_telebot_version:

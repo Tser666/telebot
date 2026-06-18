@@ -16,9 +16,23 @@
 - `on_command(ctx, cmd, args, event) -> bool`，返回 `True` 表示接管。
 - `on_message` 里别直接假设 `event.outgoing` 一定存在，先 `getattr`。
 - `on_interaction` 用于交互 Bot，按 `entry_key` 和 `payload["event"]["type"]` 分流。
+- `interaction_entries[].launch_mode` 必填：`bridge` 走交互 Bot，`direct` 走原命令/内部调用，`hybrid` 两边都支持。
 - 常见事件：`payment_confirmed`、`keyword`、`message`、`session_close`。
 - 常见动作：`send_message`、`send_photo`、`send_file`、`end_session`。
 - `interaction_entries[].session_scope` 必填：群局写 `chat`，个人流程写 `user`，一次性动作写 `none`。
+- `interaction_entries[].events` 是事件白名单，别让插件自己猜会收到什么。
+- 交互 payload 优先看 `source`、`actor`、`reply_to`、`trigger`、`session` 信封；旧平铺字段只做兼容。
+- `source` 是来源，`actor` 是触发人，`reply_to` 是要引用的消息，`trigger` 是命中的规则/入口，`session` 是会话边界。
+- 新交互入口名尽量别再用泛化的 `start_game`，用 `start_<plugin_key>` 更清楚；历史别名只在插件内部兼容。
+- `interaction_profile` 建议显式写：`session_game`、`challenge_game`、`reward_pool`、`utility_trigger`。
+- `session_policy` 写 TTL、重复触发、关闭条件；插件内部状态 key 要和 `session_scope` 对齐。
+- `payload_contract` 描述输入要求，`result_contract` 描述允许动作和 `send_via` 白名单。
+- `send_via` 只能用白名单值；默认只允许 `interaction_bot`。
+- 常见 `send_via`：`interaction_bot`、`userbot_reply`、`bbot_notice`。
+- `userbot_reply` 由账号 worker 的 userbot 代发，不是插件自由选择发送者。
+- `settlement` 只描述中奖/奖金/对账结果，交互 Bot 不直接执行钱相关动作。
+- `preserve_command_trigger=true` 是硬规则；加交互入口不能影响插件原有命令触发。
+- `command_fallback` 只能提示或受控回退，不能让普通 incoming 消息直接进入 `on_command`。
 - 规则 `concurrency=user` 只表示每用户 CD/每日上限，不等于模块会话也按用户。
 - 自动回复和交互 Bot 都只是触发器；业务逻辑放插件本体，UserBot 命令和 `on_interaction` 调同一份业务函数。
 - 长表单页要把“使用说明 → 功能总开关 → 配置”拆成三张卡。
@@ -29,6 +43,8 @@
 - `plugin.json` 只做静态安装元数据，不执行 Python。
 - 远程模块安装后还要看 `manifest.py` 的真实 `MANIFEST`。
 - 远程模块的 `version`、`category`、`interaction_entries` 要前后一致。
+- `plugin.json` 和 `manifest.py` 里的交互入口字段要同步，尤其 `launch_mode`、`events`、`session_scope`、`result_contract`。
+- 已接入的 installed 互动插件可跑 `python scripts/validate-installed-interaction-plugins.py` 做一次静态对齐检查。
 - 抢答/竞猜/抽奖要用锁和二次检查，避免重复发奖。
 - 超时任务、禁用、热重载、卸载都要清理状态。
 - 外部请求必须有 timeout。

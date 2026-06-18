@@ -1,0 +1,51 @@
+{
+  "name": "with_interaction",
+  "display_name": "交互示例",
+  "description": "最小交互 Bot 兼容示例",
+  "author": "TelePilot",
+  "version": "1.0.0",
+  "entry": "plugin.py",
+  "permissions": ["send_message", "read_chat"],
+  "category": "interactive",
+  "interaction_profile": "utility_trigger",
+  "interaction_entries": [
+    {
+      "key": "start_with_interaction",
+      "title": "开始示例",
+      "description": "演示交互 Bot 入口与原命令双兼容。",
+      "interaction_profile": "utility_trigger",
+      "launch_mode": "hybrid",
+      "session_scope": "chat",
+      "events": ["keyword", "message", "session_close"],
+      "preserve_command_trigger": true,
+      "command_fallback": {
+        "enabled": true,
+        "command": "with_interaction",
+        "mode": "hint_only"
+      },
+      "payload_contract": {
+        "required_envelope": ["source", "actor", "trigger", "session"],
+        "required_event_fields": ["type", "chat_id"]
+      },
+      "result_contract": {
+        "actions": ["send_message", "result", "end_session"],
+        "send_via": ["interaction_bot", "userbot_reply"]
+      },
+      "settlement": {
+        "mode": "announce_only",
+        "winner_field": "actor.user_id"
+      },
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "type": "string",
+            "title": "示例文案",
+            "default": "你好，交互 Bot"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -18,6 +18,110 @@ AccountBotRole = Literal["viewer", "operator", "admin"]
 InteractionTriggerMode = Literal["payment", "keyword", "both"]
 InteractionAmountMatchMode = Literal["eq", "gte"]
 InteractionConcurrency = Literal["chat", "user", "none"]
+InteractionEventType = Literal["payment_confirmed", "keyword", "message", "session_close"]
+InteractionSendVia = Literal["interaction_bot", "userbot_reply", "bbot_notice"]
+
+
+class AccountBotInteractionEnvelopeSource(BaseModel):
+    type: InteractionEventType
+    account_id: int
+    chat_id: int | None = None
+    chat_type: str | None = None
+    update_id: int | None = None
+    message_id: int | None = None
+    text: str = ""
+    entity_languages: list[str] = Field(default_factory=list)
+
+
+class AccountBotInteractionEnvelopeActor(BaseModel):
+    user_id: int | None = None
+    display_name: str | None = None
+    username: str | None = None
+
+
+class AccountBotInteractionEnvelopeReplyTo(BaseModel):
+    user_id: int | None = None
+    display_name: str | None = None
+    username: str | None = None
+    message_id: int | None = None
+    text: str | None = None
+
+
+class AccountBotInteractionEnvelopeTrigger(BaseModel):
+    type: InteractionEventType
+    rule_id: str
+    rule_name: str
+    module_key: str
+    entry_key: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class AccountBotInteractionEnvelopeSession(BaseModel):
+    key: str | None = None
+    scope: InteractionConcurrency = "chat"
+    ttl_seconds: int = Field(default=600, ge=30, le=86400)
+    active: bool = True
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class AccountBotInteractionSettlement(BaseModel):
+    mode: Literal["announce_only", "manual", "auto"] = "announce_only"
+    amount: int | None = Field(default=None, ge=1)
+    currency: str | None = Field(default=None, max_length=16)
+    winner_user_id: int | None = None
+    winner_name: str | None = Field(default=None, max_length=128)
+    payout_account_label: str | None = Field(default=None, max_length=128)
+    status: Literal["pending", "announced", "settled", "failed"] = "pending"
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class AccountBotInteractionResultSettlement(BaseModel):
+    mode: str | None = None
+    amount: int | None = None
+    currency: str | None = Field(default=None, max_length=16)
+    winner_user_id: int | None = None
+    winner_name: str | None = Field(default=None, max_length=128)
+    payout_account_label: str | None = Field(default=None, max_length=128)
+    status: str | None = None
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class AccountBotInteractionAction(BaseModel):
+    type: str = Field(max_length=64)
+    text: str | None = Field(default=None, max_length=4000)
+    send_via: InteractionSendVia | None = None
+    reply_to_message_id: int | None = None
+    settlement: AccountBotInteractionSettlement | None = None
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class AccountBotInteractionResultItem(BaseModel):
+    ts: datetime
+    account_id: int
+    chat_id: int | None = None
+    message_id: int | None = None
+    rule_id: str | None = None
+    rule_name: str | None = None
+    plugin_key: str | None = None
+    entry_key: str | None = None
+    session_key: str | None = None
+    session_scope: str | None = None
+    action_type: str | None = None
+    send_via: str | None = None
+    execution: str | None = None
+    status: str | None = None
+    winner_user_id: int | None = None
+    winner_name: str | None = None
+    winner_message_id: int | None = None
+    delivered_message_id: int | None = None
+    reply_to_message_id: int | None = None
+    amount: int | None = None
+    currency: str | None = None
+    payout_mode: str | None = None
+    payout_account_label: str | None = None
+    delivery_error: str | None = None
+    settlement: AccountBotInteractionResultSettlement | None = None
+    result: dict[str, Any] = Field(default_factory=dict)
 
 
 class AccountBotRemotePluginPolicy(BaseModel):

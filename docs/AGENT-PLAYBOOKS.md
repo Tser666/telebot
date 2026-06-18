@@ -54,6 +54,7 @@ pnpm --dir frontend build
 cd backend && . .venv/bin/activate && ruff check app
 cd backend && . .venv/bin/activate && pytest
 python scripts/validate-plugin-examples.py
+python scripts/validate-installed-interaction-plugins.py
 git diff --check
 ```
 

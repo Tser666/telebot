@@ -51,11 +51,15 @@ TRANSFER_NOTICE_SETTING_PREFIX = "account_bot_transfer_notice:"
 VALID_TRIGGER_MODES = {"payment", "keyword", "both"}
 VALID_AMOUNT_MATCH_MODES = {"eq", "gte"}
 VALID_CONCURRENCY = {"chat", "user", "none"}
+VALID_INTERACTION_EVENTS = {"payment_confirmed", "keyword", "message", "session_close"}
+VALID_INTERACTION_LAUNCH_MODES = {"bridge", "direct", "hybrid"}
+VALID_INTERACTION_SEND_VIA = {"interaction_bot", "userbot_reply", "bbot_notice"}
 FALLBACK_CHAT_SESSION_MODULE_ENTRIES = {
     ("dice_grid_hunt", "start_dice_grid_hunt"),
     ("dice_grid_hunt", "answer_dice_grid_hunt"),
     ("game24", "start_paid_game"),
     ("math10", "start_math10"),
+    ("guess_number", "start_game"),
 }
 RULE_CONTROLLED_MODULE_CONFIG_KEYS = {"prize", "timeout", "valid_seconds"}
 DEFAULT_MATH10_START_KEYWORDS = ["发十以内算数", "十以内算数", "开算数题"]
@@ -367,27 +371,105 @@ def _normalize_string_list(raw: Any, *, default: list[str] | None = None) -> lis
     return out or list(default or [])
 
 
+def normalize_interaction_entry_manifest(raw: Any) -> dict[str, Any] | None:
+    """把 builtin/installed 入口声明整理成统一形态，同时保留扩展字段。"""
+
+    if not isinstance(raw, dict):
+        return None
+    key = str(raw.get("key") or "").strip()
+    if not key:
+        return None
+    launch_mode = str(raw.get("launch_mode") or "bridge").strip()
+    if launch_mode not in VALID_INTERACTION_LAUNCH_MODES:
+        launch_mode = "bridge"
+    scope = str(raw.get("session_scope") or "chat").strip()
+    if scope not in VALID_CONCURRENCY:
+        scope = "chat"
+    events: list[str] = []
+    raw_events = raw.get("events")
+    if isinstance(raw_events, list):
+        for item in raw_events:
+            event = str(item or "").strip()
+            if event in VALID_INTERACTION_EVENTS and event not in events:
+                events.append(event)
+    if not events:
+        events = ["payment_confirmed", "keyword", "message", "session_close"]
+    out = dict(raw)
+    out.update(
+        {
+            "key": key,
+            "launch_mode": launch_mode,
+            "session_scope": scope,
+            "events": events,
+            "preserve_command_trigger": bool(raw.get("preserve_command_trigger", True)),
+        }
+    )
+    profile = str(raw.get("interaction_profile") or "").strip()
+    if profile:
+        out["interaction_profile"] = profile
+    result_contract = raw.get("result_contract")
+    if isinstance(result_contract, dict):
+        normalized_result_contract = dict(result_contract)
+        send_via: list[str] = []
+        raw_send_via = result_contract.get("send_via")
+        if isinstance(raw_send_via, list):
+            for raw_item in raw_send_via:
+                item = str(raw_item or "").strip()
+                if item in VALID_INTERACTION_SEND_VIA and item not in send_via:
+                    send_via.append(item)
+        if send_via:
+            normalized_result_contract["send_via"] = send_via
+        elif "send_via" in normalized_result_contract:
+            normalized_result_contract["send_via"] = ["interaction_bot"]
+        out["result_contract"] = normalized_result_contract
+    command_fallback = raw.get("command_fallback")
+    if isinstance(command_fallback, dict):
+        out["command_fallback"] = dict(command_fallback)
+    return out
+
+
 def _entry_session_scope_from_entries(entries: Any, entry_key: str | None) -> str | None:
     if not entry_key or not isinstance(entries, list):
         return None
-    for entry in entries:
-        if not isinstance(entry, dict):
+    for raw_entry in entries:
+        entry = normalize_interaction_entry_manifest(raw_entry)
+        if entry is None:
             continue
         if str(entry.get("key") or "").strip() != entry_key:
             continue
-        scope = str(entry.get("session_scope") or "").strip()
-        return scope if scope in VALID_CONCURRENCY else None
+        return str(entry.get("session_scope") or "chat")
     return None
+
+
+def _entry_events_from_entries(entries: Any, entry_key: str | None) -> list[str]:
+    if not entry_key or not isinstance(entries, list):
+        return []
+    for raw_entry in entries:
+        entry = normalize_interaction_entry_manifest(raw_entry)
+        if entry is None:
+            continue
+        if str(entry.get("key") or "").strip() != entry_key:
+            continue
+        raw_events = entry.get("events")
+        if isinstance(raw_events, list):
+            return [
+                str(item).strip()
+                for item in raw_events
+                if str(item or "").strip() in VALID_INTERACTION_EVENTS
+            ]
+        break
+    return []
 
 
 def _entry_key_from_entries(entries: Any) -> str | None:
     if not isinstance(entries, list):
         return None
     keys: list[str] = []
-    for entry in entries:
-        if not isinstance(entry, dict):
+    for raw_entry in entries:
+        entry = normalize_interaction_entry_manifest(raw_entry)
+        if entry is None:
             continue
-        key = str(entry.get("key") or "").strip()
+        key = str(entry.get("key") or "")
         if key and key not in keys:
             keys.append(key)
     return keys[0] if len(keys) == 1 else None
@@ -443,6 +525,31 @@ def _declared_module_entry_session_scope(module_key: str | None, module_action: 
     if (module_key, module_action) in FALLBACK_CHAT_SESSION_MODULE_ENTRIES:
         return "chat"
     return None
+
+
+def declared_module_entry_events(module_key: str | None, module_action: str | None) -> list[str]:
+    if not module_key or not module_action:
+        return []
+    try:
+        manifest = BUILTIN_FEATURES.manifest_for(module_key)
+        events = _entry_events_from_entries(getattr(manifest, "interaction_entries", None), module_action)
+        if events:
+            return events
+    except Exception:  # noqa: BLE001
+        log.debug("读取 builtin 模块交互入口事件失败: %s.%s", module_key, module_action, exc_info=True)
+    try:
+        plugin_json = settings.plugins_installed_path / module_key / "plugin.json"
+        if plugin_json.exists():
+            meta = json.loads(plugin_json.read_text(encoding="utf-8"))
+            raw_entries = meta.get("interaction_entries")
+            if raw_entries is None and isinstance(meta.get("config_schema"), dict):
+                raw_entries = meta["config_schema"].get("x-interaction-entries")
+            events = _entry_events_from_entries(raw_entries, module_action)
+            if events:
+                return events
+    except Exception:  # noqa: BLE001
+        log.debug("读取 installed 模块交互入口事件失败: %s.%s", module_key, module_action, exc_info=True)
+    return []
 
 
 def normalize_interaction_rules(raw: Any) -> list[dict[str, Any]]:

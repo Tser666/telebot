@@ -226,7 +226,7 @@ MANIFEST = Manifest(
 | codex_image | ✅ command, access_token, model, message_template, image_size/aspect_ratio/image_format, timeout/status/output/instructions | `single` | 内置图片模块 |
 | scheduler | ✅ default_notify, max_tasks | `platform` | 已迁移为平台基础能力 |
 
-`examples/plugins/translate` 是历史示例目录，不属于当前内置模块清单；其中直接复用后端私有 LLM 链路的写法也不是第三方模块推荐模板。新增第三方模块应优先参考本文的远程模块骨架；需要 HTTP 时参考 `examples/plugins/with_http`，需要 AI 文本能力时参考 `examples/plugins/with_ai`，声明 `ai_text` 并通过 `ctx.ai` 调用平台统一 LLM 池。
+`examples/plugins/translate` 是历史示例目录，不属于当前内置模块清单；其中直接复用后端私有 LLM 链路的写法也不是第三方模块推荐模板。新增第三方模块应优先参考本文的远程模块骨架；需要 HTTP 时参考 `examples/plugins/with_http`，需要 AI 文本能力时参考 `examples/plugins/with_ai`，需要原命令与交互 Bot 双兼容时参考 `examples/plugins/with_interaction`。
 
 ### Manifest 验证
 
@@ -272,6 +272,8 @@ version_pattern = r"^\d+\.\d+\.\d+"
 
 交互 Bot 运行时采用事件路由模型：Bbot 负责接收群消息、转账通知和规则指令；平台只把命中规则且存在活跃会话的事件投递给对应模块，不会把所有群消息广播给所有模块。模块应在同一个 `on_interaction` 中按 `payload["event"]["type"]` 区分事件。
 
+交互入口是新增触发面，不是命令系统的替代品。模块原有 `commands`、`on_command`、`message_channels` 和 `on_message` 语义必须保持不变；任何新入口都不得让普通 incoming 消息绕过 UserBot outgoing 指令边界。需要复用能力时，把业务逻辑抽成共享函数，由 UserBot 命令和交互入口分别调用。
+
 #### 平台、规则、插件的职责边界
 
 交互 Bot 的核心设计是“触发器和业务分离”。开发插件时先按下面的边界判断代码应该放在哪里：
@@ -306,6 +308,45 @@ version_pattern = r"^\d+\.\d+\.\d+"
 | `message` | 规则已有活跃会话后的普通群消息 | 常用于答题、猜测、继续流程 |
 | `session_close` | 规则被关闭或会话被强制结束 | 模块可清理状态，第一版可按需实现 |
 
+#### interaction_entries 字段
+
+每个交互入口都必须把启动方式、事件、会话和输出边界写清楚。推荐字段如下：
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `key` | 是 | 传给插件 `on_interaction(ctx, entry_key, payload)` 的入口名 |
+| `title` / `description` | 推荐 | 前端选择器、实验室和日志里展示给人的说明 |
+| `launch_mode` | 是 | `bridge` / `direct` / `hybrid`，决定交互 Bot 如何启动插件 |
+| `events` | 是 | 入口接受的事件白名单，例如 `keyword`、`payment_confirmed`、`message`、`session_close` |
+| `session_scope` | 是 | `chat` / `user` / `none`，决定平台如何保存会话和路由后续消息 |
+| `session_policy` | 推荐 | 会话 TTL、重复触发、关闭策略、并发策略的声明 |
+| `payload_contract` | 推荐 | 插件要求平台提供的输入信封与必填字段 |
+| `input_schema` | 推荐 | 当前规则可覆盖的入口参数，默认值用于前端预填 |
+| `result_contract` | 推荐 | 插件会返回的标准动作类型、结算字段和结束语义 |
+| `settlement` | 按需 | 涉及奖金、补发、对账时声明结算责任和字段 |
+| `command_fallback` | 按需 | 是否允许平台在无法走交互入口时提示或回退到 UserBot 命令 |
+| `preserve_command_trigger` | 是 | 必须为 `true`，表示保留原有 UserBot 命令触发，不被交互入口覆盖 |
+| `interaction_profile` | 推荐 | 玩法类型声明，供前端展示和后续插件接入分型使用 |
+
+`interaction_profile` 当前建议值：
+
+| 值 | 说明 |
+| --- | --- |
+| `session_game` | 群局抢答、竞猜、填空、算题、24 点等单局互动玩法 |
+| `challenge_game` | 双人/多人对战、轮流操作的互动玩法 |
+| `reward_pool` | 红包、奖池、下注开奖这类多人结算玩法 |
+| `utility_trigger` | 只借交互 Bot 做入口，但主体不是群局玩法的工具模块 |
+
+`launch_mode` 的含义：
+
+| launch_mode | 启动路径 | 适用场景 |
+| --- | --- | --- |
+| `bridge` | 交互 Bot 收到事件，平台组装信封后调用插件 `on_interaction` | 群局、抢答、抽奖、转账命中开局等高频群内流程 |
+| `direct` | UserBot 原有命令或模块内部调用直接执行业务，不经过交互 Bot | 管理员命令、私有工具、无需 Bbot 规则的能力 |
+| `hybrid` | 同一能力同时支持 `bridge` 和 `direct`，但两边仍是独立触发边界 | 既允许管理员 `{prefix}24d 100` 开局，也允许群友关键词/转账由交互 Bot 开局 |
+
+`direct` 和 `hybrid` 都不表示普通群友 incoming 消息可以直接触发 `commands`。`command_fallback` 只用于平台提示或受控内部派发，不能把群友文本原样送入 `on_command`。如果启用回退，必须同时声明 `preserve_command_trigger: true`，并保证原命令名、参数格式、权限和 outgoing 限制保持兼容。
+
 ```python
 MANIFEST = Manifest(
     key="game24",
@@ -317,8 +358,20 @@ MANIFEST = Manifest(
             "key": "start_paid_game",
             "title": "付费开局",
             "description": "转账命中或模块关键词命中后，由交互 Bot 开启一局游戏。",
+            "launch_mode": "hybrid",
             "session_scope": "chat",
             "events": ["payment_confirmed", "keyword", "message", "session_close"],
+            "preserve_command_trigger": True,
+            "command_fallback": {
+                "enabled": True,
+                "command": "24d",
+                "mode": "hint_only",
+            },
+            "session_policy": {
+                "ttl_seconds": 3600,
+                "duplicate_start": "reject",
+                "close_on": ["winner", "timeout", "session_close"],
+            },
             "input_schema": {
                 "type": "object",
                 "additionalProperties": False,
@@ -338,6 +391,19 @@ MANIFEST = Manifest(
                     },
                 },
                 "required": ["prize"],
+            },
+            "payload_contract": {
+                "required_envelope": ["source", "actor", "trigger", "session"],
+                "required_event_fields": ["type", "chat_id"],
+            },
+            "result_contract": {
+                "actions": ["send_message", "send_photo", "end_session"],
+                "send_via": ["interaction_bot", "bbot_notice"],
+            },
+            "settlement": {
+                "mode": "announce_only",
+                "winner_field": "actor.user_id",
+                "amount_field": "prize",
             },
         }
     ],
@@ -388,7 +454,7 @@ class GuessNumberPlugin(Plugin):
         entry_key: str,
         payload: dict[str, Any],
     ) -> list[dict[str, Any]] | None:
-        if entry_key != "start_game":
+        if entry_key != "start_guess_number":
             return None
 
         event = payload.get("event") if isinstance(payload.get("event"), dict) else {}
@@ -421,9 +487,20 @@ class GuessNumberPlugin(Plugin):
 | --- | --- | --- |
 | `send_message` | `text` | 由交互 Bot 在命中的群里发送消息 |
 | `send_message` | `reply_to_message_id` | 可选，指定回复哪条消息 |
+| `send_message` | `send_via` | 可选但必须在入口 `result_contract.send_via` 白名单内 |
 | `send_photo` / `send_file` | `photo_base64` / `file_base64` | 由交互 Bot 发送图片/文件字节，适合题图 |
 | `send_photo` / `send_file` | `filename`、`caption`、`reply_to_message_id` | 可选，文件名、说明文字、回复目标 |
 | `end_session` | 无 | 本次入口处理完成后不保留交互会话，适合彩票、红包等长期轮回模块 |
+
+`send_via` 是发送者白名单，不是插件自由选择账号的能力。推荐只使用这些值：
+
+| send_via | 含义 | 约束 |
+| --- | --- | --- |
+| `interaction_bot` | 由交互 Bot 发送群内题面、答复、图片、会话提示 | 默认值，适合高频互动 |
+| `userbot_reply` | 由当前账号 worker 的 userbot 代发指定消息 | 适合低频、可审计、确有账号身份需要的动作，平台会通过账号 worker 的 Telethon client 执行 |
+| `bbot_notice` | 由通知 Bot 发公告、命中、对账提示 | 不处理钱相关执行动作 |
+
+入口未声明 `result_contract.send_via` 时，平台应按最小权限只允许 `interaction_bot`。涉及奖金、补发、转账、催付的插件必须在 `settlement` 中写清职责：交互 Bot 只能公告和给出可对账结果，真正发奖仍由账号 worker 的 userbot 代发或由平台受控结算流程处理。
 
 `payload["event"]` 的核心字段：
 
@@ -438,6 +515,67 @@ class GuessNumberPlugin(Plugin):
 | `text` | 原始消息文本 |
 | `reply_to_user_id` / `reply_to_display_name` / `reply_to_username` | 被回复消息的用户身份 |
 | `data` | 事件附加数据；转账事件包含 `payer_name`、`receiver_name`、`amount` 等 |
+
+#### 标准 payload 信封
+
+新版交互入口使用“信封 + event + 参数”的结构。旧字段仍可兼容平铺读取，但新模块应优先读取这些对象：
+
+```json
+{
+  "source": {
+    "type": "interaction_bot",
+    "bot_key": "bbot",
+    "account_id": 1,
+    "chat_id": -100123
+  },
+  "actor": {
+    "user_id": 111,
+    "display_name": "AAA",
+    "username": "aaa"
+  },
+  "reply_to": {
+    "message_id": 99,
+    "user_id": 111
+  },
+  "trigger": {
+    "type": "keyword",
+    "rule_id": "game24-ticket",
+    "rule_name": "24 点门票",
+    "module_key": "game24",
+    "entry_key": "start_paid_game",
+    "message_id": 80,
+    "text": "开始 24 点"
+  },
+  "session": {
+    "scope": "chat",
+    "id": "account:1:chat:-100123:game24:start_paid_game",
+    "ttl_seconds": 3600,
+    "is_new": true
+  },
+  "event": {
+    "type": "keyword",
+    "chat_id": -100123,
+    "message_id": 80,
+    "text": "开始 24 点"
+  },
+  "module_config": {
+    "prize": 200
+  },
+  "prize": 200
+}
+```
+
+信封字段说明：
+
+| 字段 | 说明 |
+| --- | --- |
+| `source` | 事件来源和发送通道，不等同于中奖用户；用于判断来自交互 Bot、UserBot 还是平台内部 |
+| `actor` | 触发本次事件的人，答题、中奖、个人限流和审计应优先用它 |
+| `reply_to` | 本动作应引用的原消息或被回复对象，中奖公告必须尽量带上 |
+| `trigger` | 命中的规则、入口、消息和触发类型；用于排障和幂等 |
+| `session` | 平台会话标识、作用域、TTL 和是否新建；插件内部状态 key 应与它一致 |
+
+`payload_contract` 用来声明插件对上述信封的要求。平台和前端可以据此校验规则是否能保存，排障时也能判断是“事件没到”还是“字段不满足”。不要把敏感原文、Bot Token、完整付款通知文本写进信封；只传插件业务需要的结构化字段。
 
 `interaction_entries` 中的 `session_scope` 是模块会话作用域，必须按模块业务形态声明。它和交互规则里的 `concurrency` 不是一回事：
 
@@ -467,9 +605,22 @@ class GuessNumberPlugin(Plugin):
 
 `input_schema` 的默认值主要给前端表单预填使用；旧规则、API 直接写入或第三方客户端不一定会带上这些默认值，所以模块仍应在代码里为关键参数提供兜底。`module_config` 只保存当前交互规则的覆盖项，例如“这条门票规则奖金为 200”。模块自身的通用配置仍放在模块配置页中，运行时从 `ctx.config` 读取，不能混进规则的 `module_config`。
 
+`session_policy` 用来告诉平台和维护者会话如何结束、重复触发如何处理、TTL 多久。常见写法：
+
+```json
+{
+  "ttl_seconds": 3600,
+  "duplicate_start": "reject",
+  "close_on": ["winner", "timeout", "session_close"],
+  "max_active_per_scope": 1
+}
+```
+
+`payload_contract` 描述输入，`result_contract` 描述输出。两者是文档化契约，不应被插件拿来动态扩权。`result_contract.actions` 只能列标准动作；`result_contract.send_via` 是发送者白名单；`settlement` 只说明结算/公告语义，不能让交互 Bot 直接拥有发奖权限。
+
 #### 标准事件输入
 
-平台调用交互入口时，会向适配层提供标准事件对象。模块不要依赖转账通知原文。
+平台调用交互入口时，会提供标准信封；历史适配层或旧规则还可能同时提供下面这种平铺事件对象。模块不要依赖转账通知原文，新模块应优先读取 `source` / `actor` / `reply_to` / `trigger` / `session` 信封。
 
 ```json
 {
@@ -493,15 +644,24 @@ class GuessNumberPlugin(Plugin):
 [
   {
     "type": "send_message",
+    "send_via": "interaction_bot",
     "text": "24 点开始..."
   },
   {
     "type": "send_message",
+    "send_via": "bbot_notice",
     "text": "答对了：AAA\n题目：24 点 [1 5 5 5]\n奖金：123",
-    "reply_to_message_id": 99
+    "reply_to_message_id": 99,
+    "settlement": {
+      "status": "winner_confirmed",
+      "winner_user_id": 111,
+      "amount": 123,
+      "currency": "points"
+    }
   },
   {
     "type": "send_photo",
+    "send_via": "interaction_bot",
     "photo_base64": "...",
     "filename": "puzzle.png",
     "caption": "题面"
@@ -541,7 +701,7 @@ class Game24Plugin(Plugin):
         if not chat_id:
             return []
 
-        state_key = f"account_bot:game24:{ctx.account_id}:{chat_id}"
+        state_key = f"userbot_reply:game24:{ctx.account_id}:{chat_id}"
 
         if event_type in ("payment_confirmed", "keyword"):
             numbers = generate_24_puzzle()
@@ -563,7 +723,7 @@ class Game24Plugin(Plugin):
         if event_type == "message":
             if not state.get("active") or not check_answer(str(payload.get("message_text") or ""), state["numbers"]):
                 return []
-            claim_key = f"account_bot:game24_claim:{ctx.account_id}:{chat_id}:{state['game_id']}"
+            claim_key = f"userbot_reply:game24_claim:{ctx.account_id}:{chat_id}:{state['game_id']}"
             if not await ctx.redis.set(claim_key, str(payload.get("message_id") or ""), nx=True, ex=3600):
                 return []
             state["active"] = False
@@ -594,6 +754,9 @@ class Game24Plugin(Plugin):
 5. 若模块未声明 `interaction_entries`，前端不应把它展示为可由交互 Bot 启动的模块。旧 `config_schema["x-interaction-entries"]` 仅作为兼容入口，新模块不要再用旧字段。
 6. `interaction_entries[].session_scope` 必须和插件内部状态 key 一致：群局状态 key 应包含 `chat_id`，用户私有流程状态 key 应同时包含 `chat_id` 和 `user_id`。
 7. 返回 `end_session` / `close_session` / `no_session` 时，平台会清理规则会话；模块自己的 Redis 状态仍由模块负责清理。
+8. `preserve_command_trigger` 必须保持为 `true`。交互入口新增后，原本能用的 UserBot 指令仍要按原指令名、原参数和原权限工作。
+9. `send_via` 必须命中入口声明的白名单；插件不得通过动作结果临时指定未声明发送者。
+10. `settlement` / `result_contract` 只描述可对账结果和平台动作，不得把发奖、转账、催付等钱相关动作塞进交互 Bot 高频入口。
 
 ---
 
@@ -746,7 +909,7 @@ except ConversationTimeout:
 
 ## 9. 模块日志
 
-模块日志会进入后台的“日志中心 → Runtime → 模块日志”分页，和“消息日志”“系统日志”分开显示；涉及 sudo、Config Bundle confirm、account_bot confirm 等安全决策的记录则在“日志中心 → Audit”查看。
+模块日志会进入后台的“日志中心 → Runtime → 模块日志”分页，和“消息日志”“系统日志”分开显示；涉及 sudo、Config Bundle confirm、userbot_reply confirm 等安全决策的记录则在“日志中心 → Audit”查看。
 
 ### 如何写日志
 

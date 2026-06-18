@@ -147,7 +147,19 @@ class Plugin:
         entry_key: str,
         payload: dict[str, Any],
     ) -> list[dict[str, Any]] | None:
-        """交互 Bot 入口；返回平台标准动作列表，默认表示未实现。"""
+        """交互 Bot 入口；返回平台标准动作列表，默认表示未实现。
+
+        平台会尽量提供统一信封：
+        - ``event``: 兼容旧版的扁平事件对象
+        - ``source`` / ``actor`` / ``reply_to`` / ``trigger`` / ``session``: 新版标准信封
+        - 旧字段如 ``event_type`` / ``message_text`` / ``sender_name`` / ``reply_to_text`` 继续保留
+
+        标准动作约定：
+        - ``send_message`` / ``send_photo`` / ``send_file``
+        - 可选 ``send_via``，默认由交互 Bot 发送；``userbot_reply`` 表示由账号 worker 的 userbot 代发
+        - ``end_session`` / ``close_session`` / ``no_session`` / ``result``
+        - 可选 ``settlement``，供平台记录和后续结算
+        """
         return None
 
 

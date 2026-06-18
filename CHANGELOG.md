@@ -14,6 +14,29 @@
 
 ## [Unreleased]
 
+## [0.29.0] — 2026-06-18 · minor · 交互插件统一调用与结果隔离
+
+### Added
+- 新增交互插件统一调用契约，支持 `interaction_profile`、`launch_mode`、`events`、`session_scope`、`payload_contract`、`result_contract`、`settlement` 与 `preserve_command_trigger`，让娱乐性、交互性插件按同一套入口接入交互 Bot。
+- 新增标准交互 payload envelope，把来源、操作者、被回复消息、触发规则、会话与结算信息一并传给插件，插件可明确区分监听来源并选择回复发送通道。
+- 新增结构化互动结果接口 `GET /api/accounts/{aid}/interaction-results`，前端可查看最近赢家、奖金、赢家消息 ID、发奖账号与发送状态，避免从群消息文本里猜结果。
+- 新增 `examples/plugins/with_interaction` 最小交互插件示例和 installed 交互插件静态校验脚本，方便后续插件库按规范迁移。
+
+### Changed
+- 交互插件规范继续收敛到统一契约：示例、文档与校验链路同步覆盖 `interaction_profile`、`interaction_entries`、`preserve_command_trigger` 与 `on_interaction`，方便后续娱乐性、交互性插件按同一套规则接入。
+- 账号 Bot 的交互规则工作台继续优化移动端宽度适配，减少固定栅格和截断文案在 PWA 窄屏下的拥挤感。
+- 已安装互动插件的 `plugin.json` / `manifest.py` 对齐范围继续扩大到猜数字、诗词填空、九宫格、彩票、红包和 PT 促销，并新增 installed 交互插件静态校验脚本，避免安装态与运行态的交互契约继续漂移。
+- 交互 Bot 运行时现在按插件声明的 `events` 做事件边界控制，同时保留旧插件未声明事件时的兼容放行，避免交互入口吞掉原本的命令触发路径。
+- 账号 Bot 联动规则页改为规则列表与规则详情分区，并按交互类型分组入口选择，减少不同插件的输入框和选择框挤在同一页。
+
+### Fixed
+- 修复九宫格、猜数字、诗词填空、彩票、红包和 PT 促销等 installed 插件安装态元数据与运行态 manifest 不一致的问题。
+- 修复旧日志或第三方插件写入未知 `send_via` / settlement 状态时，最近互动结果接口可能因为枚举过严而无法展示的问题。
+
+### Tests
+- 插件示例校验脚本现已把 `examples/plugins/with_interaction` 纳入稳定 API gate，保证最小交互示例的目录结构与 manifest 契约持续有效。
+- 新增回归测试覆盖原始命令触发保留、事件白名单分发、结构化赢家提取、旧结果值兼容、installed 插件契约和 game24 / math10 交互入口。
+
 ## [0.28.0] — 2026-06-18 · minor · 交互 Bot 规则工作台
 
 ### Changed

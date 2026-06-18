@@ -49,10 +49,16 @@ def test_game24_manifest_schema_matches_runtime_config() -> None:
 
 def test_game24_manifest_declares_interaction_entry() -> None:
     assert MANIFEST.category == "interactive"
+    assert MANIFEST.interaction_profile == "session_game"
     assert MANIFEST.interaction_entries
     entry = MANIFEST.interaction_entries[0]
     assert entry["key"] == "start_paid_game"
+    assert entry["interaction_profile"] == "session_game"
+    assert entry["launch_mode"] == "hybrid"
     assert entry["session_scope"] == "chat"
+    assert entry["preserve_command_trigger"] is True
+    assert entry["command_fallback"]["command"] == "24d"
+    assert "settlement" in entry
     assert "prize" in entry["input_schema"]["properties"]
     assert "timeout" in entry["input_schema"]["properties"]
     assert "valid_seconds" in entry["input_schema"]["properties"]
@@ -131,6 +137,29 @@ async def test_game24_on_interaction_handles_three_event_types(monkeypatch) -> N
             "text": "答对了：AAA\n题目：24 点 [1 5 5 5]\n答案：5*(5-1/5) = 24\n奖金：888\n奖金将由 @owner 账号自动发放。",
             "reply_to_message_id": 99,
         },
+        {
+            "type": "result",
+            "success": True,
+            "result": {
+                "status": "winner",
+                "winner_user_id": None,
+                "winner_name": "AAA",
+                "winner_message_id": 99,
+                "question": [1, 5, 5, 5],
+                "answer": "5*(5-1/5)",
+                "prize": 888,
+                "payout_mode": "auto",
+                "payout_account_label": "@owner",
+            },
+            "settlement": {
+                "mode": "auto",
+                "amount": 888,
+                "winner_user_id": None,
+                "winner_name": "AAA",
+                "payout_account_label": "@owner",
+                "status": "announced",
+            },
+        },
         {"type": "end_session"},
     ]
     state = json.loads(redis.data[state_key])
@@ -151,6 +180,113 @@ async def test_game24_on_interaction_handles_three_event_types(monkeypatch) -> N
     assert close_actions == []
     state = json.loads(redis.data[state_key])
     assert state["active"] is False
+
+
+@pytest.mark.asyncio
+async def test_game24_on_interaction_accepts_standard_envelope(monkeypatch) -> None:
+    monkeypatch.setattr(game24_plugin, "generate_24_puzzle", lambda: [1, 5, 5, 5])
+    redis = _Redis()
+    plugin = Game24Plugin()
+    ctx = PluginContext(account_id=1, feature_key="game24", redis=redis, log=AsyncMock())
+
+    start_actions = await plugin.on_interaction(
+        ctx,
+        "start_paid_game",
+        {
+            "source": {
+                "type": "keyword",
+                "chat_id": -100123,
+                "update_id": 7,
+                "message_id": 70,
+                "text": "开24点",
+            },
+            "trigger": {"type": "keyword", "rule_id": "game24", "entry_key": "start_paid_game"},
+            "session": {"scope": "chat", "ttl_seconds": 120},
+            "prize": 888,
+            "valid_seconds": 120,
+        },
+    )
+
+    assert start_actions and start_actions[0]["type"] == "send_message"
+    state = json.loads(redis.data["account_bot:game24:1:-100123"])
+    assert state["source_update_id"] == 7
+    assert state["source_message_id"] == 70
+
+    answer_actions = await plugin.on_interaction(
+        ctx,
+        "start_paid_game",
+        {
+            "source": {
+                "type": "message",
+                "chat_id": -100123,
+                "update_id": 8,
+                "message_id": 99,
+                "text": "5*(5-1/5)",
+            },
+            "actor": {"user_id": 111, "display_name": "AAA"},
+            "settlement": {"mode": "auto", "payout_account_label": "@owner"},
+        },
+    )
+
+    assert answer_actions == [
+        {
+            "type": "send_message",
+            "text": "答对了：AAA\n题目：24 点 [1 5 5 5]\n答案：5*(5-1/5) = 24\n奖金：888\n奖金将由 @owner 账号自动发放。",
+            "reply_to_message_id": 99,
+        },
+        {
+            "type": "result",
+            "success": True,
+            "result": {
+                "status": "winner",
+                "winner_user_id": 111,
+                "winner_name": "AAA",
+                "winner_message_id": 99,
+                "question": [1, 5, 5, 5],
+                "answer": "5*(5-1/5)",
+                "prize": 888,
+                "payout_mode": "auto",
+                "payout_account_label": "@owner",
+            },
+            "settlement": {
+                "mode": "auto",
+                "amount": 888,
+                "winner_user_id": 111,
+                "winner_name": "AAA",
+                "payout_account_label": "@owner",
+                "status": "announced",
+            },
+        },
+        {"type": "end_session"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_game24_on_interaction_accepts_legacy_entry_key(monkeypatch) -> None:
+    monkeypatch.setattr(game24_plugin, "generate_24_puzzle", lambda: [1, 5, 5, 5])
+    redis = _Redis()
+    plugin = Game24Plugin()
+    ctx = PluginContext(account_id=1, feature_key="game24", redis=redis, log=AsyncMock())
+
+    actions = await plugin.on_interaction(
+        ctx,
+        "start_game24",
+        {"event_type": "keyword", "chat_id": -100123, "prize": 321},
+    )
+
+    assert actions == [
+        {
+            "type": "send_message",
+            "text": (
+                "24 点开始\n"
+                "━━━━━━━━\n"
+                "数字：[ 1 ] [ 5 ] [ 5 ] [ 5 ]\n"
+                "奖金：321\n"
+                "可用符号：+ - x ÷ * / ( )\n"
+                "请直接发送算式，结果必须等于 24，并且恰好使用这 4 个数字各一次。"
+            ),
+        }
+    ]
 
 
 @pytest.mark.asyncio

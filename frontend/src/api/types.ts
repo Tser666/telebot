@@ -248,6 +248,46 @@ export interface AccountBotInteractionConfig {
   rules?: AccountBotInteractionRule[];
 }
 
+export interface AccountBotInteractionSettlement {
+  mode?: "announce_only" | "manual" | "auto";
+  amount?: number | null;
+  currency?: string | null;
+  winner_user_id?: number | null;
+  winner_name?: string | null;
+  payout_account_label?: string | null;
+  status?: "pending" | "announced" | "settled" | "failed";
+  data?: Record<string, unknown>;
+}
+
+export interface AccountBotInteractionResultItem {
+  ts: string;
+  account_id: number;
+  chat_id?: number | null;
+  message_id?: number | null;
+  rule_id?: string | null;
+  rule_name?: string | null;
+  plugin_key?: string | null;
+  entry_key?: string | null;
+  session_key?: string | null;
+  session_scope?: "chat" | "user" | "none" | string | null;
+  action_type?: string | null;
+  send_via?: "interaction_bot" | "userbot_reply" | "bbot_notice" | string | null;
+  execution?: string | null;
+  status?: string | null;
+  winner_user_id?: number | null;
+  winner_name?: string | null;
+  winner_message_id?: number | null;
+  delivered_message_id?: number | null;
+  reply_to_message_id?: number | null;
+  amount?: number | null;
+  currency?: string | null;
+  payout_mode?: string | null;
+  payout_account_label?: string | null;
+  delivery_error?: string | null;
+  settlement?: AccountBotInteractionSettlement | null;
+  result?: Record<string, unknown>;
+}
+
 export type AccountBotInteractionConfigUpdate = Pick<
   AccountBotInteractionConfig,
   | "enabled"
@@ -416,7 +456,19 @@ export interface FeatureInteractionEntry {
   title?: string | null;
   label?: string | null;
   description?: string | null;
+  interaction_profile?: "session_game" | "challenge_game" | "reward_pool" | "utility_trigger" | string | null;
+  launch_mode?: "bridge" | "direct" | "hybrid" | string | null;
+  events?: string[];
   session_scope?: "chat" | "user" | "none" | string | null;
+  preserve_command_trigger?: boolean | null;
+  command_fallback?: {
+    enabled?: boolean;
+    command?: string | null;
+    mode?: string | null;
+  } | null;
+  payload_contract?: Record<string, unknown> | null;
+  result_contract?: Record<string, unknown> | null;
+  settlement?: Record<string, unknown> | null;
   input_schema?: Record<string, unknown> | null;
 }
 
@@ -431,6 +483,7 @@ export interface FeatureInfo {
   version?: string | null;
   config_schema?: Record<string, unknown> | null;
   category?: FeatureCategory | string | null;
+  interaction_profile?: "session_game" | "challenge_game" | "reward_pool" | "utility_trigger" | string | null;
   interaction_entries?: FeatureInteractionEntry[];
   experimental: boolean;
   update_available?: boolean;

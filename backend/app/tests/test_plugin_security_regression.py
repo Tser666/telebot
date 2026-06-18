@@ -1151,3 +1151,83 @@ class TestPluginMetadataSchema:
 
         with pytest.raises(ValidationError):
             PluginMetadataSchema(name="test", version="1.0.0", author="x" * 300)
+
+    def test_interaction_fields_are_accepted(self):
+        from app.services.remote_plugin_service import PluginMetadataSchema
+
+        data = {
+            "name": "game24",
+            "version": "1.0.0",
+            "category": "interactive",
+            "interaction_profile": "session_game",
+            "interaction_entries": [
+                {
+                    "key": "start_game24",
+                    "session_scope": "chat",
+                    "preserve_command_trigger": True,
+                    "result_contract": {"send_via": ["interaction_bot", "userbot_reply"]},
+                }
+            ],
+        }
+        schema = PluginMetadataSchema(**data)
+        assert schema.category == "interactive"
+        assert schema.interaction_profile == "session_game"
+        assert schema.interaction_entries[0]["key"] == "start_game24"
+
+    def test_manifest_json_from_remote_meta_keeps_interaction_fields(self):
+        from app.services.remote_plugin_service import PluginMetadata, _manifest_json_from_remote_meta
+
+        meta = PluginMetadata(
+            name="dice_grid_hunt",
+            display_name="九宫格猜骰",
+            version="1.0.0",
+            category="interactive",
+            interaction_profile="session_game",
+            interaction_entries=[
+                {
+                    "key": "start_dice_grid_hunt",
+                    "session_scope": "chat",
+                    "preserve_command_trigger": True,
+                }
+            ],
+        )
+
+        manifest_json = _manifest_json_from_remote_meta(meta)
+        assert manifest_json["category"] == "interactive"
+        assert manifest_json["interaction_profile"] == "session_game"
+        assert manifest_json["interaction_entries"] == [
+            {
+                "key": "start_dice_grid_hunt",
+                "session_scope": "chat",
+                "preserve_command_trigger": True,
+            }
+        ]
+
+
+def test_lint_plugin_metadata_files_warns_on_bad_interaction_contract(tmp_path) -> None:
+    plugin_dir = tmp_path / "plugin"
+    plugin_dir.mkdir()
+    (plugin_dir / "plugin.json").write_text(
+        """
+        {
+          "name": "bad_interaction",
+          "version": "1.0.0",
+          "interaction_entries": [
+            {
+              "key": "start_bad",
+              "session_scope": "group",
+              "result_contract": {
+                "send_via": ["interaction_bot", "unknown"]
+              }
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    warnings = svc.lint_plugin_metadata_files(plugin_dir)
+    assert any("session_scope" in item for item in warnings)
+    assert any("events" in item for item in warnings)
+    assert any("result_contract.send_via" in item for item in warnings)
+    assert any("interaction_profile" in item for item in warnings)

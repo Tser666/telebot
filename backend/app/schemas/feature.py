@@ -22,6 +22,7 @@ class FeatureInfo(BaseModel):
     version: str | None = None
     config_schema: dict[str, Any] | None = None
     category: str = "utility"
+    interaction_profile: str | None = None
     interaction_entries: list[dict[str, Any]] = Field(default_factory=list)
     experimental: bool = False
     update_available: bool = False
@@ -66,6 +67,7 @@ class FeatureInfo(BaseModel):
         category = str(manifest.get("category") or schema_meta.get("x-category") or "utility")
         if category not in {"interactive", "automation", "utility"}:
             category = "utility"
+        interaction_profile = str(manifest.get("interaction_profile") or "").strip() or None
         raw_entries = manifest.get("interaction_entries")
         if raw_entries is None:
             raw_entries = schema_meta.get("x-interaction-entries")
@@ -98,6 +100,7 @@ class FeatureInfo(BaseModel):
             version=f.version,
             config_schema=config_schema,
             category=category,
+            interaction_profile=interaction_profile,
             interaction_entries=[item for item in entries if isinstance(item, dict)],
             experimental=bool(
                 manifest.get("x-experimental") or manifest.get("experimental")
