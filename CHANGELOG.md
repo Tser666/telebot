@@ -14,6 +14,11 @@
 
 ## [Unreleased]
 
+## [0.30.4] — 2026-06-19 · patch · Redis 消费超时降噪
+
+### Fixed
+- 修复主进程可靠消费 `runtime_log` / `ratelimit_event` 时只捕获 Python 内置 `TimeoutError`、未捕获 redis-py `TimeoutError` 的问题，避免空队列等待被误记为生产错误日志。
+
 ## [0.30.3] — 2026-06-19 · patch · 插件口径统一
 
 ### Changed

@@ -5,6 +5,7 @@ import asyncio
 import json
 
 import pytest
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from app.worker import supervisor
 
@@ -96,6 +97,18 @@ class _TimeoutOnceRedis(_FakeRedis):
         return await super().blmove(*args, **kwargs)
 
 
+class _RedisTimeoutOnceRedis(_FakeRedis):
+    def __init__(self) -> None:
+        super().__init__()
+        self.timeout_once = True
+
+    async def blmove(self, *args, **kwargs) -> str | None:  # noqa: ANN002, ANN003
+        if self.timeout_once:
+            self.timeout_once = False
+            raise RedisTimeoutError("idle")
+        return await super().blmove(*args, **kwargs)
+
+
 class _FakeSession:
     def __init__(self, *, fail_commit: bool) -> None:
         self.fail_commit = fail_commit
@@ -184,6 +197,36 @@ async def test_reliable_consumer_ack_after_commit(monkeypatch: pytest.MonkeyPatc
 @pytest.mark.asyncio
 async def test_reliable_consumer_continues_after_redis_idle_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     redis = _TimeoutOnceRedis()
+    payload = json.dumps(
+        {"account_id": 2, "level": "info", "source": "test", "message": "hello"}
+    )
+    redis.data["runtime_log_stream"] = [payload]
+    factory = _SessionFactory(fail_commit=False)
+    monkeypatch.setattr(supervisor, "get_redis", lambda: redis)
+    monkeypatch.setattr(supervisor, "AsyncSessionLocal", factory)
+
+    task = asyncio.create_task(
+        supervisor._consume_stream_reliable(
+            stream_key="runtime_log_stream",
+            inflight_key="runtime_log_stream:inflight",
+            build_row=supervisor._build_runtime_log_row,
+            consumer_name="test",
+            batch_size=10,
+        )
+    )
+    await asyncio.sleep(0.2)
+    task.cancel()
+    await task
+
+    assert redis.data["runtime_log_stream"] == []
+    assert redis.data["runtime_log_stream:inflight"] == []
+    assert factory.last_session is not None
+    assert len(factory.last_session.rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_reliable_consumer_treats_redis_client_timeout_as_idle(monkeypatch: pytest.MonkeyPatch) -> None:
+    redis = _RedisTimeoutOnceRedis()
     payload = json.dumps(
         {"account_id": 2, "level": "info", "source": "test", "message": "hello"}
     )

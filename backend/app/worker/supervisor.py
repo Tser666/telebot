@@ -40,6 +40,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy import delete, select, update
 
 from ..db.base import AsyncSessionLocal
@@ -802,7 +803,7 @@ async def _consume_stream_reliable(
                             src="LEFT",
                             dest="RIGHT",
                         )
-                    except TimeoutError:
+                    except (TimeoutError, RedisTimeoutError):
                         continue
                     if first is None:
                         continue
