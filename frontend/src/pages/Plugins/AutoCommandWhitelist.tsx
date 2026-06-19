@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowLeft, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Save, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
 import { listAccounts } from "@/api/accounts";
@@ -139,7 +139,11 @@ export function PluginsAutoCommandWhitelistPage() {
               onClick={() => saveMut.mutate()}
               disabled={!aid || !dirty || saveMut.isPending || schedulerCfgQ.isLoading}
             >
-              {saveMut.isPending ? <Spinner className="mr-2" /> : null}
+              {saveMut.isPending ? (
+                <Spinner className="mr-2" />
+              ) : (
+                <Save className="mr-2 h-4 w-4" />
+              )}
               保存白名单
             </Button>
           </div>

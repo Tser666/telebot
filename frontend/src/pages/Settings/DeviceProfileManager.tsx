@@ -141,6 +141,7 @@ export function DeviceProfileManager() {
                 onClick={() => createMut.mutate()}
                 disabled={!form.name.trim() || createMut.isPending}
               >
+                <Plus className="mr-1 h-4 w-4" />
                 创建
               </Button>
             </div>

@@ -15,6 +15,7 @@ import {
   MessageCircle,
   Network,
   Power,
+  Save,
   ShieldCheck,
   Terminal,
   Trash2,
@@ -952,6 +953,7 @@ function ProxyTab({
                 (selected ? Number(selected) : null) === currentProxyId
               }
             >
+              {saveMut.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Save className="mr-1 h-4 w-4" />}
               保存
             </Button>
           </div>
@@ -1060,6 +1062,7 @@ function DeviceProfileTab({
                 (selected ? Number(selected) : null) === currentProfileId
               }
             >
+              {saveMut.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Save className="mr-1 h-4 w-4" />}
               保存
             </Button>
           </div>
@@ -1145,6 +1148,7 @@ function RateInput({
           variant="outline"
           onClick={() => onSave(val ? Number(val) : null)}
         >
+          <Save className="mr-1 h-3.5 w-3.5" />
           保存
         </Button>
       )}
@@ -1378,7 +1382,9 @@ function HumanizePanel({ aid }: { aid: number }) {
               >
                 {saveMut.isPending ? (
                   <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                ) : null}
+                ) : (
+                  <Save className="mr-1 h-4 w-4" />
+                )}
                 保存
               </Button>
               {dirty ? (

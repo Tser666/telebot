@@ -1256,3 +1256,80 @@ async def test_reload_account_config_keeps_merged_defaults_stable(monkeypatch) -
         shutdown_spy.assert_not_awaited()
     finally:
         _REGISTRY.pop("_test_config_stable", None)
+
+
+@pytest.mark.asyncio
+async def test_merge_plugin_config_uses_legacy_account_global_field_when_global_empty() -> None:
+    """字段迁移到 global 后，旧账号级值应继续作为运行时兼容回退。"""
+    fake_db = _FakeDB(
+        accounts={1: _FakeAcc(id=1)},
+        humanize={1: None},
+        afs=[],
+        rules=[],
+        features={
+            "pt_promote": _FakeFeature(
+                key="pt_promote",
+                manifest={
+                    "config_schema": {
+                        "properties": {
+                            "command": {"default": "pt"},
+                            "cookie": {"default": "", "level": "global"},
+                            "torrent_cooldown_seconds": {"default": "12h"},
+                        }
+                    }
+                },
+            )
+        },
+        plugin_global_configs={},
+    )
+
+    merged = await loader_mod._merge_plugin_config(
+        fake_db,
+        1,
+        "pt_promote",
+        {"command": "pt", "cookie": "sid=legacy", "torrent_cooldown_seconds": "12h"},
+    )
+
+    assert merged["cookie"] == "sid=legacy"
+    assert merged["command"] == "pt"
+
+
+@pytest.mark.asyncio
+async def test_merge_plugin_config_prefers_saved_global_over_legacy_account_global_field() -> None:
+    """全局配置保存成功后，应以 plugin_global_config 为准。"""
+    fake_db = _FakeDB(
+        accounts={1: _FakeAcc(id=1)},
+        humanize={1: None},
+        afs=[],
+        rules=[],
+        features={
+            "pt_promote": _FakeFeature(
+                key="pt_promote",
+                manifest={
+                    "config_schema": {
+                        "properties": {
+                            "command": {"default": "pt"},
+                            "cookie": {"default": "", "level": "global"},
+                            "torrent_cooldown_seconds": {"default": "12h"},
+                        }
+                    }
+                },
+            )
+        },
+        plugin_global_configs={
+            "pt_promote": _FakePluginGlobalConfig(
+                plugin_key="pt_promote",
+                config={"cookie": "sid=global"},
+            )
+        },
+    )
+
+    merged = await loader_mod._merge_plugin_config(
+        fake_db,
+        1,
+        "pt_promote",
+        {"command": "pt", "cookie": "sid=legacy", "torrent_cooldown_seconds": "12h"},
+    )
+
+    assert merged["cookie"] == "sid=global"
+    assert merged["command"] == "pt"

@@ -11,7 +11,7 @@
  */
 import { useState, useEffect, useCallback, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, Save } from "lucide-react";
 import { toast } from "sonner";
 import { TelegramHtmlPreview, TelegramHtmlPreviewThread } from "@/components/TelegramHtmlPreview";
 import { listLLMProviders } from "@/api/commands";
@@ -180,7 +180,8 @@ export function ConfigDialog({
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>取消</Button>
           <Button onClick={handleSave} disabled={saving}>
-            {saving ? <><Spinner className="mr-2 h-4 w-4" /> 保存中…</> : "保存"}
+            {saving ? <Spinner className="mr-2 h-4 w-4" /> : <Save className="mr-2 h-4 w-4" />}
+            {saving ? "保存中…" : "保存"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -850,10 +851,12 @@ export function buildScopedConfigValues(
   const globalVals: Record<string, unknown> = {};
   const accountVals: Record<string, unknown> = {};
   for (const [key, field] of Object.entries(schema.properties)) {
-    // 合并顺序：schema defaults < globalConfig < accountConfig
-    const effectiveVal = accountConfig[key] ?? globalConfig[key] ?? field.default;
+    const isGlobalField = field.level === "global";
+    const effectiveVal = isGlobalField
+      ? globalConfig[key] ?? accountConfig[key] ?? field.default
+      : accountConfig[key] ?? globalConfig[key] ?? field.default;
     const displayVal = isSensitiveConfigKey(key) && isRedactedSecretValue(effectiveVal) ? "" : effectiveVal;
-    if (field.level === "global") {
+    if (isGlobalField) {
       globalVals[key] = displayVal;
     } else {
       accountVals[key] = displayVal;

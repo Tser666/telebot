@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { Plus, Trash2, KeyRound, Edit3, Download, Loader2, CheckCircle2, XCircle, Star, ChevronDown, ChevronRight, Filter, X, Package } from "lucide-react";
+import { Plus, Trash2, KeyRound, Edit3, Download, Loader2, CheckCircle2, XCircle, Star, ChevronDown, ChevronRight, Filter, X, Package, Save } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { CommandBadge } from "@/components/CommandBadge";
@@ -924,6 +924,7 @@ function ProviderEditDialog({
             取消
           </Button>
           <Button onClick={onSave} disabled={saving}>
+            {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
             保存
           </Button>
         </DialogFooter>

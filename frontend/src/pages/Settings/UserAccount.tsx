@@ -5,7 +5,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { KeyRound, ShieldCheck } from "lucide-react";
+import { KeyRound, ShieldCheck, ShieldOff } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -146,6 +146,7 @@ export function UserAccount() {
             />
           </div>
           <Button onClick={handleChange} disabled={changeMut.isPending}>
+            <KeyRound className="mr-2 h-4 w-4" />
             修改密码
           </Button>
           <p className="text-xs text-muted-foreground">
@@ -184,6 +185,7 @@ export function UserAccount() {
                 }}
                 disabled={disableTotpMut.isPending}
               >
+                <ShieldOff className="mr-2 h-4 w-4" />
                 禁用 动态验证码（TOTP）
               </Button>
             </div>

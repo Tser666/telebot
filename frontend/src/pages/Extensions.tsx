@@ -15,14 +15,17 @@ import {
   ChevronDown,
   ChevronRight,
   Code2,
+  Download,
   FileText,
   GitFork,
   Globe2,
   ListChecks,
   Network,
   Power,
+  Plus,
   Puzzle,
   RefreshCw,
+  Save,
   ShieldCheck,
   Sparkles,
   Trash2,
@@ -460,6 +463,7 @@ function RemoteUpdateSettingsCard() {
         </div>
         <div className="flex gap-2">
           <Button onClick={() => saveMut.mutate()} disabled={saveMut.isPending}>
+            {saveMut.isPending ? <Spinner className="mr-2 h-4 w-4" /> : <Save className="mr-2 h-4 w-4" />}
             保存
           </Button>
           <Button variant="outline" onClick={() => checkMut.mutate()} disabled={checkMut.isPending}>
@@ -519,6 +523,11 @@ function LocalImportCard() {
                   disabled={installLocalMut.isPending || p.installed}
                   onClick={() => installLocalMut.mutate(p.name)}
                 >
+                  {installLocalMut.isPending ? (
+                    <Spinner className="mr-2 h-4 w-4" />
+                  ) : (
+                    <Download className="mr-2 h-4 w-4" />
+                  )}
                   {p.installed ? "已导入" : "导入"}
                 </Button>
               </div>
@@ -634,7 +643,10 @@ function RemoteInstallCard() {
             {addRepoMut.isPending ? (
               <><Spinner className="mr-2 h-4 w-4" /> 添加中…</>
             ) : (
-              "添加仓库"
+              <>
+                <Plus className="mr-2 h-4 w-4" />
+                添加仓库
+              </>
             )}
           </Button>
         </div>
@@ -733,6 +745,11 @@ function RemoteInstallCard() {
                                   : installFromRepoMut.mutate({ repoId: repo.id, name: p.name })
                               }
                             >
+                              {canUpdate ? (
+                                <RefreshCw className="mr-1 h-3.5 w-3.5" />
+                              ) : p.installed ? null : (
+                                <Download className="mr-1 h-3.5 w-3.5" />
+                              )}
                               {canUpdate ? "更新" : p.installed ? "已安装" : "安装"}
                             </Button>
                           </div>

@@ -238,7 +238,8 @@ async def patch_account_feature(
         config_schema = (feature.manifest or {}).get("config_schema")
         if config_schema:
             validation = feature_service.validate_config_against_schema(
-                payload.config, config_schema
+                payload.config,
+                feature_service.config_schema_for_scope(config_schema, "account"),
             )
             if not validation.valid:
                 raise _bad(
@@ -302,7 +303,8 @@ async def update_account_feature_config(
     config_schema = (feature.manifest or {}).get("config_schema")
     if config_schema:
         validation = feature_service.validate_config_against_schema(
-            payload.config, config_schema
+            payload.config,
+            feature_service.config_schema_for_scope(config_schema, "account"),
         )
         if not validation.valid:
             raise _bad(

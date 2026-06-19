@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Iterable
+from copy import deepcopy
 from typing import Any
 
 from jsonschema import Draft7Validator
@@ -501,7 +502,10 @@ async def set_plugin_global_config(
     # 验证 config_schema
     config_schema = (feature.manifest or {}).get("config_schema")
     if config_schema:
-        validation = validate_config_against_schema(config, config_schema)
+        validation = validate_config_against_schema(
+            config,
+            config_schema_for_scope(config_schema, "global"),
+        )
         if not validation.valid:
             error_msgs = [f"{e.field}: {e.message}" for e in validation.errors]
             raise ValueError(f"Config validation failed: {'; '.join(error_msgs)}")
@@ -629,8 +633,52 @@ def validate_config_against_schema(
         )
 
 
+def config_schema_for_scope(
+    config_schema: dict[str, Any],
+    scope: str,
+) -> dict[str, Any]:
+    """Return a schema whose required fields match one config storage scope.
+
+    A plugin config can be split between plugin-global storage and account
+    storage via ``properties[*].level == "global"``. The complete schema still
+    describes the merged runtime object, so validating either half with the
+    complete ``required`` list rejects valid partial saves.
+    """
+
+    if not isinstance(config_schema, dict):
+        return {}
+    scoped = deepcopy(config_schema)
+    properties = scoped.get("properties")
+    if not isinstance(properties, dict):
+        scoped.pop("required", None)
+        return scoped
+
+    if scope == "global":
+        scoped_keys = {
+            key
+            for key, field in properties.items()
+            if isinstance(field, dict) and field.get("level") == "global"
+        }
+    elif scope == "account":
+        scoped_keys = {
+            key
+            for key, field in properties.items()
+            if not (isinstance(field, dict) and field.get("level") == "global")
+        }
+    else:
+        scoped_keys = set(properties)
+
+    required = scoped.get("required")
+    if isinstance(required, list):
+        scoped["required"] = [
+            key for key in required if isinstance(key, str) and key in scoped_keys
+        ]
+    return scoped
+
+
 __all__ = [
     "bulk_set_enabled",
+    "config_schema_for_scope",
     "feature_matrix",
     "get_account_features",
     "get_effective_plugin_config",

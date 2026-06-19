@@ -13,6 +13,7 @@ from app.db.models.plugin_global_config import PluginGlobalConfig
 from app.schemas.feature import FeatureInfo
 from app.services.feature_service import (
     _seed_local_installed_features,
+    config_schema_for_scope,
     feature_matrix,
     get_effective_plugin_config,
     get_plugin_global_config,
@@ -107,6 +108,30 @@ class TestValidateConfigAgainstSchema:
         config = {"time_limit": 30, "extra_field": "should_be_allowed"}
         result = validate_config_against_schema(config, schema)
         assert result.valid is True
+
+    def test_scope_schema_filters_required_fields(self) -> None:
+        """分层保存时只要求当前 scope 的 required 字段。"""
+        schema = {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "command": {"type": "string"},
+                "cookie": {"type": "string", "level": "global"},
+                "torrent_cooldown_seconds": {"type": "string"},
+            },
+            "required": ["command", "cookie", "torrent_cooldown_seconds"],
+        }
+
+        global_schema = config_schema_for_scope(schema, "global")
+        account_schema = config_schema_for_scope(schema, "account")
+
+        assert global_schema["required"] == ["cookie"]
+        assert account_schema["required"] == ["command", "torrent_cooldown_seconds"]
+        assert validate_config_against_schema({"cookie": "sid=ok"}, global_schema).valid is True
+        assert validate_config_against_schema(
+            {"command": "pt", "torrent_cooldown_seconds": "12h"},
+            account_schema,
+        ).valid is True
 
 
 # ─────────────────────────────────────────────────────
@@ -552,6 +577,39 @@ class TestSetPluginGlobalConfig:
         assert added_row.plugin_key == "demo"
         assert added_row.config == {"global_field": 42}
         db.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_global_config_validation_ignores_account_required_fields(self) -> None:
+        """保存全局字段时不应要求账号级 required 字段同时出现。"""
+        feature = MagicMock()
+        feature.manifest = {
+            "config_schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "command": {"type": "string"},
+                    "cookie": {"type": "string", "level": "global"},
+                    "torrent_cooldown_seconds": {"type": "string"},
+                },
+                "required": ["command", "cookie", "torrent_cooldown_seconds"],
+            },
+        }
+
+        db = AsyncMock()
+        db.get = AsyncMock(side_effect=[feature, None])
+        db.add = MagicMock()
+        db.commit = AsyncMock()
+
+        with (
+            pytest.mock.patch("app.services.feature_service.seed_builtin_features", AsyncMock()),
+            pytest.mock.patch("app.services.feature_service._notify_all_accounts_using_feature", AsyncMock()),
+        ):
+            result = await set_plugin_global_config(db, "pt_promote", {"cookie": "sid=ok"})
+
+        assert result == {"cookie": "sid=ok"}
+        added_row = db.add.call_args.args[0]
+        assert isinstance(added_row, PluginGlobalConfig)
+        assert added_row.config == {"cookie": "sid=ok"}
 
     @pytest.mark.asyncio
     async def test_updates_existing_global_config_row(self) -> None:

@@ -2698,12 +2698,36 @@ def _interaction_delivery_error(result: dict[str, Any] | Any) -> str | None:
     return text or None
 
 
+async def _delete_interaction_placeholder(
+    incoming: Incoming,
+    message_id: int | None,
+) -> None:
+    if incoming.chat_id is None or message_id is None:
+        return
+    try:
+        await account_bot_service.delete_message(
+            incoming.token,
+            incoming.chat_id,
+            message_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        await _write_interaction_runtime_log(
+            incoming,
+            "warn",
+            "interaction placeholder delete failed",
+            message_id=message_id,
+            error=str(exc),
+            **_interaction_log_context(incoming),
+        )
+
+
 async def _send_interaction_action_message(
     incoming: Incoming,
     text: str,
     *,
     reply_to_message_id: int | None,
     send_via: str,
+    edit_message_id: int | None = None,
 ) -> tuple[bool, dict[str, Any]]:
     if incoming.chat_id is None:
         return False, {}
@@ -2738,12 +2762,33 @@ async def _send_interaction_action_message(
             **_interaction_log_context(incoming),
         )
         return False, {"error": "bot token unavailable"}
+    if send_via == "interaction_bot" and edit_message_id is not None:
+        try:
+            result = await account_bot_service.edit_message(
+                token,
+                incoming.chat_id,
+                edit_message_id,
+                text,
+            )
+            return True, result
+        except Exception as exc:  # noqa: BLE001
+            await _write_interaction_runtime_log(
+                incoming,
+                "warn",
+                "interaction action edit placeholder failed, fallback send",
+                send_via=send_via,
+                edit_message_id=edit_message_id,
+                error=str(exc),
+                **_interaction_log_context(incoming),
+            )
     result = await account_bot_service.send_message(
         token,
         incoming.chat_id,
         text,
         reply_to_message_id=reply_to_message_id,
     )
+    if send_via == "interaction_bot" and edit_message_id is not None:
+        await _delete_interaction_placeholder(incoming, edit_message_id)
     return True, result
 
 
@@ -2858,6 +2903,7 @@ async def _apply_interaction_actions(
     actions: list[dict[str, Any]],
     *,
     context: dict[str, Any] | None = None,
+    replace_message_id: int | None = None,
 ) -> None:
     for action in actions[:10]:
         action = dict(action)
@@ -2883,12 +2929,23 @@ async def _apply_interaction_actions(
             text = str(action.get("text") or "").strip()
             if not text:
                 continue
+            edit_message_id = None
+            delete_message_id = None
+            if replace_message_id is not None and send_via == "interaction_bot":
+                edit_message_id = replace_message_id
+                replace_message_id = None
+            elif replace_message_id is not None:
+                delete_message_id = replace_message_id
+                replace_message_id = None
             ok, result = await _send_interaction_action_message(
                 incoming,
                 text,
                 reply_to_message_id=reply_to_message_id,
                 send_via=send_via,
+                edit_message_id=edit_message_id,
             )
+            if ok and delete_message_id is not None:
+                await _delete_interaction_placeholder(incoming, delete_message_id)
             await _record_interaction_result(
                 incoming,
                 action,
@@ -2919,6 +2976,9 @@ async def _apply_interaction_actions(
                 reply_to_message_id=reply_to_message_id,
                 send_via=send_via,
             )
+            if ok and replace_message_id is not None:
+                await _delete_interaction_placeholder(incoming, replace_message_id)
+                replace_message_id = None
             await _record_interaction_result(
                 incoming,
                 action,
@@ -2952,8 +3012,10 @@ async def _run_interaction_module(
         await _send(incoming, "模块启动失败：请先选择模块和交互入口。")
         return False, False
     start_text = str(rule.get("module_start_text") or "").strip()
+    start_message_id: int | None = None
     if start_text:
-        await _send(incoming, start_text, reply_to_message_id=incoming.message_id)
+        start_result = await _send(incoming, start_text, reply_to_message_id=incoming.message_id)
+        start_message_id = _interaction_delivery_message_id(start_result)
     payload = await _interaction_module_payload_async(incoming, rule, parsed, event_type=event_type)
     trace_context = _interaction_trace_context(payload)
     ok, error, actions = await _run_worker_interaction_entry(
@@ -2969,7 +3031,12 @@ async def _run_interaction_module(
         )
         return False, False
     keep_session = not _interaction_actions_request_no_session(actions)
-    await _apply_interaction_actions(incoming, actions, context=trace_context)
+    await _apply_interaction_actions(
+        incoming,
+        actions,
+        context=trace_context,
+        replace_message_id=start_message_id,
+    )
     return _interaction_actions_mark_success(actions), keep_session
 
 
@@ -4165,22 +4232,21 @@ async def _send(
     reply_markup: dict[str, Any] | None = None,
     reply_to_message_id: int | None = None,
     edit: bool = False,
-) -> None:
+) -> dict[str, Any] | None:
     if incoming.chat_id is None:
-        return
+        return None
     if edit and incoming.message_id is not None:
         try:
-            await account_bot_service.edit_message(
+            return await account_bot_service.edit_message(
                 incoming.token,
                 incoming.chat_id,
                 incoming.message_id,
                 text,
                 reply_markup=reply_markup,
             )
-            return
         except Exception:
             log.debug("edit account bot message failed, fallback send", exc_info=True)
-    await account_bot_service.send_message(
+    return await account_bot_service.send_message(
         incoming.token,
         incoming.chat_id,
         text,

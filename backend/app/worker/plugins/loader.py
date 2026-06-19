@@ -1314,9 +1314,14 @@ async def _merge_plugin_config(
 
     # 合并：defaults < global < account_only
     result = {**defaults}
-    for k, v in global_config.items():
-        if k in global_fields:
-            result[k] = v
+    for key in global_fields:
+        if key in global_config:
+            result[key] = global_config[key]
+        elif key in account_config:
+            # Compatibility for configs saved before a plugin moved a field to
+            # level="global". Keep the old account-level value usable until
+            # the next successful global-config save migrates it.
+            result[key] = account_config[key]
     result.update(account_only_config)
 
     return result

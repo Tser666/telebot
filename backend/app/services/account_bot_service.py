@@ -1125,6 +1125,18 @@ async def edit_message(
     return await call_bot_api(token, "editMessageText", payload)
 
 
+async def delete_message(
+    token: str,
+    chat_id: int,
+    message_id: int,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+    }
+    return await call_bot_api(token, "deleteMessage", payload)
+
+
 async def answer_callback(
     token: str,
     callback_query_id: str,

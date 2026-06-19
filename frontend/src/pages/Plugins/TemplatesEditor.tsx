@@ -7,7 +7,7 @@
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronDown, Plus, Trash2, Edit3 } from "lucide-react";
+import { ChevronDown, Loader2, Plus, Save, Trash2, Edit3 } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
@@ -689,6 +689,7 @@ export function CommandTemplates() {
                 disabled={!echoGuardEnabled || settingsQ.isLoading || echoGuardMut.isPending}
                 onClick={() => echoGuardMut.mutate(nextEchoGuardLimit)}
               >
+                <Save className="mr-1 h-4 w-4" />
                 保存条数
               </Button>
               <span className="text-xs text-muted-foreground">
@@ -1663,6 +1664,7 @@ function CommandEditDialog({
             取消
           </Button>
           <Button onClick={onSave} disabled={saving}>
+            {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
             保存
           </Button>
         </DialogFooter>

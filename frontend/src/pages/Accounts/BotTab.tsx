@@ -11,6 +11,7 @@ import {
   Loader2,
   Plus,
   RefreshCw,
+  Save,
   Send,
   ShieldCheck,
   Trash2,
@@ -23,6 +24,7 @@ import {
   type ConfigSchema,
   ConfigScopeSection,
 } from "@/components/plugin/ConfigDialog";
+import { TelegramHtmlPreview } from "@/components/TelegramHtmlPreview";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -130,6 +132,15 @@ const DEFAULT_TRANSFER_NOTICE_TEMPLATE = [
   "金额：{amount}",
   "{receiver_user_id_line}</code></pre>",
 ].join("\n");
+const TRANSFER_NOTICE_TEMPLATE_SAMPLE_VALUES: Record<string, string> = {
+  payer_name: "Alice",
+  payer_user_id: "10001",
+  payer_user_id_line: "付款人ID：10001",
+  receiver_name: "Bob",
+  receiver_user_id: "10002",
+  receiver_user_id_line: "收款人ID：10002",
+  amount: "88.00",
+};
 
 const DEFAULT_INTERACTION_BOT: AccountBotInteractionConfig = {
   enabled: false,
@@ -442,6 +453,13 @@ function parseTextLines(value: string): string[] {
     if (item && !out.includes(item)) out.push(item);
   }
   return out;
+}
+
+function renderTransferNoticeTemplatePreview(template: string): string {
+  const source = template.trim() || DEFAULT_TRANSFER_NOTICE_TEMPLATE;
+  return source.replace(/\{(\w+)\}/g, (match, key: string) => (
+    TRANSFER_NOTICE_TEMPLATE_SAMPLE_VALUES[key] ?? match
+  ));
 }
 
 function isInteractionEntrySchema(schema: unknown): schema is InteractionEntrySchema {
@@ -2024,7 +2042,9 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
                 <Button onClick={() => saveMut.mutate()} disabled={saveMut.isPending}>
                   {saveMut.isPending ? (
                     <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                  ) : null}
+                  ) : (
+                    <Save className="mr-1 h-4 w-4" />
+                  )}
                   保存管理 Bot
                 </Button>
               </div>
@@ -2208,7 +2228,11 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
                     onClick={() => saveInteractionBotMut.mutate()}
                     disabled={saveInteractionBotMut.isPending || !interactionQ.data}
                   >
-                    {saveInteractionBotMut.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
+                    {saveInteractionBotMut.isPending ? (
+                      <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Save className="mr-1 h-4 w-4" />
+                    )}
                     保存交互 Bot
                   </Button>
                   <Button
@@ -2265,7 +2289,11 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
                     onClick={() => saveTransferResultBotMut.mutate()}
                     disabled={saveTransferResultBotMut.isPending || !interactionQ.data}
                   >
-                    {saveTransferResultBotMut.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
+                    {saveTransferResultBotMut.isPending ? (
+                      <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Save className="mr-1 h-4 w-4" />
+                    )}
                     保存通知 Bot
                   </Button>
                   <Button
@@ -2378,7 +2406,9 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
                 >
                   {saveTransferMut.isPending ? (
                     <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                  ) : null}
+                  ) : (
+                    <Save className="mr-1 h-4 w-4" />
+                  )}
                   保存规则
                 </Button>
                 <Button
@@ -2570,6 +2600,23 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
                 <span className="sm:col-span-2"><code>{"{payer_user_id_line}"}</code>：有付款人 ID 时渲染为“付款人ID：数字”，没有时自动留空</span>
                 <span className="sm:col-span-2"><code>{"{receiver_user_id_line}"}</code>：有收款人 ID 时渲染为“收款人ID：数字”，没有时自动留空</span>
               </div>
+              <div className="rounded-md border bg-background p-3 text-xs">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <div className="font-medium">消息预览</div>
+                  <span className="text-[11px] text-muted-foreground">使用示例变量渲染</span>
+                </div>
+                <TelegramHtmlPreview
+                  value={renderTransferNoticeTemplatePreview(transferNoticeTemplate)}
+                  mode="html"
+                  title="转账通知 Bot"
+                  caption="transfer notice"
+                  hints={[
+                    { label: "payer", value: TRANSFER_NOTICE_TEMPLATE_SAMPLE_VALUES.payer_name },
+                    { label: "receiver", value: TRANSFER_NOTICE_TEMPLATE_SAMPLE_VALUES.receiver_name },
+                    { label: "amount", value: TRANSFER_NOTICE_TEMPLATE_SAMPLE_VALUES.amount },
+                  ]}
+                />
+              </div>
             </div>
 
           <div className="rounded-md bg-muted px-3 py-2 text-xs leading-5 text-muted-foreground">
@@ -2585,7 +2632,9 @@ export function BotTab({ aid, mode = "management" }: { aid: number; mode?: "mana
               >
                 {saveTransferMut.isPending ? (
                   <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                ) : null}
+                ) : (
+                  <Save className="mr-1 h-4 w-4" />
+                )}
                 保存整块交互配置
               </Button>
             </div>

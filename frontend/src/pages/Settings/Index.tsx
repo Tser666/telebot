@@ -7,6 +7,8 @@ import {
   ChevronDown,
   Cog,
   Download,
+  Loader2,
+  Save,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
@@ -434,6 +436,7 @@ export function SettingsIndex() {
                   onClick={() => prefix && savePrefix.mutate()}
                   disabled={savePrefix.isPending}
                 >
+                  {savePrefix.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                   保存
                 </Button>
               </div>
@@ -543,6 +546,7 @@ export function SettingsIndex() {
                   />
                 </div>
                 <Button onClick={() => saveQps.mutate()} disabled={saveQps.isPending}>
+                  {saveQps.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                   保存
                 </Button>
               </div>
@@ -593,6 +597,7 @@ export function SettingsIndex() {
                   </p>
                 </div>
                 <Button onClick={() => saveTimezone.mutate()} disabled={saveTimezone.isPending}>
+                  {saveTimezone.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                   保存
                 </Button>
               </div>
@@ -673,6 +678,7 @@ export function SettingsIndex() {
               </div>
               <div className="mt-3">
                 <Button onClick={() => saveLogRetention.mutate()} disabled={saveLogRetention.isPending}>
+                  {saveLogRetention.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                   保存
                 </Button>
               </div>
@@ -721,6 +727,7 @@ export function SettingsIndex() {
               </div>
               <div className="mt-3">
                 <Button onClick={() => saveLlmLimits.mutate()} disabled={saveLlmLimits.isPending}>
+                  {saveLlmLimits.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                   保存
                 </Button>
               </div>

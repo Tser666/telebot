@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Pencil, Trash2, X } from "lucide-react";
+import { Check, Pencil, Plus, Save, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -479,10 +479,16 @@ export function SudoManagement() {
               }}
               disabled={!canSave || createMut.isPending || updateMut.isPending}
             >
+              {editingId ? (
+                <Save className="mr-1 h-4 w-4" />
+              ) : (
+                <Plus className="mr-1 h-4 w-4" />
+              )}
               {editingId ? "更新" : "添加"}
             </Button>
             {editingId && (
               <Button variant="outline" onClick={cancelEdit}>
+                <X className="mr-1 h-4 w-4" />
                 取消
               </Button>
             )}

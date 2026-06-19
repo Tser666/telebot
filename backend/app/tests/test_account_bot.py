@@ -2679,7 +2679,8 @@ async def test_interaction_keyword_module_result_false_does_not_mark_usage(monke
 
 @pytest.mark.asyncio
 async def test_interaction_module_start_text_is_sent_before_module_actions(monkeypatch) -> None:
-    send = AsyncMock()
+    send = AsyncMock(return_value={"message_id": 88})
+    edit = AsyncMock(return_value={"message_id": 88})
     run_entry = AsyncMock(
         return_value=(
             True,
@@ -2688,6 +2689,7 @@ async def test_interaction_module_start_text_is_sent_before_module_actions(monke
         )
     )
     monkeypatch.setattr(account_bot_service, "send_message", send)
+    monkeypatch.setattr(account_bot_service, "edit_message", edit)
     monkeypatch.setattr(account_bot_runtime, "_run_worker_interaction_entry", run_entry)
     incoming = account_bot_runtime.Incoming(
         account_id=1,
@@ -2712,9 +2714,11 @@ async def test_interaction_module_start_text_is_sent_before_module_actions(monke
     )
 
     assert ok is True
-    assert send.await_args_list[0].args[:3] == ("bbot-token", -100123, "正在启动互动模块...")
-    assert send.await_args_list[0].kwargs["reply_to_message_id"] == 10
-    assert send.await_args_list[1].args[:3] == ("bbot-token", -100123, "模块已开始")
+    send.assert_awaited_once()
+    assert send.await_args.args[:3] == ("bbot-token", -100123, "正在启动互动模块...")
+    assert send.await_args.kwargs["reply_to_message_id"] == 10
+    edit.assert_awaited_once()
+    assert edit.await_args.args[:4] == ("bbot-token", -100123, 88, "模块已开始")
 
 
 @pytest.mark.asyncio
@@ -4049,7 +4053,9 @@ async def test_transfer_notice_module_rule_accepts_guess_number_legacy_entry(mon
 @pytest.mark.asyncio
 async def test_interaction_action_can_send_photo(monkeypatch) -> None:
     send = AsyncMock()
+    delete = AsyncMock()
     monkeypatch.setattr(account_bot_service, "send_photo_bytes", send)
+    monkeypatch.setattr(account_bot_service, "delete_message", delete)
     incoming = account_bot_runtime.Incoming(
         account_id=1,
         token="bbot-token",
@@ -4071,6 +4077,7 @@ async def test_interaction_action_can_send_photo(monkeypatch) -> None:
                 "reply_to_message_id": 9,
             }
         ],
+        replace_message_id=77,
     )
 
     assert send.await_count == 1
@@ -4080,6 +4087,7 @@ async def test_interaction_action_can_send_photo(monkeypatch) -> None:
         "caption": "九宫格",
         "reply_to_message_id": 9,
     }
+    delete.assert_awaited_once_with("bbot-token", -100123, 77)
 
 
 @pytest.mark.asyncio
@@ -4092,10 +4100,12 @@ async def test_interaction_action_send_via_bbot_notice_and_logs_settlement(monke
             return None
 
     send = AsyncMock()
+    delete = AsyncMock()
     write_log = AsyncMock()
     monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
     monkeypatch.setattr(account_bot_service, "get_transfer_bot_token", AsyncMock(return_value="abot-token"))
     monkeypatch.setattr(account_bot_service, "send_message", send)
+    monkeypatch.setattr(account_bot_service, "delete_message", delete)
     monkeypatch.setattr(account_bot_runtime, "_write_interaction_runtime_log", write_log)
     incoming = account_bot_runtime.Incoming(
         account_id=1,
@@ -4123,11 +4133,13 @@ async def test_interaction_action_send_via_bbot_notice_and_logs_settlement(monke
                 },
             }
         ],
+        replace_message_id=77,
     )
 
     assert send.await_count == 1
     assert send.await_args.args[:3] == ("abot-token", -100123, "结算公告")
     assert send.await_args.kwargs["reply_to_message_id"] == 9
+    delete.assert_awaited_once_with("bbot-token", -100123, 77)
     assert write_log.await_count == 2
     assert write_log.await_args_list[0].args[1:3] == ("info", "interaction settlement reported")
     assert write_log.await_args_list[1].args[1:3] == ("info", "interaction result reported")
