@@ -1212,6 +1212,19 @@ def _interaction_rule_trigger_labels(rule: dict[str, Any]) -> list[str]:
     return labels
 
 
+def _interaction_rule_query_trigger_label(rule: dict[str, Any]) -> str:
+    labels = [_interaction_trigger_mode_label(rule)]
+    if _rule_trigger_mode_allows(rule, "keyword"):
+        keywords = _rule_keyword_list(rule, "module_start_keywords")
+        if keywords:
+            labels.append("关键词：" + " / ".join(f"<code>{account_bot_service.html_text(item)}</code>" for item in keywords[:5]))
+        else:
+            labels.append("关键词未配置")
+    if _rule_trigger_mode_allows(rule, "payment"):
+        labels.append("转账通知")
+    return "；".join(labels)
+
+
 def _interaction_query_template_value(cfg: dict[str, Any], key: str, fallback: str) -> str:
     value = str(cfg.get(key) or "").strip()
     return value or fallback
@@ -1244,9 +1257,8 @@ async def _render_interaction_rules_query(_db: Any, incoming: Incoming, cfg: dic
     lines: list[str] = []
     for index, rule in enumerate(open_rules, start=1):
         name = account_bot_service.html_text(str(rule.get("name") or rule.get("id") or f"玩法 {index}"))
-        lines.append(f"{index}. <b>{name}</b> · {_interaction_rule_kind_label(rule)}")
-        lines.append("触发：" + "；".join(_interaction_rule_trigger_labels(rule)))
-        lines.append("限制：" + _interaction_rule_limit_label(rule))
+        lines.append(f"{index}. <b>{name}</b>")
+        lines.append("触发方式：" + _interaction_rule_query_trigger_label(rule))
     closed_count = len(matched) - len(open_rules)
     if closed_count > 0:
         lines.append(f"另有 {closed_count} 个玩法已临时关闭。")

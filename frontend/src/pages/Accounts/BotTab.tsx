@@ -469,12 +469,10 @@ function renderTransferNoticeTemplatePreview(template: string): string {
 function renderInteractionQueryTemplatePreview(template: string): string {
   const source = template.trim() || DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE;
   const sampleItems = [
-    "1. <b>九宫格</b> · 玩法 <code>dice_grid_hunt</code>",
-    "触发：方式：转账或关键词；关键词：<code>。ct num=数字</code>；金额 = <code>123</code>；收款人 当前账号",
-    "限制：奖金 <code>123</code>；限时 <code>90</code> 秒；每用户 CD <code>10s</code>；每用户日上限 <code>2</code>",
-    "2. <b>置顶促销</b> · 玩法 <code>pt_promote</code>",
-    "触发：方式：关键词；关键词：<code>促销 id=12345</code>",
-    "限制：限时 <code>600</code> 秒；每用户 CD <code>12h</code>",
+    "1. <b>九宫格</b>",
+    "触发方式：转账或关键词；关键词：<code>。ct num=数字</code>；转账通知",
+    "2. <b>置顶促销</b>",
+    "触发方式：关键词；关键词：<code>促销 id=12345</code>",
   ].join("\n");
   const sampleValues: Record<string, string> = {
     items: sampleItems,

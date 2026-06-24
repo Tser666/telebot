@@ -3208,11 +3208,15 @@ async def test_interaction_query_command_lists_current_chat_games(monkeypatch) -
     text = send.await_args.args[2]
     assert "当前可用联动玩法" in text
     assert "九宫格" in text
-    assert "dice_grid_hunt" in text
+    assert "触发方式：转账或关键词" in text
     assert "。ct num=数字" in text
-    assert "金额 = <code>123</code>" in text
-    assert "每用户 CD <code>10s</code>" in text
-    assert "每用户日上限 <code>2</code>" in text
+    assert "转账通知" in text
+    assert "dice_grid_hunt" not in text
+    assert "金额 = <code>123</code>" not in text
+    assert "收款人" not in text
+    assert "奖金" not in text
+    assert "每用户 CD <code>10s</code>" not in text
+    assert "每用户日上限 <code>2</code>" not in text
     assert "其他群算数题" not in text
     assert "<b>通知</b>" not in text
     assert send.await_args.kwargs["reply_to_message_id"] == 10010
@@ -3306,8 +3310,10 @@ async def test_interaction_query_template_hides_prize_for_no_prize_entry(monkeyp
     text = send.await_args.args[2]
     assert "当前 1 个玩法" in text
     assert "置顶促销" in text
+    assert "触发方式：关键词" in text
+    assert "促销 id=12345" in text
     assert "奖金" not in text
-    assert "每用户 CD <code>12h</code>" in text
+    assert "每用户 CD <code>12h</code>" not in text
 
 
 @pytest.mark.asyncio
