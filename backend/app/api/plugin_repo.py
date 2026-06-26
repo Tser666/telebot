@@ -82,6 +82,19 @@ async def list_repo_plugins(repo_id: int, db: DBSession, _user: CurrentUser):
         raise HTTPException(400, detail={"code": e.code, "message": e.message}) from e
 
 
+@router.post("/{repo_id}/refresh", response_model=list[PluginRepoPlugin])
+async def refresh_repo_plugins(repo_id: int, db: DBSession, _user: CurrentUser):
+    """强制刷新仓库缓存并返回最新插件列表。"""
+    try:
+        return await svc.list_plugins_in_repo(db, repo_id, force_refresh=True)
+    except PluginRepoNotFound as e:
+        raise HTTPException(404, detail={"code": e.code, "message": e.message}) from e
+    except (GitOperationFailed, InvalidPluginMetadata) as e:
+        raise HTTPException(400, detail={"code": e.code, "message": e.message}) from e
+    except (PluginRepoError, RemotePluginError) as e:
+        raise HTTPException(400, detail={"code": e.code, "message": e.message}) from e
+
+
 @router.get("/local/plugins", response_model=list[PluginRepoPlugin])
 async def list_local_plugins(_user: CurrentUser):
     """列出 ``plugins/local_imports`` 下可导入的本地插件。"""

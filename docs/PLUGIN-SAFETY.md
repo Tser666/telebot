@@ -29,6 +29,8 @@ Manifest 中的 `permissions` 字段声明插件需要的能力：
 
 `permissions` 默认是空列表。第三方插件漏写权限时不会注入对应 facade，也不能调用未声明的 `ctx.client` / `event` helper 能力；内置插件也建议显式写全，方便审计和后续迁移。
 
+交互入口不要直接使用 Bot Token 或 Telegram Bot API。需要发送、编辑、删除、置顶或回应按钮时，优先使用 `ctx.messages` 生成标准动作，再由 TelePilot 按 `result_contract.actions` 和 `result_contract.send_via` 统一校验。`ctx.client` 保留给常规 UserBot 命令和高级兼容场景，不作为普通 Bot 按钮回调的主入口。
+
 ### 禁止行为
 
 - 不允许 `os.system` / `subprocess` 执行系统命令（除非显式声明）
@@ -154,6 +156,7 @@ Manifest 中的 `permissions` 字段声明插件需要的能力：
 | `on_message` 普通发送 | 有 | `event.respond(...)` | 在同一聊天里发新消息，不引用原消息 | `send_message` |
 | 跨聊天发送/转发 | 有或无 | `ctx.client.send_message(target_chat_id, ...)` / `ctx.client.send_file(...)` | 转发、通知、发图、调度任务 | `send_message` / `send_file` |
 | `ctx.scheduler` 定时回调 | 无 | `ctx.client.send_message(chat_id, ...)` | 定时任务没有原始 `event`，必须从配置或规则里拿 `chat_id` | `send_message` |
+| `on_interaction` 交互入口 | 无原始事件对象 | `ctx.messages.send(...)` / `ctx.messages.answer_callback(...)` | 交互 Bot、通知 Bot、userbot_reply 三类发送通道统一走标准动作 | `interaction_entries[].result_contract` |
 | `on_startup` / `on_shutdown` | 无 | 默认不发；确需通知时用 `ctx.client.send_message(...)` | 启停阶段容易重复触发，必须有显式配置开关 | `send_message` |
 | `ctx.conversation()` | conversation 内部 | `conv.send(...)` / `conv.get_response(...)` | 与 BotFather 或其它 bot 进行会话 | 取决于底层发送/读取能力 |
 | 成员管理 | 有 | `ctx.client.mute_user(chat_id, user_id, duration_seconds=3600)` / `ctx.client.kick_user(chat_id, user_id)` / `ctx.client.ban_user(chat_id, user_id)` | 反广告、风控等明确需要处理违规成员的场景；调用前应先确认目标，避免误操作管理员或无关用户 | `moderate_chat` |

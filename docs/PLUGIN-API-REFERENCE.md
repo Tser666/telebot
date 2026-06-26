@@ -110,13 +110,14 @@ result = await ctx.ai.complete(
 | `ctx.feature_key` | `ctx.feature_key` | 当前插件 feature key |
 | `ctx.config` | `ctx.config.get("k")` | 插件配置（账号/全局已合并后的可见配置） |
 | `ctx.rules` | 遍历 `ctx.rules` | 当前账号 + 当前插件已启用规则 |
-| `ctx.client` | `await ctx.client.send_message(...)` | Telegram 客户端；第三方插件场景会是 `SandboxClient` 包装 |
+| `ctx.client` | `await ctx.client.send_message(...)` | UserBot 客户端 facade；常规命令和高级兼容场景可用，交互入口不推荐直接用它发消息 |
 | `ctx.engine` | `await ctx.engine.acquire(...)` | 仅内置插件可用；第三方插件通常为 `None` |
 | `ctx.redis` | `await ctx.redis.get(...)` | 仅内置插件可用；第三方插件通常为 `None` |
 | `ctx.log` | `await ctx.log("info", "...", **detail)` | 运行日志写入器 |
 | `ctx.scheduler` | `ctx.scheduler.register(job_id, schedule, callback, *, replace=True)` / `ctx.scheduler.unregister(job_id)` | 调度 facade（按权限/能力边界开放） |
 | `ctx.http` | `await ctx.http.get(url, params={...})` / `await ctx.http.post(url, json={...})` | 安全 HTTP facade；第三方插件需声明 `external_http` + `allowed_hosts` |
 | `ctx.ai` | `await ctx.ai.complete(system="...", user="...")` | 文本 LLM facade；第三方插件需声明 `ai_text` |
+| `ctx.messages` | `await ctx.messages.send(...)` / `await ctx.messages.answer_callback(...)` | 交互入口消息操作 facade；只生成平台标准动作，由 TelePilot 统一校验和发送 |
 | `ctx.conversation(...)` | `async with ctx.conversation(peer)` | 与目标 peer 建立会话 |
 
 ### 4.2 权限边界与禁止事项
@@ -132,7 +133,7 @@ result = await ctx.ai.complete(
 
 1. 配置：通过 `ctx.config` 读取；按 `config_schema` 的 `level` 设计字段，不自行拼接跨账号配置。
 2. 账号：通过 `ctx.account_id` 做所有业务隔离键，不缓存到跨账号全局变量。
-3. 运行时：仅使用 `ctx.client` / `ctx.scheduler` / `ctx.conversation` 提供的公开入口。
+3. 运行时：常规命令仅使用 `ctx.client` / `ctx.scheduler` / `ctx.conversation` 提供的公开入口；交互入口优先使用 `ctx.messages`。
 4. 日志：统一用 `ctx.log`，并在 `detail` 里带结构化字段（如 `chat_id`、`action`）。
 5. 兜底：对可选能力（`engine`/`redis`）做 feature-detection，保证第三方插件在受限上下文也能安全降级。
 
@@ -465,21 +466,24 @@ class GuessNumberPlugin(Plugin):
             answer = str(event.get("text") or "").strip()
             if answer != "42":
                 return []
-            return [
-                {
-                    "type": "send_message",
-                    "text": f"答对了：{event.get('display_name') or '玩家'}\n奖金：{payload.get('prize') or 123}",
-                    "reply_to_message_id": event.get("message_id"),
-                }
-            ]
+            if ctx.messages:
+                await ctx.messages.send(
+                    text=f"答对了：{event.get('display_name') or '玩家'}\n奖金：{payload.get('prize') or 123}",
+                    reply_to_message_id=event.get("message_id"),
+                )
+                return []
+            return [{"type": "send_message", "text": "答对了"}]
 
         prize = int(payload.get("prize") or 123)
-        return [
-            {
-                "type": "send_message",
-                "text": f"猜数字开始，奖金：{prize}",
-            }
-        ]
+        if ctx.messages:
+            await ctx.messages.send(
+                text=f"猜数字开始，奖金：{prize}",
+                reply_markup={
+                    "inline_keyboard": [[{"text": "查看状态", "callback_data": "guess:status"}]]
+                },
+            )
+            return []
+        return [{"type": "send_message", "text": f"猜数字开始，奖金：{prize}"}]
 ```
 
 当前平台已支持的标准动作：
@@ -492,6 +496,9 @@ class GuessNumberPlugin(Plugin):
 | `send_message` | `reply_markup` | 可选，Bot API inline keyboard；只有 `send_via=interaction_bot` / `bbot_notice` 会透传，`userbot_reply` 不承接按钮 |
 | `send_photo` / `send_file` | `photo_base64` / `file_base64` | 由交互 Bot 发送图片/文件字节，适合题图 |
 | `send_photo` / `send_file` | `filename`、`caption`、`reply_to_message_id` | 可选，文件名、说明文字、回复目标 |
+| `delete_message` | `message_id` | 删除交互 Bot 侧消息 |
+| `pin_message` | `message_id` | 置顶交互 Bot 侧消息 |
+| `answer_callback` | `callback_query_id`、`text`、`show_alert` | 回应 inline keyboard 按钮回调 |
 | `end_session` | 无 | 本次入口处理完成后不保留交互会话，适合彩票、红包等长期轮回插件 |
 
 `send_via` 是发送者白名单，不是插件自由选择账号的能力。推荐只使用这些值：
@@ -502,7 +509,9 @@ class GuessNumberPlugin(Plugin):
 | `userbot_reply` | 由当前账号 worker 的 userbot 代发指定消息 | 适合低频、可审计、确有账号身份需要的动作，平台会通过账号 worker 的 Telethon client 执行 |
 | `bbot_notice` | 由通知 Bot 发公告、命中、对账提示 | 不处理钱相关执行动作 |
 
-入口未声明 `result_contract.send_via` 时，平台应按最小权限只允许 `interaction_bot`。涉及奖金、补发、转账、催付的插件必须在 `settlement` 中写清职责：交互 Bot 只能公告和给出可对账结果，真正发奖仍由账号 worker 的 userbot 代发或由平台受控结算流程处理。
+入口未声明 `result_contract.send_via` 时，平台按最小权限只允许 `interaction_bot`。入口声明了 `result_contract.actions` 时，运行时会丢弃未声明动作；`send_via` 不在白名单内的发送动作也会被丢弃并写入运行时日志。`reply_markup` 只会透传给 `interaction_bot` / `bbot_notice`，`userbot_reply` 会自动移除按钮，避免按钮发到无法接收回调的通道。涉及奖金、补发、转账、催付的插件必须在 `settlement` 中写清职责：交互 Bot 只能公告和给出可对账结果，真正发奖仍由账号 worker 的 userbot 代发或由平台受控结算流程处理。
+
+推荐迁移路径：旧插件继续返回 `list[dict]` 标准动作可以兼容；新插件或重构插件优先调用 `ctx.messages.send/edit/delete/pin/answer_callback`。`ctx.messages` 只缓存动作，不会暴露 Bot Token，也不会直接调用 Telegram API。
 
 `payload["event"]` 的核心字段：
 
@@ -651,7 +660,7 @@ class GuessNumberPlugin(Plugin):
 }
 ```
 
-`payload_contract` 描述输入，`result_contract` 描述输出。两者是文档化契约，不应被插件拿来动态扩权。`result_contract.actions` 只能列标准动作；`result_contract.send_via` 是发送者白名单；`settlement` 只说明结算/公告语义，不能让交互 Bot 直接拥有发奖权限。
+`payload_contract` 描述输入，`result_contract` 描述输出。两者是文档化契约，也是运行时守卫依据，不应被插件拿来动态扩权。`result_contract.actions` 只能列标准动作；`result_contract.send_via` 是发送者白名单；`settlement` 只说明结算/公告语义，不能让交互 Bot 直接拥有发奖权限。
 
 #### 标准事件输入
 
@@ -673,7 +682,7 @@ class GuessNumberPlugin(Plugin):
 
 #### 标准动作输出
 
-交互入口或适配器应返回平台可执行的标准动作，而不是直接调用 Telegram API。交互 Bot runtime 统一负责发送、回复与基础动作执行；业务状态和幂等锁由插件自己放在 `ctx.redis`。
+交互入口或适配器应返回平台可执行的标准动作，或通过 `ctx.messages` 缓存这些动作，而不是直接调用 Telegram API。交互 Bot runtime 统一负责发送、回复、删除、置顶、按钮 ACK 与基础动作执行；业务状态和幂等锁由插件自己放在 `ctx.redis`。
 
 ```json
 [
@@ -1554,7 +1563,7 @@ class DemoPlugin(Plugin):
 - 群局插件是否声明了 `interaction_entries[].session_scope = "chat"`；如果漏写，规则设置 `concurrency=user` 后，后续群友消息可能找不到会话。
 - 用户私有流程是否声明了 `session_scope = "user"`，并在插件内部状态 key 中包含用户 ID。
 - worker 是否在线；离线时交互 Bot 会返回“插件启动失败：worker 调用超时”。
-- 日志页搜索 `run_interaction_entry`、`interaction module`、`unsupported type`，未知 action type 会写入 runtime log，便于发现返回了平台尚不支持的动作。
+- 日志页搜索 `run_interaction_entry`、`interaction module`、`unsupported type`、`result_contract`，未知 action type 或越权 `send_via` 会写入 runtime log，便于发现返回了平台尚不支持或未声明的动作。
 
 ### 常见问题
 

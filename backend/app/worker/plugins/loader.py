@@ -1730,6 +1730,7 @@ def get_recent_peers(account_id: int) -> list[dict[str, Any]]:
 
 
 _INTERACTION_SEND_ACTIONS = {"send_message", "send_photo", "send_file"}
+_INTERACTION_CONTROL_ACTIONS = {"delete_message", "pin_message", "answer_callback"}
 _INTERACTION_SEND_VIA = {"interaction_bot", "userbot_reply", "bbot_notice"}
 
 
@@ -1739,7 +1740,7 @@ def _normalize_interaction_action(raw: dict[str, Any]) -> dict[str, Any]:
     action = dict(raw)
     action_type = str(action.get("type") or "").strip()
     action["type"] = action_type
-    if action_type in _INTERACTION_SEND_ACTIONS:
+    if action_type in _INTERACTION_SEND_ACTIONS or action_type in _INTERACTION_CONTROL_ACTIONS:
         send_via = str(action.get("send_via") or "interaction_bot").strip()
         action["send_via"] = send_via if send_via in _INTERACTION_SEND_VIA else "interaction_bot"
     if isinstance(action.get("settlement"), dict):
@@ -1771,12 +1772,22 @@ async def invoke_interaction_entry(
     ctx = state.contexts.get(plugin_key)
     if inst is None or ctx is None:
         raise RuntimeError(f"模块未加载或未启用：{plugin_key}")
-    actions = await inst.on_interaction(ctx, entry_key, dict(payload or {}))
-    if actions is None:
+    from .message_ops import BufferedMessageOps
+
+    previous_messages = ctx.messages
+    buffered_messages = BufferedMessageOps()
+    ctx.messages = buffered_messages
+    try:
+        actions = await inst.on_interaction(ctx, entry_key, dict(payload or {}))
+    finally:
+        ctx.messages = previous_messages
+    if actions is None and not buffered_messages.actions:
         raise RuntimeError(f"模块尚未实现交互入口：{plugin_key}.{entry_key}")
+    if actions is None:
+        actions = []
     if not isinstance(actions, list) or not all(isinstance(item, dict) for item in actions):
         raise TypeError("交互入口必须返回 list[dict] 标准动作")
-    return _normalize_interaction_actions(actions)
+    return _normalize_interaction_actions([*buffered_messages.actions, *actions])
 
 
 __all__ = [

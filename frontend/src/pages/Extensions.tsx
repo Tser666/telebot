@@ -93,6 +93,7 @@ import {
   fetchPluginRepos,
   fetchLocalPlugins,
   fetchRepoPlugins,
+  refreshRepoPlugins,
   installLocalPlugin,
   installFromRepo,
 } from "@/api/pluginRepo";
@@ -545,6 +546,7 @@ function RemoteInstallCard() {
   const [addUrl, setAddUrl] = useState("");
   const [addName, setAddName] = useState("");
   const [expandedRepoId, setExpandedRepoId] = useState<number | null>(null);
+  const [refreshingRepoId, setRefreshingRepoId] = useState<number | null>(null);
 
   // 已保存仓库列表（后端）
   const reposQ = useQuery({ queryKey: PLUGIN_REPOS_QK, queryFn: fetchPluginRepos });
@@ -555,6 +557,22 @@ function RemoteInstallCard() {
     queryKey: ["repo-plugins", expandedRepoId],
     queryFn: () => fetchRepoPlugins(expandedRepoId!),
     enabled: expandedRepoId !== null,
+  });
+
+  const refreshRepoMut = useMutation({
+    mutationFn: async (repoId: number) => {
+      setRefreshingRepoId(repoId);
+      return { repoId, plugins: await refreshRepoPlugins(repoId) };
+    },
+    onSuccess: ({ repoId, plugins }) => {
+      toast.success("插件仓库已刷新");
+      setExpandedRepoId(repoId);
+      qc.setQueryData(["repo-plugins", repoId], plugins);
+      qc.invalidateQueries({ queryKey: REMOTE_QK });
+      qc.invalidateQueries({ queryKey: PLUGINS_QK });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+    onSettled: () => setRefreshingRepoId(null),
   });
 
   // 添加仓库
@@ -676,6 +694,24 @@ function RemoteInstallCard() {
                   <MetaBadge tone="outline" className="shrink-0">
                     {expandedRepoId === repo.id && pluginsQ.isLoading ? "加载中…" : "仓库"}
                   </MetaBadge>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 w-6 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+                    disabled={refreshRepoMut.isPending && refreshingRepoId === repo.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      refreshRepoMut.mutate(repo.id);
+                    }}
+                    aria-label={`刷新插件仓库 ${repo.name || repo.url}`}
+                    title="刷新仓库插件列表"
+                  >
+                    {refreshRepoMut.isPending && refreshingRepoId === repo.id ? (
+                      <Spinner className="h-3.5 w-3.5" />
+                    ) : (
+                      <RefreshCw className="h-3.5 w-3.5" />
+                    )}
+                  </Button>
                   <Button
                     variant="ghost"
                     size="sm"

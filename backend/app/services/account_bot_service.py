@@ -526,6 +526,18 @@ def _entry_events_from_entries(entries: Any, entry_key: str | None) -> list[str]
     return []
 
 
+def _entry_manifest_from_entries(entries: Any, entry_key: str | None) -> dict[str, Any] | None:
+    if not entry_key or not isinstance(entries, list):
+        return None
+    for raw_entry in entries:
+        entry = normalize_interaction_entry_manifest(raw_entry)
+        if entry is None:
+            continue
+        if str(entry.get("key") or "").strip() == entry_key:
+            return entry
+    return None
+
+
 def _entry_has_field_from_entries(entries: Any, entry_key: str | None, field_name: str) -> bool | None:
     if not entry_key or not isinstance(entries, list):
         return None
@@ -650,6 +662,27 @@ def declared_module_entry_events(module_key: str | None, module_action: str | No
     except Exception:  # noqa: BLE001
         log.debug("读取 installed 模块交互入口事件失败: %s.%s", module_key, module_action, exc_info=True)
     return []
+
+
+def declared_module_entry_manifest(module_key: str | None, module_action: str | None) -> dict[str, Any] | None:
+    """返回交互入口的规范化声明；未知入口返回 None 以保留旧配置兼容。"""
+
+    if not module_key or not module_action:
+        return None
+    try:
+        manifest = BUILTIN_FEATURES.manifest_for(module_key)
+        entry = _entry_manifest_from_entries(getattr(manifest, "interaction_entries", None), module_action)
+        if entry:
+            return entry
+    except Exception:  # noqa: BLE001
+        log.debug("读取 builtin 模块交互入口声明失败: %s.%s", module_key, module_action, exc_info=True)
+    try:
+        entry = _entry_manifest_from_entries(_plugin_json_interaction_entries(module_key), module_action)
+        if entry:
+            return entry
+    except Exception:  # noqa: BLE001
+        log.debug("读取 installed 模块交互入口声明失败: %s.%s", module_key, module_action, exc_info=True)
+    return None
 
 
 def declared_module_entry_has_field(module_key: str | None, module_action: str | None, field_name: str) -> bool | None:

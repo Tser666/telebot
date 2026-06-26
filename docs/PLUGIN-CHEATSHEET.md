@@ -6,7 +6,8 @@
 - `__init__.py` 导出 `PLUGIN_CLASS` 和 `MANIFEST`。
 - `Manifest.key` 要和插件类 `key` 一致。
 - `permissions` 不写就不会注入对应能力。
-- `ctx.client` 是主运行入口；远程插件拿到的是受限 `SandboxClient`。
+- `ctx.client` 是常规命令和高级兼容入口；远程插件拿到的是受限 `SandboxClient`。
+- 交互入口优先用 `ctx.messages`，它只生成标准动作，不直接调用 Telegram API。
 - `ctx.http` 需要 `external_http` + `allowed_hosts`。
 - `ctx.ai` 需要 `ai_text`，细节见 `docs/PLUGIN-AI.md`。
 - `command` 只保存裸指令名，不保存前缀。
@@ -18,8 +19,9 @@
 - `on_interaction` 用于交互 Bot，按 `entry_key` 和 `payload["event"]["type"]` 分流。
 - `interaction_entries[].launch_mode` 必填：`bridge` 走交互 Bot，`direct` 走原命令/内部调用，`hybrid` 两边都支持。
 - 常见事件：`payment_confirmed`、`keyword`、`message`、`callback_query`、`session_close`。
-- 常见动作：`send_message`、`send_photo`、`send_file`、`end_session`。
+- 常见动作：`send_message`、`send_photo`、`send_file`、`delete_message`、`pin_message`、`answer_callback`、`end_session`。
 - `send_message.reply_markup` 可用于 inline keyboard；按钮点击会作为 `callback_query` 事件回到同一活跃会话。
+- 按钮回调用 `ctx.messages.answer_callback(...)`，不要在插件里直接拼 Bot API。
 - `interaction_entries[].session_scope` 必填：群局写 `chat`，个人流程写 `user`，一次性动作写 `none`。
 - `interaction_entries[].events` 是事件白名单，别让插件自己猜会收到什么。
 - 交互 payload 优先看 `source`、`actor`、`source_actor`、`payment`、`player`、`reply_to`、`trigger`、`session` 信封；旧平铺字段只做兼容。
@@ -31,8 +33,10 @@
 - `session_policy` 写 TTL、重复触发、关闭条件；插件内部状态 key 要和 `session_scope` 对齐。
 - `payload_contract` 描述输入要求，`result_contract` 描述允许动作和 `send_via` 白名单。
 - `send_via` 只能用白名单值；默认只允许 `interaction_bot`。
+- 声明了 `result_contract.actions` 时，运行时会丢弃未声明动作；越权 `send_via` 会写 runtime log。
 - 常见 `send_via`：`interaction_bot`、`userbot_reply`、`bbot_notice`。
 - `userbot_reply` 由账号 worker 的 userbot 代发，不是插件自由选择发送者。
+- `userbot_reply` 不承接 `reply_markup`，平台会移除按钮；按钮只走 `interaction_bot` 或 `bbot_notice`。
 - `settlement` 只描述中奖/奖金/对账结果，交互 Bot 不直接执行钱相关动作。
 - `preserve_command_trigger=true` 是硬规则；加交互入口不能影响插件原有命令触发。
 - `command_fallback` 只能提示或受控回退，不能让普通 incoming 消息直接进入 `on_command`。

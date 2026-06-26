@@ -35,6 +35,15 @@ export async function fetchRepoPlugins(
   return data;
 }
 
+export async function refreshRepoPlugins(
+  repoId: number,
+): Promise<PluginRepoPlugin[]> {
+  const { data } = await api.post<PluginRepoPlugin[]>(
+    `${BASE}/${repoId}/refresh`,
+  );
+  return data;
+}
+
 export async function installFromRepo(
   repoId: number,
   pluginName: string,

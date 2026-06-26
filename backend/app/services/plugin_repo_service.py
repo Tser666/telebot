@@ -194,7 +194,10 @@ def _version_tuple(raw: str | None) -> tuple[int, ...]:
 
 
 async def list_plugins_in_repo(
-    db: AsyncSession, repo_id: int
+    db: AsyncSession,
+    repo_id: int,
+    *,
+    force_refresh: bool = False,
 ) -> list[PluginRepoPlugin]:
     """列出 ``plugin_repo[id]`` 仓库内所有可装插件。
 
@@ -207,7 +210,7 @@ async def list_plugins_in_repo(
     """
     row = await _get_repo(db, repo_id)
 
-    repo_dir = await _ensure_repo_cached(row.url)
+    repo_dir = await _ensure_repo_cached(row.url, force_refresh=force_refresh)
     raw = _scan_plugins(repo_dir)
 
     installed_rows = (

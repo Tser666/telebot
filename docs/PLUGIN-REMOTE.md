@@ -217,7 +217,7 @@ guess_number/
 
 付费触发是“双证据”模型：UserBot/回复上下文用于补充付款玩家 `user_id`，可信转账通知 Bot 用于确认真实到账、金额和收款人。余额不足、只发送 `+1000` 但没有转账通知时，平台不会生成 `payment_confirmed`。如果转账通知只有付款人名称，独玩或按钮玩法应声明 `participant_policy=solo_owner`，平台会要求付款人点击确认后再启动，避免把转账通知 Bot 误当玩家。
 
-插件返回动作时必须遵守 `result_contract`。`send_via` 是发送者白名单，常见值只有：
+插件返回动作时必须遵守 `result_contract`。新插件推荐通过 `ctx.messages` 生成标准动作；它不会暴露 Bot Token，也不会直接调用 Telegram API。`send_via` 是发送者白名单，常见值只有：
 
 | send_via | 说明 |
 | --- | --- |
@@ -225,7 +225,7 @@ guess_number/
 | `userbot_reply` | 当前账号的 userbot 由 worker 代发指定消息 |
 | `bbot_notice` | 通知 Bot 发公告、命中和对账提示 |
 
-未声明 `result_contract.send_via` 时按最小权限处理，只允许 `interaction_bot`。涉及奖金、补发、转账、催付的插件要写 `settlement`，但 `settlement` 只能描述结果和对账字段，不能让交互 Bot 直接拥有发奖权限。钱相关动作仍应由账号 worker 的 userbot 代发或由平台受控结算流程处理。
+未声明 `result_contract.send_via` 时按最小权限处理，只允许 `interaction_bot`。声明了 `result_contract.actions` 时，运行时会丢弃未声明动作；越权 `send_via` 会写入 runtime log。`reply_markup` 只由 `interaction_bot` / `bbot_notice` 承接，`userbot_reply` 会被平台移除按钮。涉及奖金、补发、转账、催付的插件要写 `settlement`，但 `settlement` 只能描述结果和对账字段，不能让交互 Bot 直接拥有发奖权限。钱相关动作仍应由账号 worker 的 userbot 代发或由平台受控结算流程处理。
 
 交互入口不得影响原有命令触发。远程插件可以把业务逻辑抽成共享函数，但 `commands`、`on_command`、`message_channels`、`on_message` 的既有语义必须保持；普通群成员 incoming 消息不能因为 `launch_mode=bridge/hybrid` 或 `command_fallback` 就直接进入 `on_command`。
 

@@ -326,10 +326,13 @@
 - `send_message`
 - `send_photo`
 - `send_file`
+- `delete_message`
+- `pin_message`
+- `answer_callback`
 - `result`
 - `end_session`
 
-`send_message` 可携带 Bot API `reply_markup`（inline keyboard）。按钮点击会以 `callback_query` 事件回到对应活跃会话，payload 会同时包含 `callback_query_id`、`callback_data` 和原按钮消息的 `message_id` / `message_text`。
+`send_message` 可携带 Bot API `reply_markup`（inline keyboard）。按钮点击会以 `callback_query` 事件回到对应活跃会话，payload 会同时包含 `callback_query_id`、`callback_data` 和原按钮消息的 `message_id` / `message_text`。新插件推荐用 `ctx.messages.send/edit/delete/pin/answer_callback` 生成这些动作，而不是直接调用 Bot API。
 
 ### 7.1 标准动作与发送通道
 
@@ -348,6 +351,8 @@
 这里的关键点是：
 
 > `send_via` 是“平台允许的发送通道”，不是“插件自由指定任何发送者”的能力。
+
+运行时会按 `result_contract` 执行守卫：未声明 `send_via` 时只允许 `interaction_bot`；声明了 `actions` 时，未声明动作会被丢弃；`reply_markup` 只透传给 `interaction_bot` / `bbot_notice`，不会交给 `userbot_reply`。
 
 ## 7.2 结果与结算分离
 

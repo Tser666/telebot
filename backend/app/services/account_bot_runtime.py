@@ -1976,6 +1976,7 @@ async def _close_active_interaction_games(incoming: Incoming, target_rule: dict[
                     payload=payload,
                 )
                 if ok and actions:
+                    actions = await _guard_interaction_actions(incoming, rule, actions)
                     await _apply_interaction_actions(
                         incoming,
                         actions,
@@ -2713,12 +2714,13 @@ async def _try_handle_interaction_module_message(db: Any, incoming: Incoming) ->
                 await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "")
                 return True
             continue
+        actions = await _guard_interaction_actions(incoming, rule, actions)
         await _apply_interaction_actions(
             incoming,
             actions,
             context=_interaction_trace_context(payload),
         )
-        if is_callback:
+        if is_callback and not _interaction_actions_answer_callback(actions):
             await account_bot_service.answer_callback(incoming.token, incoming.callback_id or "")
         if _interaction_actions_request_no_session(actions):
             await _clear_loaded_interaction_session(
@@ -3319,12 +3321,17 @@ def _interaction_trace_context(payload: dict[str, Any] | None) -> dict[str, Any]
     }
 
 
-_INTERACTION_CONTROL_ACTIONS = {"end_session", "close_session", "no_session"}
+_INTERACTION_SESSION_CONTROL_ACTIONS = {"end_session", "close_session", "no_session"}
 _INTERACTION_SEND_VIA = {"interaction_bot", "userbot_reply", "bbot_notice"}
+_INTERACTION_BUTTON_CHANNELS = {"interaction_bot", "bbot_notice"}
 
 
 def _interaction_actions_request_no_session(actions: list[dict[str, Any]]) -> bool:
-    return any(str(action.get("type") or "").strip() in _INTERACTION_CONTROL_ACTIONS for action in actions)
+    return any(str(action.get("type") or "").strip() in _INTERACTION_SESSION_CONTROL_ACTIONS for action in actions)
+
+
+def _interaction_actions_answer_callback(actions: list[dict[str, Any]]) -> bool:
+    return any(str(action.get("type") or "").strip() == "answer_callback" for action in actions)
 
 
 def _interaction_actions_mark_success(actions: list[dict[str, Any]]) -> bool:
@@ -3341,6 +3348,76 @@ def _interaction_actions_mark_success(actions: list[dict[str, Any]]) -> bool:
 def _interaction_action_send_via(action: dict[str, Any]) -> str:
     send_via = str(action.get("send_via") or "interaction_bot").strip()
     return send_via if send_via in _INTERACTION_SEND_VIA else "interaction_bot"
+
+
+def _interaction_entry_result_contract(rule: dict[str, Any]) -> dict[str, Any]:
+    module_key = str(rule.get("module_key") or "").strip() or None
+    entry_key = str(rule.get("module_action") or "").strip() or None
+    entry = account_bot_service.declared_module_entry_manifest(module_key, entry_key)
+    contract = entry.get("result_contract") if isinstance(entry, dict) else None
+    return dict(contract) if isinstance(contract, dict) else {}
+
+
+async def _guard_interaction_actions(
+    incoming: Incoming,
+    rule: dict[str, Any],
+    actions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    contract = _interaction_entry_result_contract(rule)
+    raw_actions = contract.get("actions")
+    allowed_actions = (
+        {str(item or "").strip() for item in raw_actions if str(item or "").strip()}
+        if isinstance(raw_actions, list)
+        else set()
+    )
+    raw_send_via = contract.get("send_via")
+    allowed_send_via = (
+        {str(item or "").strip() for item in raw_send_via if str(item or "").strip() in _INTERACTION_SEND_VIA}
+        if isinstance(raw_send_via, list)
+        else set()
+    ) or {"interaction_bot"}
+    guarded: list[dict[str, Any]] = []
+    for raw_action in actions:
+        if not isinstance(raw_action, dict):
+            continue
+        action = dict(raw_action)
+        action_type = str(action.get("type") or "").strip()
+        if allowed_actions and action_type not in allowed_actions:
+            await _write_interaction_runtime_log(
+                incoming,
+                "warn",
+                f"interaction action blocked by result_contract.actions: {action_type}",
+                action_type=action_type,
+                allowed_actions=sorted(allowed_actions),
+                **_interaction_log_context(incoming),
+            )
+            continue
+        if action_type in {"send_message", "send_photo", "send_file", "delete_message", "pin_message"}:
+            send_via = _interaction_action_send_via(action)
+            if send_via not in allowed_send_via:
+                await _write_interaction_runtime_log(
+                    incoming,
+                    "warn",
+                    f"interaction action blocked by result_contract.send_via: {send_via}",
+                    action_type=action_type,
+                    send_via=send_via,
+                    allowed_send_via=sorted(allowed_send_via),
+                    **_interaction_log_context(incoming),
+                )
+                continue
+            action["send_via"] = send_via
+            if send_via not in _INTERACTION_BUTTON_CHANNELS and "reply_markup" in action:
+                action.pop("reply_markup", None)
+                await _write_interaction_runtime_log(
+                    incoming,
+                    "info",
+                    "interaction action reply_markup stripped for non-bot channel",
+                    action_type=action_type,
+                    send_via=send_via,
+                    **_interaction_log_context(incoming),
+                )
+        guarded.append(action)
+    return guarded
 
 
 async def _resolve_interaction_action_token(incoming: Incoming, send_via: str) -> str | None:
@@ -3540,7 +3617,7 @@ async def _apply_interaction_actions(
             action["context"] = dict(context)
         action_type = str(action.get("type") or "").strip()
         await _record_interaction_settlement(incoming, action)
-        if action_type in _INTERACTION_CONTROL_ACTIONS or action_type == "result":
+        if action_type in _INTERACTION_SESSION_CONTROL_ACTIONS or action_type == "result":
             continue
         if action_type == "settlement":
             continue
@@ -3549,6 +3626,41 @@ async def _apply_interaction_actions(
         send_via = _interaction_action_send_via(action)
         raw_reply_markup = action.get("reply_markup")
         reply_markup = raw_reply_markup if isinstance(raw_reply_markup, dict) else None
+        if action_type == "answer_callback":
+            callback_query_id = str(action.get("callback_query_id") or incoming.callback_id or "").strip()
+            if callback_query_id:
+                await account_bot_service.answer_callback(
+                    incoming.token,
+                    callback_query_id,
+                    text=str(action.get("text") or ""),
+                    show_alert=bool(action.get("show_alert")),
+                )
+            continue
+        if action_type == "delete_message":
+            message_id = _int_or_none(action.get("message_id"))
+            if send_via == "interaction_bot":
+                await _delete_interaction_placeholder(incoming, message_id)
+            continue
+        if action_type == "pin_message":
+            message_id = _int_or_none(action.get("message_id"))
+            if send_via == "interaction_bot" and message_id is not None and incoming.chat_id is not None:
+                token = await _resolve_interaction_action_token(incoming, send_via)
+                if token:
+                    try:
+                        await account_bot_service.call_bot_api(
+                            token,
+                            "pinChatMessage",
+                            {"chat_id": incoming.chat_id, "message_id": message_id},
+                        )
+                    except Exception:  # noqa: BLE001
+                        log.debug(
+                            "interaction action pin message failed aid=%s chat_id=%s message_id=%s",
+                            incoming.account_id,
+                            incoming.chat_id,
+                            message_id,
+                            exc_info=True,
+                        )
+            continue
         if action_type == "send_message":
             text = str(action.get("text") or "").strip()
             if not text:
@@ -3671,6 +3783,7 @@ async def _run_interaction_module(
             f"模块启动失败：{account_bot_service.html_text(error or f'{module_key}.{entry_key} 不可用')}",
         )
         return False, False
+    actions = await _guard_interaction_actions(incoming, rule, actions)
     keep_session = not _interaction_actions_request_no_session(actions)
     await _apply_interaction_actions(
         incoming,

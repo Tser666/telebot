@@ -9,6 +9,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   Boxes,
+  Bot,
   Cog,
   Github,
   Home,
@@ -38,13 +39,14 @@ interface NavItem {
 const NAV: NavItem[] = [
   { to: "/", label: "概览", icon: Home, end: true },
   { to: "/plugins", label: "插件", icon: Boxes },
+  { to: "/interaction", label: "交互", icon: Bot },
   { to: "/ai", label: "AI", icon: Sparkles },
   { to: "/logs", label: "日志", icon: ScrollText },
   { to: "/settings", label: "系统", icon: Cog },
 ];
 
 export const MOBILE_PRIMARY_NAV: NavItem[] = NAV.filter(
-  (item) => item.to === "/" || item.to === "/plugins" || item.to === "/ai" || item.to === "/logs" || item.to === "/settings",
+  (item) => item.to === "/" || item.to === "/plugins" || item.to === "/interaction" || item.to === "/ai" || item.to === "/logs" || item.to === "/settings",
 );
 
 function NavList({

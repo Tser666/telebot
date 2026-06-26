@@ -18,6 +18,8 @@ from typing import Any
 
 from telethon import TelegramClient, events
 
+from .message_ops import BufferedMessageOps
+
 
 def _clean_text(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
@@ -101,6 +103,7 @@ class PluginContext:
     scheduler: Any = None  # SchedulerFacade
     http: Any = None  # PluginHTTP
     ai: Any = None  # PluginAI
+    messages: BufferedMessageOps | None = None
     generation: int = 0
     account_proxy_url: str | None = None
 
@@ -207,6 +210,11 @@ class Plugin:
         - 可选 ``send_via``，默认由交互 Bot 发送；``userbot_reply`` 表示由账号 worker 的 userbot 代发
         - ``end_session`` / ``close_session`` / ``no_session`` / ``result``
         - 可选 ``settlement``，供平台记录和后续结算
+
+        新插件可优先使用 ``ctx.messages`` 生成受控消息动作，例如
+        ``await ctx.messages.send(channel="interaction_bot", chat_id=..., text="...")``。
+        这些动作不会直接调用 Bot API 或 Telethon，而是随本 hook 的返回结果交给
+        平台统一校验、限流、审计和发送。
         """
         return None
 

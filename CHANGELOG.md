@@ -2,9 +2,15 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与 [SemVer](https://semver.org/lang/zh-CN/)：MAJOR.MINOR.PATCH。
 
-- **MAJOR**：破坏兼容的数据库迁移、配置格式变更、API 路径或语义不兼容、老版本无法平滑升级。
-- **MINOR**：用户可感知的新能力、主要入口/信息架构重组、后端能力完整前端化、新插件或重要工作流变化。
-- **PATCH**：bug 修复、文案、小 UI、错误提示、测试补充、兼容性补丁和不改变主要用户路径的小调整。
+- **MAJOR（主版本）**：破坏兼容的数据库迁移、配置格式变更、API 路径或语义不兼容、老版本无法平滑升级。
+- **MINOR（次版本）**：用户可感知的新能力、主要入口/信息架构重组、后端能力完整前端化、新插件或重要工作流变化。
+- **PATCH（补丁版本）**：bug 修复、文案、小 UI、错误提示、测试补充、兼容性补丁和不改变主要用户路径的小调整。
+
+0.x 阶段额外约定：
+
+- **0.X.0** 表示一个阶段性能力版本，例如交互框架、部署体验、插件系统、主入口重组等可命名的一批能力。
+- **0.X.Y** 表示同一阶段内的修复、体验补丁、文档补充、兼容性更新或测试补齐。
+- 不再把第三位当作每日流水号；不再使用 `feature` / `fix` / `polish` / `hotfix` / `refactor` 作为版本级别，正式段落统一写 `minor（次版本）` 或 `patch（补丁版本）`。
 
 > 不要为每个微小提交单独迭代版本号。开发过程中先把变更积累在 `Unreleased`；只有准备发布、推送稳定检查点、创建 release/PR，或用户明确要求“推一版/发一版”时，才按本批改动的最高影响级别统一 bump 一次版本号。
 >
@@ -14,7 +20,28 @@
 
 ## [Unreleased]
 
-## [0.32.0] — 2026-06-27 · minor · 交互玩法身份与参与者策略
+## [0.33.0] — 2026-06-27 · minor（次版本） · TelePilot 交互框架与部署体验收口
+
+### Added
+- 新增独立「交互框架」工作台页面，作为 TelePilot 内部与 AI 并列的重要框架入口，集中展示事件渠道、插件入口、动作契约和发送通道。
+- 新增插件交互消息 facade：`ctx.messages.send/edit/delete/pin/answer_callback`，插件可生成平台标准动作，由 TelePilot 统一校验、审计和发送，不再需要每个插件自己拼普通 Bot API。
+- 交互 runtime 支持 `answer_callback`、`delete_message`、`pin_message` 标准动作，并避免插件已 ACK 按钮后再次自动发送空 ACK。
+- 交互入口新增 `result_contract` 运行时守卫：未声明 `send_via` 时默认只允许 `interaction_bot`；显式声明 `actions` 时丢弃未声明动作；`userbot_reply` 自动移除 `reply_markup`，避免按钮发到无法承接回调的通道。
+- 远程插件仓库新增刷新接口与前端刷新按钮，可在插件页直接刷新原创插件库列表。
+- 新增生产 Docker Compose 初始化脚本 `scripts/init-prod-env.sh`，可自动生成 `MASTER_KEY`、`JWT_SECRET`、`POSTGRES_PASSWORD` 和 `.env`，减少首次部署手工配置。
+
+### Changed
+- Docker Compose 快速部署文档改为 `./scripts/init-prod-env.sh` 后直接 `docker compose up -d --build`，并新增 `make init-prod-env`。
+- 插件交互开发指南把 `ctx.client` 定位为常规命令与高级兼容入口，交互入口推荐使用 TelePilot 的事件信封和 `ctx.messages`。
+
+### Tests
+- 补充 `ctx.messages` 标准动作缓存、`result_contract.send_via` 守卫和 `userbot_reply` 按钮剥离的单元测试。
+
+### Docs
+- 明确 0.x 阶段版本号规则：`0.X.0` 表示阶段能力版本，`0.X.Y` 表示同阶段补丁；版本级别使用中英并列口径。
+- 更新插件 API 参考、速查表、远程插件规范、安全边界和交互 Bot 优化方案，补齐事件信封、按钮回调、发送通道、契约守卫和旧动作列表到 `ctx.messages` 的迁移路径。
+
+## [0.32.0] — 2026-06-27 · minor（次版本） · 交互玩法身份与参与者策略
 
 ### Fixed
 - 付费玩法新增 `payment` / `player` / `source_actor` 标准信封，明确区分到账证据、真实玩家和消息来源；独玩/按钮玩法缺少真实付款人 ID 时会先要求付款人点击确认，避免把未到账的 `+金额` 或转账通知 Bot 当成玩家。
@@ -22,7 +49,7 @@
 ### Docs
 - 更新插件开发指南、远程插件规范和联动 Bot 优化方案，补充 `participant_policy`、双证据支付模型和 `payment_confirmed` 身份绑定规则。
 
-## [0.31.6] — 2026-06-26 · patch · 交互玩法运行时增强
+## [0.31.6] — 2026-06-26 · patch（补丁版本） · 交互玩法运行时增强
 
 ### Added
 - `_apply_interaction_actions` 新增通用 `send_message` 扩展字段：`edit_message_id`（插件指定编辑目标消息）、`pin`（发送后置顶，默认不置顶）、`save_message_id_key`（发送后将 message_id 写入 Redis 供后续编辑）。

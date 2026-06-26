@@ -22,6 +22,7 @@ from app.worker import runtime as worker_runtime
 from app.worker.plugins import loader as plugin_loader
 from app.worker.plugins.builtin.chatgpt_image.manifest import MANIFEST as CHATGPT_IMAGE_MANIFEST
 from app.worker.plugins.builtin.codex_image.manifest import MANIFEST as CODEX_IMAGE_MANIFEST
+from app.worker.plugins.message_ops import BufferedMessageOps
 
 
 class _MemoryRedis:
@@ -139,6 +140,99 @@ def test_bot_polling_conflict_error_mentions_role() -> None:
     assert "管理 Bot polling 冲突" in management
     assert "交互 Bot polling 冲突" in interaction
     assert "Bbot token" in interaction
+
+
+@pytest.mark.asyncio
+async def test_message_ops_buffers_standard_actions() -> None:
+    ops = BufferedMessageOps()
+
+    await ops.send(channel="interaction_bot", chat_id=-100, text="题面", reply_markup={"inline_keyboard": []})
+    await ops.answer_callback(callback_query_id="cb-1", text="收到")
+    await ops.delete(message_id=42)
+
+    assert [item["type"] for item in ops.actions] == ["send_message", "answer_callback", "delete_message"]
+    assert ops.actions[0]["send_via"] == "interaction_bot"
+    assert ops.actions[0]["reply_markup"] == {"inline_keyboard": []}
+    assert ops.actions[1]["callback_query_id"] == "cb-1"
+
+
+@pytest.mark.asyncio
+async def test_interaction_result_contract_blocks_undeclared_channel(monkeypatch) -> None:
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="123:token",
+        update_id=10,
+        user_id=20,
+        chat_id=-100,
+        message_id=30,
+        text="",
+    )
+    rule = {"module_key": "demo", "module_action": "start"}
+    logs: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        account_bot_service,
+        "declared_module_entry_manifest",
+        lambda *_args: {
+            "result_contract": {
+                "actions": ["send_message", "answer_callback"],
+                "send_via": ["interaction_bot"],
+            },
+        },
+    )
+
+    async def _fake_log(_incoming, level, message, **detail):  # noqa: ANN001
+        logs.append({"level": level, "message": message, **detail})
+
+    monkeypatch.setattr(account_bot_runtime, "_write_interaction_runtime_log", _fake_log)
+
+    guarded = await account_bot_runtime._guard_interaction_actions(
+        incoming,
+        rule,
+        [
+            {"type": "send_message", "send_via": "userbot_reply", "text": "blocked"},
+            {"type": "send_message", "send_via": "interaction_bot", "text": "ok"},
+            {"type": "delete_message", "message_id": 30},
+        ],
+    )
+
+    assert guarded == [{"type": "send_message", "send_via": "interaction_bot", "text": "ok"}]
+    assert any("send_via" in str(item["message"]) for item in logs)
+    assert any("actions" in str(item["message"]) for item in logs)
+
+
+@pytest.mark.asyncio
+async def test_interaction_result_contract_strips_buttons_from_userbot_reply(monkeypatch) -> None:
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="123:token",
+        update_id=10,
+        user_id=20,
+        chat_id=-100,
+        message_id=30,
+        text="",
+    )
+    monkeypatch.setattr(
+        account_bot_service,
+        "declared_module_entry_manifest",
+        lambda *_args: {"result_contract": {"send_via": ["interaction_bot", "userbot_reply"]}},
+    )
+    monkeypatch.setattr(account_bot_runtime, "_write_interaction_runtime_log", AsyncMock())
+
+    guarded = await account_bot_runtime._guard_interaction_actions(
+        incoming,
+        {"module_key": "demo", "module_action": "start"},
+        [
+            {
+                "type": "send_message",
+                "send_via": "userbot_reply",
+                "text": "ok",
+                "reply_markup": {"inline_keyboard": []},
+            },
+        ],
+    )
+
+    assert guarded == [{"type": "send_message", "send_via": "userbot_reply", "text": "ok"}]
 
 
 def test_account_bot_token_payload_trims_whitespace() -> None:

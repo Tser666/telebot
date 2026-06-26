@@ -37,6 +37,15 @@ VPS 上自己用：
 curl -fsSL https://raw.githubusercontent.com/Anoyou/telebot/main/scripts/install-server.sh | bash
 ```
 
+如果你已经有 Docker，也可以用两条命令生成生产 `.env` 并启动：
+
+```bash
+./scripts/init-prod-env.sh
+docker compose up -d --build
+```
+
+后续账号、API ID / Hash、Bot Token、AI Provider、插件和交互规则都在 Web 面板里配置。只有加密主密钥、数据库密码、端口和 HTTPS 这类启动前必需项留在 `.env`。
+
 如果你不想全套 Docker，或者已经有自己的 PostgreSQL / Redis，往下看“详细启动方式”。
 
 <details>
@@ -157,8 +166,8 @@ flowchart LR
 | --- | --- | --- |
 | 只是本机试用 / 开发 | `make up` | 有 Docker Desktop / Docker Engine，想先跑起来看看 |
 | VPS 上自己用 | 一条命令安装 | Ubuntu / Debian 服务器，想少配一点东西 |
-| 已有 Docker / Docker Compose | 最轻量 Docker Compose | 想从 GitHub 克隆后只改最少 `.env` 就启动 |
-| 已经克隆仓库 | `make prod-up` | 熟悉一点命令行，想自己控制 `.env` |
+| 已有 Docker / Docker Compose | `./scripts/init-prod-env.sh` + `docker compose up -d --build` | 想从 GitHub 克隆后尽快跑起来 |
+| 已经克隆仓库 | `make init-prod-env` + `make prod-up` | 熟悉一点命令行，想用项目脚本启动 |
 | 不想全套 Docker | 源码混合运行 | 已有 PostgreSQL / Redis，或只想 Docker 跑数据库 |
 
 ### 1. 准备 Telegram API 凭据
@@ -215,30 +224,20 @@ curl -fsSL https://raw.githubusercontent.com/Anoyou/telebot/main/scripts/install
 
 ### 4. 最轻量 Docker Compose
 
-如果你已经有 Docker 和 Docker Compose，只想从 GitHub 克隆后尽快跑起来，可以只写一个很小的 `.env`：
+如果你已经有 Docker 和 Docker Compose，只想从 GitHub 克隆后尽快跑起来：
 
 ```bash
 git clone https://github.com/Anoyou/telebot telepilot
 cd telepilot
 
-cat > .env <<'EOF'
-MASTER_KEY=粘贴下面 Fernet 命令生成的结果
-JWT_SECRET=粘贴下面 secrets 命令生成的结果
-POSTGRES_USER=telepilot
-POSTGRES_PASSWORD=替换成数据库强密码
-POSTGRES_DB=telepilot
-WEB_PORT_PUBLISH=8080
-COOKIE_SECURE=false
-EOF
-
+./scripts/init-prod-env.sh
 docker compose up -d --build
 ```
 
-生成两个密钥：
+脚本会生成生产可用 `.env`，包括 `MASTER_KEY`、`JWT_SECRET`、`POSTGRES_PASSWORD`、`WEB_PORT_PUBLISH=8080` 和保守的内存参数。想改端口：
 
 ```bash
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-python -c "import secrets; print(secrets.token_urlsafe(64))"
+./scripts/init-prod-env.sh --port 8088
 ```
 
 这几个字段的含义：
@@ -291,8 +290,7 @@ python -c "import secrets; print(secrets.token_urlsafe(64))"
 ### 5. 已克隆仓库的生产部署
 
 ```bash
-cp .env.example .env
-# 至少修改 MASTER_KEY / JWT_SECRET / POSTGRES_PASSWORD
+make init-prod-env
 make prod-up
 ```
 
