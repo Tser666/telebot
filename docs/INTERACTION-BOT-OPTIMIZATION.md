@@ -578,38 +578,38 @@
 9. 使用 inline keyboard 时必须声明 `callback_query` 事件，并通过 `send_message.reply_markup` 返回按钮。
 10. 业务逻辑可抽共享函数，UserBot 命令与交互入口共同调用。
 
-## 12. 迁移步骤
+## 12. 迁移步骤与 0.33 落地状态
 
 ### 阶段 1：平台契约收口
 
-- 统一 payload 信封
-- 统一动作结果
-- 统一 `send_via` 白名单
-- 统一 `settlement` 结构
+- 已落地统一 payload 信封。
+- 已落地统一动作结果。
+- 已落地 `result_contract.actions` 与 `result_contract.send_via` 运行时守卫。
+- 已落地 `settlement` 结构化记录。
 
 ### 阶段 2：插件声明升级
 
-- 先升级内置互动插件
-- 再升级已验证的 installed / 远程互动插件
-- 历史入口名仅保留必要兼容
+- 内置互动插件已按 `interaction_entries` 暴露入口。
+- 已验证的 installed 互动插件通过 `scripts/validate-installed-interaction-plugins.py` 做契约对齐检查。
+- 历史入口名仅保留必要兼容，新入口推荐 `start_<plugin_key>`。
 
-### 阶段 3：前端规则编辑器重构
+### 阶段 3：前端交互框架入口
 
-- 把平台通用项与插件入口项分层
-- 技术字段折叠
-- 入口参数动态渲染
-- 移动端单列友好布局
+- 已新增独立「交互框架」顶级页面，和 AI 一样作为 TelePilot 内的重要框架入口。
+- 账号规则页继续承载具体规则配置，交互框架页负责解释事件渠道、插件入口、动作契约和发送通道。
+- 远程插件仓库已支持在插件页直接刷新列表。
 
-### 阶段 4：赢家与结算链路稳定化
+### 阶段 4：动作执行与结算链路稳定化
 
-- 平台统一记录 `feature_key + entry_key + session_key + trace_id`
-- 自动发奖与人工补发统一读取结构化 `result/settlement`
+- `app.services.interaction.contracts` 负责动作契约守卫。
+- `app.services.interaction.delivery.InteractionDeliveryExecutor` 负责发送、编辑、删除、置顶、按钮 ACK、媒体发送和 message_id 保存。
+- 自动发奖与人工补发继续读取结构化 `result/settlement`，交互 Bot 不直接执行钱相关动作。
 
 ### 阶段 5：同步插件仓规范
 
-- 更新 `telebot-plugins` 仓库模板
-- 提供一份“交互插件最小骨架”
-- 提供一份兼容清单
+- 插件 API 参考、速查表、远程插件规范、安全边界和本文已同步 `ctx.messages`、按钮回调、发送通道和契约守卫。
+- `examples/plugins/with_interaction` 作为最小交互插件骨架继续由校验脚本覆盖。
+- installed 插件兼容清单由 `scripts/validate-installed-interaction-plugins.py` 自动发现并校验。
 
 ## 13. 验收标准
 
@@ -626,14 +626,15 @@
 5. 交互 Bot 不直接执行钱相关动作；
 6. 移动端宽度下规则页无重叠、无不可读表单。
 
-## 14. 当前仓库状态与后续建议
+## 14. 当前仓库状态
 
-按当前仓库进度，这套方案并不是从零开始：
+截至 0.33.0，这套方案已经从“交互 Bot 功能块”收口为 TelePilot 的交互框架：
 
-- 平台已经开始采用统一输入信封；
-- 内置 `game24` / `math10` 已开始返回结构化结果；
-- 运行时已经支持 `userbot_reply`；
-- 前端规则页已经开始按 `interaction_entries` 动态渲染入口参数；
-- `interaction_profile` 已开始进入 Manifest / API / 前端类型体系。
+- 平台采用统一输入信封；
+- 插件可通过 `ctx.messages` 生成受控动作；
+- 运行时按 `result_contract` 守卫动作类型和发送通道；
+- delivery executor 已从账号 Bot 大 runtime 中拆出；
+- 前端已有独立交互框架页；
+- 插件开发文档已经同步最新框架和迁移路径。
 
-接下来最重要的不是再造一套新系统，而是继续把这套契约补齐、测试补齐、文档补齐，并同步到插件仓规范中。
+后续版本可以继续增强可观测性、发奖工作流和更多玩法模板，但不再需要推翻这套框架。

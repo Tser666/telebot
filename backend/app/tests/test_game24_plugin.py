@@ -13,6 +13,7 @@ from app.worker.plugins.base import PluginContext
 from app.worker.plugins.builtin.game24 import plugin as game24_plugin
 from app.worker.plugins.builtin.game24.manifest import MANIFEST
 from app.worker.plugins.builtin.game24.plugin import Game24Plugin, GameState, check_answer
+from app.worker.plugins.message_ops import BufferedMessageOps
 
 
 class _Redis:
@@ -180,6 +181,62 @@ async def test_game24_on_interaction_handles_three_event_types(monkeypatch) -> N
     assert close_actions == []
     state = json.loads(redis.data[state_key])
     assert state["active"] is False
+
+
+@pytest.mark.asyncio
+async def test_game24_on_interaction_buffers_visible_messages_with_message_ops(monkeypatch) -> None:
+    monkeypatch.setattr(game24_plugin, "generate_24_puzzle", lambda: [1, 5, 5, 5])
+    redis = _Redis()
+    messages = BufferedMessageOps()
+    plugin = Game24Plugin()
+    ctx = PluginContext(account_id=1, feature_key="game24", redis=redis, log=AsyncMock(), messages=messages)
+
+    start_actions = await plugin.on_interaction(
+        ctx,
+        "start_paid_game",
+        {"event_type": "keyword", "chat_id": -100123, "prize": 888, "valid_seconds": 120},
+    )
+
+    assert start_actions == []
+    assert messages.actions == [
+        {
+            "type": "send_message",
+            "send_via": "interaction_bot",
+            "chat_id": None,
+            "text": (
+                "24 点开始\n"
+                "━━━━━━━━\n"
+                "数字：[ 1 ] [ 5 ] [ 5 ] [ 5 ]\n"
+                "奖金：888\n"
+                "可用符号：+ - x ÷ * / ( )\n"
+                "请直接发送算式，结果必须等于 24，并且恰好使用这 4 个数字各一次。"
+            ),
+            "reply_to_message_id": None,
+        }
+    ]
+
+    answer_actions = await plugin.on_interaction(
+        ctx,
+        "start_paid_game",
+        {
+            "event_type": "message",
+            "chat_id": -100123,
+            "message_text": "5*(5-1/5)",
+            "message_id": 99,
+            "sender_name": "AAA",
+            "payout_account_label": "@owner",
+            "payout_mode": "auto",
+        },
+    )
+
+    assert [item["type"] for item in answer_actions] == ["result", "end_session"]
+    assert messages.actions[-1] == {
+        "type": "send_message",
+        "send_via": "interaction_bot",
+        "chat_id": None,
+        "text": "答对了：AAA\n题目：24 点 [1 5 5 5]\n答案：5*(5-1/5) = 24\n奖金：888\n奖金将由 @owner 账号自动发放。",
+        "reply_to_message_id": 99,
+    }
 
 
 @pytest.mark.asyncio

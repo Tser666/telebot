@@ -22,6 +22,7 @@ from telethon import events
 
 from app.worker.command import current_command_prefix
 from app.worker.plugins.base import Plugin, PluginContext, public_entity_display_name, register
+from app.worker.plugins.events import event_from_interaction_payload
 
 DEFAULT_COMMAND = "24d"
 DEFAULT_TIMEOUT = 500
@@ -394,6 +395,21 @@ def _interaction_state_expired(state: InteractionGameState) -> bool:
     return time.time() >= state.created_at + _clamp_timeout(state.timeout)
 
 
+async def _interaction_send(
+    ctx: PluginContext,
+    text: str,
+    *,
+    reply_to_message_id: int | None = None,
+) -> list[dict[str, Any]]:
+    if ctx.messages is not None:
+        await ctx.messages.send(text=text, reply_to_message_id=reply_to_message_id)
+        return []
+    action: dict[str, Any] = {"type": "send_message", "text": text}
+    if reply_to_message_id is not None:
+        action["reply_to_message_id"] = reply_to_message_id
+    return [action]
+
+
 def _event_message(event: Any) -> Any:
     """兼容 Telethon NewMessage.Event 与裸 Message。"""
 
@@ -527,9 +543,10 @@ class Game24Plugin(Plugin):
     ) -> list[dict[str, Any]] | None:
         if entry_key not in {"start_paid_game", "start_game24"}:
             return None
+        framework_event = event_from_interaction_payload(payload)
         event = payload.get("event") if isinstance(payload.get("event"), dict) else {}
-        event_type = _interaction_event_type(payload, event)
-        chat_id = _interaction_chat_id(payload, event)
+        event_type = framework_event.type or _interaction_event_type(payload, event)
+        chat_id = framework_event.message.chat_id or _interaction_chat_id(payload, event)
         if chat_id is None:
             return []
         if event_type in {"payment_confirmed", "keyword"}:
@@ -549,7 +566,7 @@ class Game24Plugin(Plugin):
     ) -> list[dict[str, Any]]:
         active = await self._load_interaction_state(ctx, ctx.account_id, chat_id)
         if active is not None and active.active:
-            return [{"type": "send_message", "text": "当前已有进行中的 24 点游戏，请先答完再开新局。"}]
+            return await _interaction_send(ctx, "当前已有进行中的 24 点游戏，请先答完再开新局。")
 
         prize = _int_payload(payload.get("prize")) or 123
         timeout = _interaction_timeout_from_payload(payload)
@@ -576,7 +593,7 @@ class Game24Plugin(Plugin):
             timeout=timeout,
             game_id=state.game_id,
         )
-        return [{"type": "send_message", "text": self._render_interaction_start_message(numbers, prize)}]
+        return await _interaction_send(ctx, self._render_interaction_start_message(numbers, prize))
 
     async def _handle_interaction_answer(
         self,
@@ -626,18 +643,19 @@ class Game24Plugin(Plugin):
             numbers=state.numbers,
             prize=state.prize,
         )
-        return [
-            {
-                "type": "send_message",
-                "text": (
-                    f"答对了：{winner_display}\n"
-                    f"题目：24 点 [{nums_disp}]\n"
-                    f"答案：{result.normalized_expr} = 24\n"
-                    f"奖金：{state.prize}\n"
-                    f"{payout_line}"
-                ),
-                "reply_to_message_id": _interaction_message_id(payload, event),
-            },
+        actions = await _interaction_send(
+            ctx,
+            (
+                f"答对了：{winner_display}\n"
+                f"题目：24 点 [{nums_disp}]\n"
+                f"答案：{result.normalized_expr} = 24\n"
+                f"奖金：{state.prize}\n"
+                f"{payout_line}"
+            ),
+            reply_to_message_id=_interaction_message_id(payload, event),
+        )
+        actions.extend(
+            [
             {
                 "type": "result",
                 "success": True,
@@ -662,7 +680,9 @@ class Game24Plugin(Plugin):
                 },
             },
             {"type": "end_session"},
-        ]
+            ]
+        )
+        return actions
 
     async def _handle_interaction_close(self, ctx: PluginContext, chat_id: int) -> list[dict[str, Any]]:
         state = await self._load_interaction_state(ctx, ctx.account_id, chat_id)

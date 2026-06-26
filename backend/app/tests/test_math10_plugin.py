@@ -11,6 +11,7 @@ from app.worker.plugins.base import PluginContext
 from app.worker.plugins.builtin.math10 import plugin as math10_plugin
 from app.worker.plugins.builtin.math10.manifest import MANIFEST
 from app.worker.plugins.builtin.math10.plugin import Math10Plugin
+from app.worker.plugins.message_ops import BufferedMessageOps
 
 
 class _Redis:
@@ -159,6 +160,54 @@ async def test_math10_on_interaction_start_answer_and_close(monkeypatch) -> None
     )
     assert state_key not in redis.data
     assert claim_keys[0] not in redis.data
+
+
+@pytest.mark.asyncio
+async def test_math10_on_interaction_buffers_visible_messages_with_message_ops(monkeypatch) -> None:
+    monkeypatch.setattr(math10_plugin, "_new_math_question", lambda: ("3 + 4", 7))
+    redis = _Redis()
+    messages = BufferedMessageOps()
+    plugin = Math10Plugin()
+    ctx = PluginContext(account_id=1, feature_key="math10", redis=redis, log=AsyncMock(), messages=messages)
+
+    start_actions = await plugin.on_interaction(
+        ctx,
+        "start_math_game",
+        {"event_type": "keyword", "chat_id": -100123, "prize": 888},
+    )
+
+    assert start_actions == []
+    assert messages.actions == [
+        {
+            "type": "send_message",
+            "send_via": "interaction_bot",
+            "chat_id": None,
+            "text": "算数题测试开始\n题目：3 + 4 = ?\n奖金：888\n直接发送数字答案，答对后我会公告赢家。",
+            "reply_to_message_id": None,
+        }
+    ]
+
+    answer_actions = await plugin.on_interaction(
+        ctx,
+        "start_math_game",
+        {
+            "event_type": "message",
+            "chat_id": -100123,
+            "message_text": "7",
+            "message_id": 99,
+            "sender_name": "AAA",
+            "payout_account_label": "@owner",
+        },
+    )
+
+    assert [item["type"] for item in answer_actions] == ["result", "end_session"]
+    assert messages.actions[-1] == {
+        "type": "send_message",
+        "send_via": "interaction_bot",
+        "chat_id": None,
+        "text": "答对了：AAA\n题目：3 + 4 = 7\n奖金：888\n请由 @owner 人工回复赢家发放奖金。",
+        "reply_to_message_id": 99,
+    }
 
 
 @pytest.mark.asyncio

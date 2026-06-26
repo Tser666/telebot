@@ -18,6 +18,7 @@ from app.db.models.account_bot import AccountBot
 from app.db.models.log import RuntimeLog
 from app.schemas.account_bot import AccountBotConfigUpdate, AccountBotTestRequest
 from app.services import account_bot_runtime, account_bot_service, audit
+from app.services.interaction.delivery import InteractionDeliveryExecutor, action_save_message_id_key
 from app.worker import runtime as worker_runtime
 from app.worker.plugins import loader as plugin_loader
 from app.worker.plugins.builtin.chatgpt_image.manifest import MANIFEST as CHATGPT_IMAGE_MANIFEST
@@ -140,6 +141,91 @@ def test_bot_polling_conflict_error_mentions_role() -> None:
     assert "管理 Bot polling 冲突" in management
     assert "交互 Bot polling 冲突" in interaction
     assert "Bbot token" in interaction
+
+
+def test_interaction_delivery_save_key_keeps_runtime_constraints() -> None:
+    assert action_save_message_id_key("abc:123.ok") == "abc:123.ok"
+    assert action_save_message_id_key("bad key") is None
+    assert action_save_message_id_key("." * 201) is None
+
+
+@pytest.mark.asyncio
+async def test_interaction_delivery_executor_sends_bot_message(monkeypatch) -> None:
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="123:token",
+        update_id=10,
+        user_id=20,
+        chat_id=-100,
+        message_id=30,
+        text="",
+    )
+    send_message = AsyncMock(return_value={"message_id": 55})
+    monkeypatch.setattr(account_bot_service, "send_message", send_message)
+    executor = InteractionDeliveryExecutor(
+        incoming=incoming,
+        write_log=AsyncMock(),
+        run_worker_action=AsyncMock(),
+        log_context=account_bot_runtime._interaction_log_context,
+        trace_context=account_bot_runtime._interaction_trace_context,
+    )
+
+    await executor.apply([
+        {
+            "type": "send_message",
+            "send_via": "interaction_bot",
+            "text": "题面",
+            "reply_markup": {"inline_keyboard": []},
+        }
+    ])
+
+    send_message.assert_awaited_once_with(
+        "123:token",
+        -100,
+        "题面",
+        reply_to_message_id=None,
+        reply_markup={"inline_keyboard": []},
+    )
+
+
+@pytest.mark.asyncio
+async def test_interaction_delivery_executor_routes_userbot_reply() -> None:
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="123:token",
+        update_id=10,
+        user_id=20,
+        chat_id=-100,
+        message_id=30,
+        text="",
+    )
+    run_worker_action = AsyncMock(return_value=(True, None, {"message_id": 66}))
+    executor = InteractionDeliveryExecutor(
+        incoming=incoming,
+        write_log=AsyncMock(),
+        run_worker_action=run_worker_action,
+        log_context=account_bot_runtime._interaction_log_context,
+        trace_context=account_bot_runtime._interaction_trace_context,
+    )
+
+    await executor.apply([
+        {
+            "type": "send_message",
+            "send_via": "userbot_reply",
+            "text": "低频代发",
+            "reply_to_message_id": 30,
+        }
+    ])
+
+    run_worker_action.assert_awaited_once_with(
+        incoming,
+        payload={
+            "action_type": "send_message",
+            "chat_id": -100,
+            "text": "低频代发",
+            "reply_to_message_id": 30,
+        },
+    )
 
 
 @pytest.mark.asyncio

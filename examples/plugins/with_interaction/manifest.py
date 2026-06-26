@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from app.worker.plugins.manifest import Manifest
 
-
 MANIFEST = Manifest(
     key="with_interaction",
     display_name="交互示例",

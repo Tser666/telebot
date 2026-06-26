@@ -27,6 +27,7 @@
 - 新增插件交互消息 facade：`ctx.messages.send/edit/delete/pin/answer_callback`，插件可生成平台标准动作，由 TelePilot 统一校验、审计和发送，不再需要每个插件自己拼普通 Bot API。
 - 交互 runtime 支持 `answer_callback`、`delete_message`、`pin_message` 标准动作，并避免插件已 ACK 按钮后再次自动发送空 ACK。
 - 交互入口新增 `result_contract` 运行时守卫：未声明 `send_via` 时默认只允许 `interaction_bot`；显式声明 `actions` 时丢弃未声明动作；`userbot_reply` 自动移除 `reply_markup`，避免按钮发到无法承接回调的通道。
+- 新增 `app.services.interaction` 框架层，拆出 `contracts` 契约守卫和 `InteractionDeliveryExecutor` 受控发送执行器，账号 Bot runtime 保留兼容 shim。
 - 远程插件仓库新增刷新接口与前端刷新按钮，可在插件页直接刷新原创插件库列表。
 - 新增生产 Docker Compose 初始化脚本 `scripts/init-prod-env.sh`，可自动生成 `MASTER_KEY`、`JWT_SECRET`、`POSTGRES_PASSWORD` 和 `.env`，减少首次部署手工配置。
 
@@ -36,6 +37,7 @@
 
 ### Tests
 - 补充 `ctx.messages` 标准动作缓存、`result_contract.send_via` 守卫和 `userbot_reply` 按钮剥离的单元测试。
+- 补充 interaction delivery executor 的直接单元测试，覆盖普通 Bot 发送、userbot_reply 转 worker 和 message_id 保存 key 校验。
 
 ### Docs
 - 明确 0.x 阶段版本号规则：`0.X.0` 表示阶段能力版本，`0.X.Y` 表示同阶段补丁；版本级别使用中英并列口径。

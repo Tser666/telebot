@@ -513,6 +513,8 @@ class GuessNumberPlugin(Plugin):
 
 推荐迁移路径：旧插件继续返回 `list[dict]` 标准动作可以兼容；新插件或重构插件优先调用 `ctx.messages.send/edit/delete/pin/answer_callback`。`ctx.messages` 只缓存动作，不会暴露 Bot Token，也不会直接调用 Telegram API。
 
+框架层源码位于 `backend/app/services/interaction/`：`contracts.py` 负责执行 `result_contract` 守卫，`delivery.py` 负责受控发送、编辑、删除、置顶、按钮 ACK、媒体发送和 message_id 保存。
+
 `payload["event"]` 的核心字段：
 
 | 字段 | 说明 |

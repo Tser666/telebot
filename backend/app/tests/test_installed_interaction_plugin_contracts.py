@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.worker.plugins.base import PluginContext
+from app.worker.plugins.message_ops import BufferedMessageOps
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 INSTALLED_ROOT = PROJECT_ROOT / "plugins" / "installed"
@@ -104,6 +105,43 @@ async def test_example_with_interaction_preserves_original_command_trigger() -> 
 
     ignored = await plugin.on_command(ctx, "other_command", [], event)
     assert ignored is False
+
+
+@pytest.mark.asyncio
+async def test_example_with_interaction_uses_message_ops_for_visible_reply() -> None:
+    plugin_module = importlib.import_module("examples.plugins.with_interaction")
+    plugin = plugin_module.PLUGIN_CLASS()
+    messages = BufferedMessageOps()
+    ctx = PluginContext(account_id=1, feature_key="with_interaction", log=AsyncMock(), messages=messages)
+
+    actions = await plugin.on_interaction(
+        ctx,
+        "start_with_interaction",
+        {
+            "message": "框架消息",
+            "source": {"type": "keyword", "chat_id": -100123},
+            "actor": {"user_id": 111, "display_name": "AAA"},
+        },
+    )
+
+    assert messages.actions == [
+        {
+            "type": "send_message",
+            "send_via": "interaction_bot",
+            "chat_id": -100123,
+            "text": "框架消息\n触发人：AAA",
+            "reply_to_message_id": None,
+        }
+    ]
+    assert actions == [
+        {
+            "type": "result",
+            "success": True,
+            "result": {"status": "ok", "actor_user_id": 111, "entry_key": "start_with_interaction"},
+            "settlement": {"mode": "announce_only", "winner_user_id": 111, "winner_name": "AAA"},
+        },
+        {"type": "end_session"},
+    ]
 
 
 @pytest.mark.asyncio

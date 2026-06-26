@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
-import binascii
 import hashlib
 import json
 import logging
@@ -62,6 +60,15 @@ from . import (
     feature_service,
     remote_plugin_service,
 )
+from .interaction import InteractionDeliveryExecutor
+from .interaction.contracts import guard_interaction_actions
+from .interaction.delivery import (
+    INTERACTION_SESSION_CONTROL_ACTIONS as _INTERACTION_SESSION_CONTROL_ACTIONS,
+)
+from .interaction.delivery import (
+    action_save_message_id_key,
+    delivery_message_id,
+)
 
 log = logging.getLogger(__name__)
 
@@ -89,7 +96,6 @@ _INTERACTION_PAYMENT_CONFIRM_TTL_SECONDS = 300
 _INTERACTION_ENTRY_TIMEOUT_SECONDS = 60.0
 AUTO_PAYOUT_MODULE_KEYS = {"game24", "math10", "dice_grid_hunt", "guess_number", "poetry_blank"}
 _INTERACTION_PAYMENT_CONFIRM_CALLBACK_PREFIX = "ip"
-_INTERACTION_ACTION_SAVE_KEY_MAX_LENGTH = 200
 _PLAYER_IDENTITY_CONFIDENCE_VERIFIED = "verified_user_id"
 _PLAYER_IDENTITY_CONFIDENCE_REPLY = "reply_context"
 _PLAYER_IDENTITY_CONFIDENCE_CALLBACK = "callback_confirmed"
@@ -904,12 +910,7 @@ def _plain_callback_text(text: str, *, limit: int = 180) -> str:
 
 
 def _interaction_action_save_message_id_key(raw: Any) -> str | None:
-    key = str(raw or "").strip()
-    if not key or len(key) > _INTERACTION_ACTION_SAVE_KEY_MAX_LENGTH:
-        return None
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9:_.-]*", key):
-        return None
-    return key
+    return action_save_message_id_key(raw)
 
 
 def _render_transfer_bot_notice_with_error(
@@ -3321,11 +3322,6 @@ def _interaction_trace_context(payload: dict[str, Any] | None) -> dict[str, Any]
     }
 
 
-_INTERACTION_SESSION_CONTROL_ACTIONS = {"end_session", "close_session", "no_session"}
-_INTERACTION_SEND_VIA = {"interaction_bot", "userbot_reply", "bbot_notice"}
-_INTERACTION_BUTTON_CHANNELS = {"interaction_bot", "bbot_notice"}
-
-
 def _interaction_actions_request_no_session(actions: list[dict[str, Any]]) -> bool:
     return any(str(action.get("type") or "").strip() in _INTERACTION_SESSION_CONTROL_ACTIONS for action in actions)
 
@@ -3345,263 +3341,27 @@ def _interaction_actions_mark_success(actions: list[dict[str, Any]]) -> bool:
     return True
 
 
-def _interaction_action_send_via(action: dict[str, Any]) -> str:
-    send_via = str(action.get("send_via") or "interaction_bot").strip()
-    return send_via if send_via in _INTERACTION_SEND_VIA else "interaction_bot"
-
-
-def _interaction_entry_result_contract(rule: dict[str, Any]) -> dict[str, Any]:
-    module_key = str(rule.get("module_key") or "").strip() or None
-    entry_key = str(rule.get("module_action") or "").strip() or None
-    entry = account_bot_service.declared_module_entry_manifest(module_key, entry_key)
-    contract = entry.get("result_contract") if isinstance(entry, dict) else None
-    return dict(contract) if isinstance(contract, dict) else {}
-
-
 async def _guard_interaction_actions(
     incoming: Incoming,
     rule: dict[str, Any],
     actions: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    contract = _interaction_entry_result_contract(rule)
-    raw_actions = contract.get("actions")
-    allowed_actions = (
-        {str(item or "").strip() for item in raw_actions if str(item or "").strip()}
-        if isinstance(raw_actions, list)
-        else set()
+    return await guard_interaction_actions(
+        rule=rule,
+        actions=actions,
+        resolve_entry_manifest=account_bot_service.declared_module_entry_manifest,
+        write_log=lambda level, message, **detail: _write_interaction_runtime_log(
+            incoming,
+            level,
+            message,
+            **detail,
+        ),
+        log_context=_interaction_log_context(incoming),
     )
-    raw_send_via = contract.get("send_via")
-    allowed_send_via = (
-        {str(item or "").strip() for item in raw_send_via if str(item or "").strip() in _INTERACTION_SEND_VIA}
-        if isinstance(raw_send_via, list)
-        else set()
-    ) or {"interaction_bot"}
-    guarded: list[dict[str, Any]] = []
-    for raw_action in actions:
-        if not isinstance(raw_action, dict):
-            continue
-        action = dict(raw_action)
-        action_type = str(action.get("type") or "").strip()
-        if allowed_actions and action_type not in allowed_actions:
-            await _write_interaction_runtime_log(
-                incoming,
-                "warn",
-                f"interaction action blocked by result_contract.actions: {action_type}",
-                action_type=action_type,
-                allowed_actions=sorted(allowed_actions),
-                **_interaction_log_context(incoming),
-            )
-            continue
-        if action_type in {"send_message", "send_photo", "send_file", "delete_message", "pin_message"}:
-            send_via = _interaction_action_send_via(action)
-            if send_via not in allowed_send_via:
-                await _write_interaction_runtime_log(
-                    incoming,
-                    "warn",
-                    f"interaction action blocked by result_contract.send_via: {send_via}",
-                    action_type=action_type,
-                    send_via=send_via,
-                    allowed_send_via=sorted(allowed_send_via),
-                    **_interaction_log_context(incoming),
-                )
-                continue
-            action["send_via"] = send_via
-            if send_via not in _INTERACTION_BUTTON_CHANNELS and "reply_markup" in action:
-                action.pop("reply_markup", None)
-                await _write_interaction_runtime_log(
-                    incoming,
-                    "info",
-                    "interaction action reply_markup stripped for non-bot channel",
-                    action_type=action_type,
-                    send_via=send_via,
-                    **_interaction_log_context(incoming),
-                )
-        guarded.append(action)
-    return guarded
-
-
-async def _resolve_interaction_action_token(incoming: Incoming, send_via: str) -> str | None:
-    if send_via == "interaction_bot":
-        return incoming.token
-    if send_via == "bbot_notice":
-        async with AsyncSessionLocal() as db:
-            return await account_bot_service.get_transfer_bot_token(db, incoming.account_id)
-    return incoming.token
 
 
 def _interaction_delivery_message_id(result: dict[str, Any] | Any) -> int | None:
-    if not isinstance(result, dict):
-        return None
-    return _int_or_none(result.get("message_id"))
-
-
-async def _delete_interaction_placeholder(
-    incoming: Incoming,
-    message_id: int | None,
-) -> None:
-    if incoming.chat_id is None or message_id is None:
-        return
-    try:
-        await account_bot_service.delete_message(
-            incoming.token,
-            incoming.chat_id,
-            message_id,
-        )
-    except Exception as exc:  # noqa: BLE001
-        await _write_interaction_runtime_log(
-            incoming,
-            "warn",
-            "interaction placeholder delete failed",
-            message_id=message_id,
-            error=str(exc),
-            **_interaction_log_context(incoming),
-        )
-
-
-async def _send_interaction_action_message(
-    incoming: Incoming,
-    text: str,
-    *,
-    reply_to_message_id: int | None,
-    send_via: str,
-    edit_message_id: int | None = None,
-    reply_markup: dict[str, Any] | None = None,
-) -> tuple[bool, dict[str, Any]]:
-    if incoming.chat_id is None:
-        return False, {}
-    if send_via == "userbot_reply":
-        ok, error, result = await _run_worker_interaction_action(
-            incoming,
-            payload={
-                "action_type": "send_message",
-                "chat_id": incoming.chat_id,
-                "text": text,
-                "reply_to_message_id": reply_to_message_id,
-            },
-        )
-        if not ok:
-            await _write_interaction_runtime_log(
-                incoming,
-                "warn",
-                f"interaction action send_via={send_via} failed",
-                send_via=send_via,
-                error=error,
-                **_interaction_log_context(incoming),
-            )
-            return False, {"error": error}
-        return True, result
-    token = await _resolve_interaction_action_token(incoming, send_via)
-    if not token:
-        await _write_interaction_runtime_log(
-            incoming,
-            "warn",
-            f"interaction action send_via={send_via} ignored: bot token unavailable",
-            send_via=send_via,
-            **_interaction_log_context(incoming),
-        )
-        return False, {"error": "bot token unavailable"}
-    if send_via == "interaction_bot" and edit_message_id is not None:
-        try:
-            result = await account_bot_service.edit_message(
-                token,
-                incoming.chat_id,
-                edit_message_id,
-                text,
-                reply_markup=reply_markup,
-            )
-            return True, result
-        except Exception as exc:  # noqa: BLE001
-            await _write_interaction_runtime_log(
-                incoming,
-                "warn",
-                "interaction action edit placeholder failed, fallback send",
-                send_via=send_via,
-                edit_message_id=edit_message_id,
-                error=str(exc),
-                **_interaction_log_context(incoming),
-            )
-    result = await account_bot_service.send_message(
-        token,
-        incoming.chat_id,
-        text,
-        reply_to_message_id=reply_to_message_id,
-        reply_markup=reply_markup,
-    )
-    if send_via == "interaction_bot" and edit_message_id is not None:
-        await _delete_interaction_placeholder(incoming, edit_message_id)
-    return True, result
-
-
-async def _send_interaction_action_photo(
-    incoming: Incoming,
-    photo: bytes,
-    *,
-    filename: str,
-    caption: str | None,
-    reply_to_message_id: int | None,
-    send_via: str,
-) -> tuple[bool, dict[str, Any]]:
-    if incoming.chat_id is None:
-        return False, {}
-    if send_via == "userbot_reply":
-        ok, error, result = await _run_worker_interaction_action(
-            incoming,
-            payload={
-                "action_type": "send_photo",
-                "chat_id": incoming.chat_id,
-                "photo_base64": base64.b64encode(photo).decode("ascii"),
-                "filename": filename,
-                "caption": caption,
-                "reply_to_message_id": reply_to_message_id,
-            },
-        )
-        if not ok:
-            await _write_interaction_runtime_log(
-                incoming,
-                "warn",
-                f"interaction media action send_via={send_via} failed",
-                send_via=send_via,
-                error=error,
-                **_interaction_log_context(incoming),
-            )
-            return False, {"error": error}
-        return True, result
-    token = await _resolve_interaction_action_token(incoming, send_via)
-    if not token:
-        await _write_interaction_runtime_log(
-            incoming,
-            "warn",
-            f"interaction media action send_via={send_via} ignored: bot token unavailable",
-            send_via=send_via,
-            **_interaction_log_context(incoming),
-        )
-        return False, {"error": "bot token unavailable"}
-    result = await account_bot_service.send_photo_bytes(
-        token,
-        incoming.chat_id,
-        photo,
-        filename=filename,
-        caption=caption,
-        reply_to_message_id=reply_to_message_id,
-    )
-    return True, result
-
-
-async def _record_interaction_settlement(incoming: Incoming, action: dict[str, Any]) -> None:
-    settlement = action.get("settlement")
-    if not isinstance(settlement, dict) and str(action.get("type") or "").strip() == "settlement":
-        settlement = {k: v for k, v in action.items() if k != "type"}
-    if not isinstance(settlement, dict):
-        return
-    await _write_interaction_runtime_log(
-        incoming,
-        "info",
-        "interaction settlement reported",
-        action_type=str(action.get("type") or ""),
-        settlement=settlement,
-        **_interaction_log_context(incoming),
-        **_interaction_trace_context(action.get("context")),
-    )
+    return delivery_message_id(result)
 
 
 async def _apply_interaction_actions(
@@ -3611,138 +3371,15 @@ async def _apply_interaction_actions(
     context: dict[str, Any] | None = None,
     replace_message_id: int | None = None,
 ) -> None:
-    for action in actions[:10]:
-        action = dict(action)
-        if context:
-            action["context"] = dict(context)
-        action_type = str(action.get("type") or "").strip()
-        await _record_interaction_settlement(incoming, action)
-        if action_type in _INTERACTION_SESSION_CONTROL_ACTIONS or action_type == "result":
-            continue
-        if action_type == "settlement":
-            continue
-        raw_reply_to = action.get("reply_to_message_id")
-        reply_to_message_id = _int_or_none(raw_reply_to)
-        send_via = _interaction_action_send_via(action)
-        raw_reply_markup = action.get("reply_markup")
-        reply_markup = raw_reply_markup if isinstance(raw_reply_markup, dict) else None
-        if action_type == "answer_callback":
-            callback_query_id = str(action.get("callback_query_id") or incoming.callback_id or "").strip()
-            if callback_query_id:
-                await account_bot_service.answer_callback(
-                    incoming.token,
-                    callback_query_id,
-                    text=str(action.get("text") or ""),
-                    show_alert=bool(action.get("show_alert")),
-                )
-            continue
-        if action_type == "delete_message":
-            message_id = _int_or_none(action.get("message_id"))
-            if send_via == "interaction_bot":
-                await _delete_interaction_placeholder(incoming, message_id)
-            continue
-        if action_type == "pin_message":
-            message_id = _int_or_none(action.get("message_id"))
-            if send_via == "interaction_bot" and message_id is not None and incoming.chat_id is not None:
-                token = await _resolve_interaction_action_token(incoming, send_via)
-                if token:
-                    try:
-                        await account_bot_service.call_bot_api(
-                            token,
-                            "pinChatMessage",
-                            {"chat_id": incoming.chat_id, "message_id": message_id},
-                        )
-                    except Exception:  # noqa: BLE001
-                        log.debug(
-                            "interaction action pin message failed aid=%s chat_id=%s message_id=%s",
-                            incoming.account_id,
-                            incoming.chat_id,
-                            message_id,
-                            exc_info=True,
-                        )
-            continue
-        if action_type == "send_message":
-            text = str(action.get("text") or "").strip()
-            if not text:
-                continue
-            edit_message_id = _int_or_none(action.get("edit_message_id"))
-            delete_message_id = None
-            if edit_message_id is None and replace_message_id is not None and send_via == "interaction_bot":
-                edit_message_id = replace_message_id
-                replace_message_id = None
-            elif edit_message_id is None and replace_message_id is not None:
-                delete_message_id = replace_message_id
-                replace_message_id = None
-            ok, result = await _send_interaction_action_message(
-                incoming,
-                text,
-                reply_to_message_id=reply_to_message_id,
-                send_via=send_via,
-                edit_message_id=edit_message_id,
-                reply_markup=reply_markup,
-            )
-            if ok and delete_message_id is not None:
-                await _delete_interaction_placeholder(incoming, delete_message_id)
-            if ok and send_via == "interaction_bot" and action.get("pin"):
-                msg_id = edit_message_id or _interaction_delivery_message_id(result)
-                if msg_id is not None and incoming.chat_id is not None:
-                    token = await _resolve_interaction_action_token(incoming, send_via)
-                    if token:
-                        try:
-                            await account_bot_service.call_bot_api(
-                                token,
-                                "pinChatMessage",
-                                {"chat_id": incoming.chat_id, "message_id": msg_id},
-                            )
-                        except Exception:  # noqa: BLE001
-                            log.debug(
-                                "interaction action pin message failed aid=%s chat_id=%s message_id=%s",
-                                incoming.account_id,
-                                incoming.chat_id,
-                                msg_id,
-                                exc_info=True,
-                            )
-            save_key = _interaction_action_save_message_id_key(action.get("save_message_id_key"))
-            if ok and save_key:
-                msg_id = _interaction_delivery_message_id(result)
-                if msg_id is not None:
-                    redis_client = get_redis()
-                    await redis_client.set(save_key, str(msg_id), ex=7200)
-            continue
-        if action_type in {"send_photo", "send_file"}:
-            raw_photo = str(action.get("photo_base64") or action.get("file_base64") or "").strip()
-            if not raw_photo:
-                continue
-            try:
-                photo = base64.b64decode(raw_photo, validate=True)
-            except (binascii.Error, ValueError):
-                log.info("interaction action ignored: invalid base64 media aid=%s", incoming.account_id)
-                continue
-            if not photo:
-                continue
-            filename = str(action.get("filename") or "interaction.png").strip() or "interaction.png"
-            caption = str(action.get("caption") or action.get("text") or "").strip() or None
-            ok, _result = await _send_interaction_action_photo(
-                incoming,
-                photo,
-                filename=filename,
-                caption=caption,
-                reply_to_message_id=reply_to_message_id,
-                send_via=send_via,
-            )
-            if ok and replace_message_id is not None:
-                await _delete_interaction_placeholder(incoming, replace_message_id)
-                replace_message_id = None
-            continue
-        log.info("interaction action ignored: unsupported type=%s aid=%s", action_type, incoming.account_id)
-        await _write_interaction_runtime_log(
-            incoming,
-            "info",
-            f"interaction action ignored: unsupported type={action_type}",
-            action_type=action_type,
-            action=action,
-            **_interaction_log_context(incoming),
-        )
+    executor = InteractionDeliveryExecutor(
+        incoming=incoming,
+        write_log=_write_interaction_runtime_log,
+        run_worker_action=_run_worker_interaction_action,
+        log_context=_interaction_log_context,
+        trace_context=_interaction_trace_context,
+        get_redis_client=get_redis,
+    )
+    await executor.apply(actions, context=context, replace_message_id=replace_message_id)
 
 
 async def _run_interaction_module(

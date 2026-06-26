@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from app.worker.plugins.base import Plugin, PluginContext, register
+from app.worker.plugins.events import event_from_interaction_payload
 
 MATH10_GAME_PREFIX = "account_bot:math10:"
 MATH10_CLAIM_PREFIX = "account_bot:math10_claim:"
@@ -190,6 +191,21 @@ async def _log(ctx: PluginContext, level: str, message: str, **detail: Any) -> N
     await ctx.log(level, message, **detail)
 
 
+async def _interaction_send(
+    ctx: PluginContext,
+    text: str,
+    *,
+    reply_to_message_id: int | None = None,
+) -> list[dict[str, Any]]:
+    if ctx.messages is not None:
+        await ctx.messages.send(text=text, reply_to_message_id=reply_to_message_id)
+        return []
+    action: dict[str, Any] = {"type": "send_message", "text": text}
+    if reply_to_message_id is not None:
+        action["reply_to_message_id"] = reply_to_message_id
+    return [action]
+
+
 @register
 class Math10Plugin(Plugin):
     """交互 Bot 随机算数题插件。"""
@@ -207,9 +223,10 @@ class Math10Plugin(Plugin):
     ) -> list[dict[str, Any]] | None:
         if entry_key not in {"start_math_game", "start_math10"}:
             return None
+        framework_event = event_from_interaction_payload(payload)
         event = _event_dict(payload)
-        event_type = _interaction_event_type(payload, event)
-        chat_id = _interaction_chat_id(payload, event)
+        event_type = framework_event.type or _interaction_event_type(payload, event)
+        chat_id = framework_event.message.chat_id or _interaction_chat_id(payload, event)
         if chat_id is None:
             return []
         if event_type in {"payment_confirmed", "keyword"}:
@@ -229,7 +246,7 @@ class Math10Plugin(Plugin):
     ) -> list[dict[str, Any]]:
         active = await self._load_state(ctx, ctx.account_id, chat_id)
         if active is not None and active.active:
-            return [{"type": "send_message", "text": "当前已有进行中的算数题，请先答完再开新局。"}]
+            return await _interaction_send(ctx, "当前已有进行中的算数题，请先答完再开新局。")
 
         question, answer = _new_math_question()
         prize = _positive_int(payload.get("prize"), DEFAULT_PRIZE)
@@ -258,7 +275,7 @@ class Math10Plugin(Plugin):
             ttl_seconds=ttl,
             game_id=state.game_id,
         )
-        return [{"type": "send_message", "text": self._render_start_message(question, prize)}]
+        return await _interaction_send(ctx, self._render_start_message(question, prize))
 
     async def _handle_answer(
         self,
@@ -298,17 +315,18 @@ class Math10Plugin(Plugin):
             prize=state.prize,
             winner_message_id=reply_to_message_id,
         )
+        message_actions = await _interaction_send(
+            ctx,
+            (
+                f"答对了：{winner_display}\n"
+                f"题目：{state.question} = {state.answer}\n"
+                f"奖金：{state.prize}\n"
+                f"{_render_payout_notice(payout_mode, payout_account_display)}"
+            ),
+            reply_to_message_id=reply_to_message_id,
+        )
         return [
-            {
-                "type": "send_message",
-                "text": (
-                    f"答对了：{winner_display}\n"
-                    f"题目：{state.question} = {state.answer}\n"
-                    f"奖金：{state.prize}\n"
-                    f"{_render_payout_notice(payout_mode, payout_account_display)}"
-                ),
-                "reply_to_message_id": reply_to_message_id,
-            },
+            *message_actions,
             {
                 "type": "result",
                 "success": True,
