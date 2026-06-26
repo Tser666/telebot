@@ -288,6 +288,34 @@ async def test_interaction_result_contract_blocks_undeclared_channel(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_interaction_without_result_contract_trusts_standard_channels(monkeypatch) -> None:
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="123:token",
+        update_id=10,
+        user_id=20,
+        chat_id=-100,
+        message_id=30,
+        text="",
+    )
+
+    monkeypatch.setattr(account_bot_service, "declared_module_entry_manifest", lambda *_args: {})
+    monkeypatch.setattr(account_bot_runtime, "_write_interaction_runtime_log", AsyncMock())
+
+    guarded = await account_bot_runtime._guard_interaction_actions(
+        incoming,
+        {"module_key": "demo", "module_action": "start"},
+        [
+            {"type": "send_message", "send_via": "userbot_reply", "text": "admin path"},
+            {"type": "send_message", "send_via": "interaction_bot", "text": "public path"},
+            {"type": "send_message", "send_via": "bbot_notice", "text": "notice path"},
+        ],
+    )
+
+    assert [item["send_via"] for item in guarded] == ["userbot_reply", "interaction_bot", "bbot_notice"]
+
+
+@pytest.mark.asyncio
 async def test_interaction_result_contract_strips_buttons_from_userbot_reply(monkeypatch) -> None:
     incoming = account_bot_runtime.Incoming(
         account_id=1,
@@ -1245,9 +1273,31 @@ def test_interaction_entry_manifest_normalizes_command_fallback() -> None:
     assert entry is not None
     assert entry["launch_mode"] == "hybrid"
     assert entry["events"] == ["payment_confirmed", "message", "callback_query"]
+    assert entry["dispatch_modes"] == ["admin_command", "public_keyword"]
+    assert entry["message_channels"] == {
+        "admin_command": "userbot_reply",
+        "public_keyword": "interaction_bot",
+    }
+    assert entry["money_channel"] == "userbot_reply"
     assert entry["preserve_command_trigger"] is True
     assert entry["command_fallback"] == {"enabled": True, "command": "24d", "mode": "hint_only"}
     assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply"]
+
+
+def test_interaction_entry_manifest_normalizes_trusted_send_via_default() -> None:
+    entry = account_bot_service.normalize_interaction_entry_manifest(
+        {
+            "key": "trusted_game",
+            "launch_mode": "bridge",
+            "session_scope": "chat",
+            "result_contract": {"send_via": ["bad"]},
+        }
+    )
+
+    assert entry is not None
+    assert entry["dispatch_modes"] == ["public_keyword"]
+    assert entry["message_channels"] == {"public_keyword": "interaction_bot"}
+    assert entry["result_contract"]["send_via"] == ["interaction_bot", "userbot_reply", "bbot_notice"]
 
 
 @pytest.mark.asyncio

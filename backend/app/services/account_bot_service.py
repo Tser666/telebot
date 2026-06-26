@@ -59,6 +59,9 @@ VALID_CONCURRENCY = {"chat", "user", "none"}
 VALID_INTERACTION_EVENTS = {"payment_confirmed", "keyword", "message", "callback_query", "session_close"}
 VALID_INTERACTION_LAUNCH_MODES = {"bridge", "direct", "hybrid"}
 VALID_INTERACTION_SEND_VIA = {"interaction_bot", "userbot_reply", "bbot_notice"}
+TRUSTED_INTERACTION_SEND_VIA = ["interaction_bot", "userbot_reply", "bbot_notice"]
+VALID_INTERACTION_DISPATCH_MODES = {"admin_command", "public_keyword"}
+VALID_INTERACTION_MESSAGE_CHANNELS = {"interaction_bot", "userbot_reply", "auto"}
 VALID_INTERACTION_PARTICIPANT_POLICIES = {"open_race", "solo_owner", "paid_pool", "notify_only"}
 FALLBACK_CHAT_SESSION_MODULE_ENTRIES = {
     ("dice_grid_hunt", "start_dice_grid_hunt"),
@@ -447,6 +450,37 @@ def normalize_interaction_entry_manifest(raw: Any) -> dict[str, Any] | None:
                 events.append(event)
     if not events:
         events = ["payment_confirmed", "keyword", "message", "session_close"]
+    command_fallback = raw.get("command_fallback")
+    has_command_fallback = isinstance(command_fallback, dict) and bool(command_fallback.get("enabled", True))
+    dispatch_modes: list[str] = []
+    raw_dispatch_modes = raw.get("dispatch_modes")
+    if isinstance(raw_dispatch_modes, list):
+        for raw_item in raw_dispatch_modes:
+            item = str(raw_item or "").strip()
+            if item in VALID_INTERACTION_DISPATCH_MODES and item not in dispatch_modes:
+                dispatch_modes.append(item)
+    if not dispatch_modes:
+        if launch_mode in {"direct", "hybrid"} or has_command_fallback:
+            dispatch_modes.append("admin_command")
+        if launch_mode in {"bridge", "hybrid"}:
+            dispatch_modes.append("public_keyword")
+    if not dispatch_modes:
+        dispatch_modes = ["public_keyword"]
+    raw_message_channels = raw.get("message_channels")
+    message_channels: dict[str, str] = {}
+    if isinstance(raw_message_channels, dict):
+        for mode, channel in raw_message_channels.items():
+            mode_key = str(mode or "").strip()
+            channel_key = str(channel or "").strip()
+            if mode_key in VALID_INTERACTION_DISPATCH_MODES and channel_key in VALID_INTERACTION_MESSAGE_CHANNELS:
+                message_channels[mode_key] = channel_key
+    if "admin_command" in dispatch_modes:
+        message_channels.setdefault("admin_command", "userbot_reply")
+    if "public_keyword" in dispatch_modes:
+        message_channels.setdefault("public_keyword", "interaction_bot")
+    money_channel = str(raw.get("money_channel") or "userbot_reply").strip()
+    if money_channel not in {"userbot_reply"}:
+        money_channel = "userbot_reply"
     out = dict(raw)
     out.update(
         {
@@ -454,6 +488,9 @@ def normalize_interaction_entry_manifest(raw: Any) -> dict[str, Any] | None:
             "launch_mode": launch_mode,
             "session_scope": scope,
             "events": events,
+            "dispatch_modes": dispatch_modes,
+            "message_channels": message_channels,
+            "money_channel": money_channel,
             "preserve_command_trigger": bool(raw.get("preserve_command_trigger", True)),
         }
     )
@@ -476,9 +513,8 @@ def normalize_interaction_entry_manifest(raw: Any) -> dict[str, Any] | None:
         if send_via:
             normalized_result_contract["send_via"] = send_via
         elif "send_via" in normalized_result_contract:
-            normalized_result_contract["send_via"] = ["interaction_bot"]
+            normalized_result_contract["send_via"] = list(TRUSTED_INTERACTION_SEND_VIA)
         out["result_contract"] = normalized_result_contract
-    command_fallback = raw.get("command_fallback")
     if isinstance(command_fallback, dict):
         out["command_fallback"] = dict(command_fallback)
     return out

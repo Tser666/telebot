@@ -20,6 +20,22 @@
 
 ## [Unreleased]
 
+## [0.34.0] — 2026-06-27 · minor（次版本） · 个人可信插件标准模式
+
+### Added
+- 交互插件入口新增可信调度元数据：`dispatch_modes` 区分「管理员命令」与「群内玩法」，`message_channels` 声明不同调度方式的默认消息通道，`money_channel` 固定标识转账相关动作由 userbot 承接。
+- 交互中心玩法入口卡片展示调度方式和通道分工，让用户能直接看出插件是管理员命令入口、群内玩法入口，还是两者都支持。
+- 后端 feature manifest seed 会统一补齐交互入口调度字段，已安装插件无需重装即可在刷新后得到一致的入口元数据。
+
+### Changed
+- TelePilot 标准模式明确调整为个人可信插件模式：管理员安装并启用插件后视为信任插件业务逻辑，平台保留频控、审计、急停、token/session 隔离和受控代发。
+- `result_contract.send_via` 从默认最小化为 `interaction_bot` 改为可信默认三通道：`interaction_bot`、`userbot_reply`、`bbot_notice`；插件主动声明白名单时仍会按白名单收窄。
+- 远程插件校验不再要求交互入口必须声明 `result_contract`，改为校验已声明的 `dispatch_modes` / `send_via` 是否使用平台支持值。
+- 插件开发指南、API 参考、远程插件规范、速查表和交互优化方案同步更新，明确 userbot 主控监听/资金动作、交互 Bot 承接群内高频互动的标准分工。
+
+### Tests
+- 补充交互入口缺省 `result_contract` 时允许三通道代发的回归测试，并更新入口 normalize 测试覆盖 `dispatch_modes`、`message_channels`、`money_channel`。
+
 ## [0.33.2] — 2026-06-27 · patch（补丁版本） · 交互中心规则列表与编辑区优化
 
 ### Changed

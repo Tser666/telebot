@@ -1,6 +1,6 @@
 # TelePilot 双 Bot / 交互插件联动优化方案
 
-本文用于统一 TelePilot 当前“交互 Bot / 通知 Bot / UserBot / 插件”之间的职责边界、插件接入规范、前端展示结构与迁移步骤。目标不是推翻现有插件，而是在**不影响插件原有命令触发能力**的前提下，把所有适合高频互动的娱乐类、交互类插件纳入同一套平台契约。
+本文用于统一 TelePilot 当前“UserBot / 交互 Bot / 通知 Bot / 插件”之间的职责边界、插件接入规范、前端展示结构与迁移步骤。TelePilot 的标准模式是个人可信插件模式：插件由管理员安装和启用后即视为可信，平台负责频控、审计、急停和通道代发，而不是按公共插件市场做强沙箱。目标不是推翻现有插件，而是在**不影响插件原有命令触发能力**的前提下，把管理员命令和群内高频玩法纳入同一套调度模型。
 
 适用范围：
 
@@ -12,11 +12,11 @@
 
 ### 1.1 目标
 
-1. 高频互动由交互 Bot 承担，减少 UserBot 本体暴露在高频群聊消息里。
+1. UserBot 作为主控感知层监听全量消息、处理管理员命令、确认收款和执行发奖；高频互动由交互 Bot 承担，减少 UserBot 本体暴露在高频群聊消息里。
 2. 插件接入时不再为每个玩法重复维护一套规则字段。
 3. 平台能稳定拿到“谁触发、谁中奖、奖金多少、由谁发奖、回复哪条消息”。
 4. 前端能优雅承载不同插件的不同入口和不同参数，不把所有规则堆在同一页的同一层级。
-5. 新插件作者只要遵守规范，就能低成本接入 TelePilot 的双 Bot 联动。
+5. 新插件作者只要遵守规范，就能低成本接入 TelePilot 的双通道调度：管理员命令走 userbot，群内玩法走交互 Bot，资金动作仍走 userbot。
 
 ### 1.2 硬约束
 
@@ -29,6 +29,33 @@
    - 交互规则页不能依赖大屏专属布局。
 4. **插件层只关心业务逻辑。**
    - 收款人匹配、金额门槛、冷却、每日次数、触发来源过滤等，属于平台层。
+
+## 1.3 标准调度方式
+
+TelePilot 只保留一个标准模式，但插件入口可以有两种调度方式：
+
+1. **管理员命令入口**
+   - 管理员使用系统命令前缀触发，例如 `{prefix}game 100`。
+   - 由 userbot 监听、触发和继续交互。
+   - 适合低频管理、人工开局、查询状态、后台任务和需要人形身份的操作。
+
+2. **群内玩法入口**
+   - 群成员发送配置好的关键词，或转账命中规则后启动。
+   - UserBot 负责监听、识别、确认收款和发奖；交互 Bot 负责题面、按钮、消息编辑、回调 ACK 等高频互动。
+   - 适合多人游戏、抢答、抽奖和按钮玩法。
+
+插件 manifest 可用兼容字段 `launch_mode`，也可用新字段 `dispatch_modes`、`message_channels`、`money_channel` 明确表达这件事。推荐写法：
+
+```json
+{
+  "dispatch_modes": ["admin_command", "public_keyword"],
+  "message_channels": {
+    "admin_command": "userbot_reply",
+    "public_keyword": "interaction_bot"
+  },
+  "money_channel": "userbot_reply"
+}
+```
 
 ## 2. 当前痛点
 
@@ -77,17 +104,17 @@
 
 ### 3.2 声明式接入，而不是平台硬编码插件特例
 
-平台只识别插件声明的交互入口，不再为每个娱乐插件单独写一套规则表单逻辑。插件通过 Manifest 声明：
+平台只识别插件声明的调度入口，不再为每个娱乐插件单独写一套规则表单逻辑。插件通过 Manifest 声明：
 
 - 自己有哪些交互入口；
 - 这些入口属于什么玩法类型；
 - 平台可覆盖哪些参数；
 - 会返回什么类型的结果；
-- 哪些发送通道是允许的。
+- 管理员命令入口和群内玩法入口分别走哪个消息通道。
 
 ### 3.3 原命令不动，交互入口只做“桥接”
 
-交互 Bot 的职责是承接高频互动，不是改写插件原本的命令语义。任何支持交互 Bot 的插件，都必须满足：
+交互 Bot 的职责是承接群内高频互动，不是改写插件原本的命令语义。任何支持群内玩法入口的插件，都必须满足：
 
 - 原本 `{prefix}24d 1000`、`{prefix}ct 1234` 之类的 UserBot 命令继续可用；
 - 交互 Bot 命中规则后调用的是同一份业务逻辑或同一份业务内核；
@@ -153,13 +180,16 @@
 
 ## 5.1 插件入口声明
 
-插件需要通过 `interaction_entries` 声明可被交互 Bot 调用的入口。每个入口至少包含：
+插件需要通过 `interaction_entries` 声明可被 TelePilot 调度的入口。每个入口至少包含：
 
 - `key`
 - `title`
 - `description`
 - `interaction_profile`
 - `launch_mode`
+- `dispatch_modes`
+- `message_channels`
+- `money_channel`
 - `events`
 - `session_scope`
 - `input_schema`
@@ -584,7 +614,7 @@
 
 - 已落地统一 payload 信封。
 - 已落地统一动作结果。
-- 已落地 `result_contract.actions` 与 `result_contract.send_via` 运行时守卫。
+- 已落地 `result_contract.actions` 与 `result_contract.send_via` 运行时守卫；未主动收窄时按可信插件标准允许三通道代发。
 - 已落地 `settlement` 结构化记录。
 
 ### 阶段 2：插件声明升级
@@ -596,18 +626,18 @@
 ### 阶段 3：前端交互框架入口
 
 - 已新增独立「交互框架」顶级页面，和 AI 一样作为 TelePilot 内的重要框架入口。
-- 账号规则页继续承载具体规则配置，交互框架页负责解释事件渠道、插件入口、动作契约和发送通道。
+- 账号规则页继续承载具体规则配置，交互框架页负责解释 userbot 主控、交互 Bot 高频互动、插件入口和发送通道。
 - 远程插件仓库已支持在插件页直接刷新列表。
 
 ### 阶段 4：动作执行与结算链路稳定化
 
-- `app.services.interaction.contracts` 负责动作契约守卫。
+- `app.services.interaction.contracts` 负责插件主动收窄时的动作契约守卫。
 - `app.services.interaction.delivery.InteractionDeliveryExecutor` 负责发送、编辑、删除、置顶、按钮 ACK、媒体发送和 message_id 保存。
 - 自动发奖与人工补发继续读取结构化 `result/settlement`，交互 Bot 不直接执行钱相关动作。
 
 ### 阶段 5：同步插件仓规范
 
-- 插件 API 参考、速查表、远程插件规范、安全边界和本文已同步 `ctx.messages`、按钮回调、发送通道和契约守卫。
+- 插件 API 参考、速查表、远程插件规范、安全边界和本文已同步个人可信插件标准模式、两类调度入口、`ctx.messages`、按钮回调和发送通道。
 - `examples/plugins/with_interaction` 作为最小交互插件骨架继续由校验脚本覆盖。
 - installed 插件兼容清单由 `scripts/validate-installed-interaction-plugins.py` 自动发现并校验。
 

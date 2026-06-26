@@ -45,6 +45,7 @@ from ..schemas.feature import (
     FeatureInfo,
 )
 from ..worker.ipc import CMD_RELOAD_CONFIG, publish_cmd_with_ack
+from .account_bot_service import normalize_interaction_entry_manifest
 
 log = logging.getLogger(__name__)
 
@@ -86,7 +87,11 @@ async def seed_builtin_features(db: AsyncSession) -> int:
             interaction_profile = str(getattr(m, "interaction_profile", None) or "").strip() or None
             raw_entries = getattr(m, "interaction_entries", None) or []
             if isinstance(raw_entries, list):
-                interaction_entries = [item for item in raw_entries if isinstance(item, dict)]
+                interaction_entries = [
+                    entry
+                    for item in raw_entries
+                    if (entry := normalize_interaction_entry_manifest(item)) is not None
+                ]
         if category not in {"interactive", "automation", "utility"}:
             category = "utility"
 
@@ -193,7 +198,11 @@ async def _seed_local_installed_features(
         raw_entries = meta.get("interaction_entries")
         if raw_entries is None and isinstance(cfg_schema, dict):
             raw_entries = cfg_schema.get("x-interaction-entries")
-        interaction_entries = raw_entries if isinstance(raw_entries, list) else []
+        interaction_entries = [
+            entry
+            for item in raw_entries
+            if (entry := normalize_interaction_entry_manifest(item)) is not None
+        ] if isinstance(raw_entries, list) else []
         tags = meta.get("tags") or []
         experimental = bool(meta.get("experimental")) or "experimental" in tags
         if is_orphan:
@@ -217,9 +226,7 @@ async def _seed_local_installed_features(
         if interaction_profile:
             manifest["interaction_profile"] = interaction_profile
         if interaction_entries:
-            manifest["interaction_entries"] = [
-                item for item in interaction_entries if isinstance(item, dict)
-            ]
+            manifest["interaction_entries"] = interaction_entries
         if experimental:
             manifest["x-experimental"] = True
         if meta.get("permissions"):

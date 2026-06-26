@@ -7,6 +7,7 @@ from typing import Any
 
 INTERACTION_SEND_VIA = {"interaction_bot", "userbot_reply", "bbot_notice"}
 INTERACTION_BUTTON_CHANNELS = {"interaction_bot", "bbot_notice"}
+TRUSTED_DEFAULT_SEND_VIA = {"interaction_bot", "userbot_reply", "bbot_notice"}
 
 WriteLog = Callable[[str, str], Awaitable[None]]
 EntryManifestResolver = Callable[[str | None, str | None], dict[str, Any] | None]
@@ -39,7 +40,7 @@ async def guard_interaction_actions(
         {str(item or "").strip() for item in raw_send_via if str(item or "").strip() in INTERACTION_SEND_VIA}
         if isinstance(raw_send_via, list)
         else set()
-    ) or {"interaction_bot"}
+    ) or set(TRUSTED_DEFAULT_SEND_VIA)
     context = dict(log_context or {})
     guarded: list[dict[str, Any]] = []
     for raw_action in actions:
@@ -96,6 +97,7 @@ def _entry_result_contract(
 __all__ = [
     "INTERACTION_BUTTON_CHANNELS",
     "INTERACTION_SEND_VIA",
+    "TRUSTED_DEFAULT_SEND_VIA",
     "action_send_via",
     "guard_interaction_actions",
 ]

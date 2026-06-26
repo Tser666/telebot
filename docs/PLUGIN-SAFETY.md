@@ -29,7 +29,7 @@ Manifest 中的 `permissions` 字段声明插件需要的能力：
 
 `permissions` 默认是空列表。第三方插件漏写权限时不会注入对应 facade，也不能调用未声明的 `ctx.client` / `event` helper 能力；内置插件也建议显式写全，方便审计和后续迁移。
 
-交互入口不要直接使用 Bot Token 或 Telegram Bot API。需要发送、编辑、删除、置顶或回应按钮时，优先使用 `ctx.messages` 生成标准动作，再由 TelePilot 按 `result_contract.actions` 和 `result_contract.send_via` 统一校验。`ctx.client` 保留给常规 UserBot 命令和高级兼容场景，不作为普通 Bot 按钮回调的主入口。
+TelePilot 按个人可信插件模式运行：管理员安装并启用插件后，远程插件的业务风险由管理员自行承担；平台不做公共插件市场式强沙箱，但仍保留频控、审计、急停和 token/session 隔离。交互入口不要直接使用 Bot Token 或 Telegram Bot API。需要发送、编辑、删除、置顶或回应按钮时，优先使用 `ctx.messages` 生成标准动作，再由 TelePilot 统一选择 userbot / 交互 Bot / 通知 Bot 通道代发。`ctx.client` 保留给管理员命令和高级兼容场景，不作为普通 Bot 按钮回调的主入口。
 
 ### 禁止行为
 
@@ -150,13 +150,13 @@ Manifest 中的 `permissions` 字段声明插件需要的能力：
 
 | 场景 | 有 `event` | 推荐方式 | 适用说明 | 远程插件权限 |
 |------|------------|----------|----------|--------------|
-| `on_command` 指令回调 | 有 | `event.edit(...)` | 把用户发出的指令改成状态/结果，适合 UserBot 自己发出的指令 | `edit_message` |
+| `on_command` 指令回调 | 有 | `event.edit(...)` | 管理员带前缀命令触发，后续默认通过 userbot 交互 | `edit_message` |
 | `on_command` 需要另发一条 | 有 | `event.respond(...)` 或 `ctx.client.send_message(event.chat_id, ...)` | 不想覆盖原指令，或指令消息可能已删除 | `send_message` |
 | `on_message` 回复触发消息 | 有 | `event.reply(...)` | 自动回复、答题奖励、引用原消息 | `send_message` |
 | `on_message` 普通发送 | 有 | `event.respond(...)` | 在同一聊天里发新消息，不引用原消息 | `send_message` |
 | 跨聊天发送/转发 | 有或无 | `ctx.client.send_message(target_chat_id, ...)` / `ctx.client.send_file(...)` | 转发、通知、发图、调度任务 | `send_message` / `send_file` |
 | `ctx.scheduler` 定时回调 | 无 | `ctx.client.send_message(chat_id, ...)` | 定时任务没有原始 `event`，必须从配置或规则里拿 `chat_id` | `send_message` |
-| `on_interaction` 交互入口 | 无原始事件对象 | `ctx.messages.send(...)` / `ctx.messages.answer_callback(...)` | 交互 Bot、通知 Bot、userbot_reply 三类发送通道统一走标准动作 | `interaction_entries[].result_contract` |
+| `on_interaction` 群内玩法入口 | 无原始事件对象 | `ctx.messages.send(...)` / `ctx.messages.answer_callback(...)` | 群友关键词/付款触发后，后续默认由交互 Bot 承接高频消息；资金动作仍交给 userbot / 平台结算 | `interaction_entries[]` |
 | `on_startup` / `on_shutdown` | 无 | 默认不发；确需通知时用 `ctx.client.send_message(...)` | 启停阶段容易重复触发，必须有显式配置开关 | `send_message` |
 | `ctx.conversation()` | conversation 内部 | `conv.send(...)` / `conv.get_response(...)` | 与 BotFather 或其它 bot 进行会话 | 取决于底层发送/读取能力 |
 | 成员管理 | 有 | `ctx.client.mute_user(chat_id, user_id, duration_seconds=3600)` / `ctx.client.kick_user(chat_id, user_id)` / `ctx.client.ban_user(chat_id, user_id)` | 反广告、风控等明确需要处理违规成员的场景；调用前应先确认目标，避免误操作管理员或无关用户 | `moderate_chat` |
@@ -196,8 +196,8 @@ async def safe_reply(ctx, event, text: str, *, chat_id: int, reply_to_id: int | 
 注意：
 
 - `event.edit(...)` 只适合编辑当前账号自己发出的指令/状态消息；不要用它编辑别人发来的 incoming 消息。
-- 远程插件安装阶段只读 `plugin.json`，但运行时仍会受 `manifest.py` 的 `permissions` 沙箱限制。
-- 第三方插件不要把 `event.reply/respond/edit` 当作绕过权限的路径；凡是会发送、编辑、删除、读取消息的行为，都必须在 `permissions` 中声明对应能力。
+- 远程插件安装阶段只读 `plugin.json`；运行时由 TelePilot facade 代发、记录和限流，插件不直接接触 Bot Token 或 userbot session。
+- 第三方插件不要把 `event.reply/respond/edit` 当作绕过审计的路径；凡是会发送、编辑、删除、读取消息的能力，都应在 `permissions` 中声明，方便安装提示和问题追踪。
 - 需要发送图片、文件时，为 `BytesIO` 设置 `name`，例如 `image_file.name = "result.png"`，否则 Telegram 客户端可能显示无后缀文件。
 - 长消息要按 Telegram 4096 字符限制分段；HTML 模式下切分前要保证标签闭合，失败时应降级为纯文本。
 

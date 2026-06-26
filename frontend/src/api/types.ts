@@ -440,6 +440,9 @@ export interface FeatureInteractionEntry {
   description?: string | null;
   interaction_profile?: "session_game" | "challenge_game" | "reward_pool" | "utility_trigger" | string | null;
   launch_mode?: "bridge" | "direct" | "hybrid" | string | null;
+  dispatch_modes?: Array<"admin_command" | "public_keyword" | string>;
+  message_channels?: Partial<Record<"admin_command" | "public_keyword" | string, "interaction_bot" | "userbot_reply" | "auto" | string>>;
+  money_channel?: "userbot_reply" | string | null;
   events?: string[];
   session_scope?: "chat" | "user" | "none" | string | null;
   participant_policy?: "open_race" | "solo_owner" | "paid_pool" | "notify_only" | string | null;

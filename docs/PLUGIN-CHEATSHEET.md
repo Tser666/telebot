@@ -1,12 +1,12 @@
 # TelePilot 插件速查表
 
-- 路线默认值：0.x 走 Route A，受信/签名插件同进程运行。
+- TelePilot 标准模式就是个人可信插件模式：管理员安装并启用插件后，视为信任插件业务逻辑；平台负责频控、审计、急停和通道代发。
 - 产品文案统一叫“插件”，代码契约仍是 `Plugin` / `Manifest` / `PluginContext`。
 - 最小目录：`__init__.py`、`manifest.py`、`plugin.py`。
 - `__init__.py` 导出 `PLUGIN_CLASS` 和 `MANIFEST`。
 - `Manifest.key` 要和插件类 `key` 一致。
-- `permissions` 不写就不会注入对应能力。
-- `ctx.client` 是常规命令和高级兼容入口；远程插件拿到的是受限 `SandboxClient`。
+- `permissions` 主要用于安装提示、审计和 UI 展示；不要把它当成公共插件市场的强沙箱。
+- `ctx.client` 是管理员命令和高级兼容入口；远程插件仍不直接拿 token/session，由平台 facade 代发。
 - 交互入口优先用 `ctx.messages`，它只生成标准动作，不直接调用 Telegram API。
 - `ctx.http` 需要 `external_http` + `allowed_hosts`。
 - `ctx.ai` 需要 `ai_text`，细节见 `docs/PLUGIN-AI.md`。
@@ -16,8 +16,10 @@
 - `incoming` 和 `outgoing` 是唯一的消息方向值。
 - `on_command(ctx, cmd, args, event) -> bool`，返回 `True` 表示接管。
 - `on_message` 里别直接假设 `event.outgoing` 一定存在，先 `getattr`。
-- `on_interaction` 用于交互 Bot，按 `entry_key` 和 `payload["event"]["type"]` 分流。
+- `on_interaction` 用于群内玩法、高频按钮和付款后开局，按 `entry_key` 和 `payload["event"]["type"]` 分流。
 - `interaction_entries[].launch_mode` 必填：`bridge` 走交互 Bot，`direct` 走原命令/内部调用，`hybrid` 两边都支持。
+- 新入口建议补 `dispatch_modes`：`admin_command` 表示管理员带前缀命令触发，后续默认由 userbot 交互；`public_keyword` 表示群友关键词触发，后续默认由交互 Bot 交互。
+- 新入口建议补 `message_channels`：`{"admin_command": "userbot_reply", "public_keyword": "interaction_bot"}`；`money_channel` 固定用 `userbot_reply`，普通 Bot 不处理转账。
 - 常见事件：`payment_confirmed`、`keyword`、`message`、`callback_query`、`session_close`。
 - 常见动作：`send_message`、`send_photo`、`send_file`、`delete_message`、`pin_message`、`answer_callback`、`end_session`。
 - `send_message.reply_markup` 可用于 inline keyboard；按钮点击会作为 `callback_query` 事件回到同一活跃会话。
@@ -31,13 +33,13 @@
 - 新交互入口名尽量别再用泛化的 `start_game`，用 `start_<plugin_key>` 更清楚；历史别名只在插件内部兼容。
 - `interaction_profile` 建议显式写：`session_game`、`challenge_game`、`reward_pool`、`utility_trigger`。
 - `session_policy` 写 TTL、重复触发、关闭条件；插件内部状态 key 要和 `session_scope` 对齐。
-- `payload_contract` 描述输入要求，`result_contract` 描述允许动作和 `send_via` 白名单。
-- `send_via` 只能用白名单值；默认只允许 `interaction_bot`。
-- 声明了 `result_contract.actions` 时，运行时会丢弃未声明动作；越权 `send_via` 会写 runtime log。
+- `payload_contract` 描述输入要求，`result_contract` 描述插件主动收窄的动作和 `send_via`；不写时按可信插件标准允许平台三通道。
+- `send_via` 支持 `interaction_bot`、`userbot_reply`、`bbot_notice`；未声明白名单时默认允许三者，由平台统一代发和审计。
+- 声明了 `result_contract.actions` 时，运行时会丢弃未声明动作；显式收窄 `send_via` 后越权会写 runtime log。
 - 常见 `send_via`：`interaction_bot`、`userbot_reply`、`bbot_notice`。
 - `userbot_reply` 由账号 worker 的 userbot 代发，不是插件自由选择发送者。
 - `userbot_reply` 不承接 `reply_markup`，平台会移除按钮；按钮只走 `interaction_bot` 或 `bbot_notice`。
-- `settlement` 只描述中奖/奖金/对账结果，交互 Bot 不直接执行钱相关动作。
+- `settlement` 只描述中奖/奖金/对账结果，普通 Bot 不直接执行钱相关动作；收款确认和发奖仍由 userbot / 平台受控结算完成。
 - `preserve_command_trigger=true` 是硬规则；加交互入口不能影响插件原有命令触发。
 - `command_fallback` 只能提示或受控回退，不能让普通 incoming 消息直接进入 `on_command`。
 - 规则 `concurrency=user` 只表示每用户 CD/每日上限，不等于插件会话也按用户。

@@ -410,6 +410,27 @@ function interactionProfileLabel(profile?: string | null): string | null {
   return null;
 }
 
+function interactionDispatchLabels(entry: FeatureInteractionEntry): string[] {
+  const modes = Array.isArray(entry.dispatch_modes) ? entry.dispatch_modes : [];
+  const labels: string[] = [];
+  if (modes.includes("admin_command")) labels.push("管理员命令");
+  if (modes.includes("public_keyword")) labels.push("群内玩法");
+  if (!labels.length) {
+    if (entry.launch_mode === "direct") return ["管理员命令"];
+    if (entry.launch_mode === "hybrid") return ["管理员命令", "群内玩法"];
+    return ["群内玩法"];
+  }
+  return labels;
+}
+
+function interactionChannelLabel(channel?: string | null): string {
+  if (channel === "userbot_reply") return "人形";
+  if (channel === "interaction_bot") return "交互 Bot";
+  if (channel === "bbot_notice") return "通知 Bot";
+  if (channel === "auto") return "自动";
+  return channel || "自动";
+}
+
 const INTERACTION_PROFILE_ORDER: Array<NonNullable<FeatureInteractionEntry["interaction_profile"]>> = [
   "session_game",
   "challenge_game",
@@ -1030,6 +1051,9 @@ function InteractionRuleEditor({
   const renderEntryOption = (item: InteractionEntryOption) => {
     const isActive = item.value === selectedModule?.value;
     const title = item.entry.title || item.entry.label || item.entry.key;
+    const dispatchLabels = interactionDispatchLabels(item.entry);
+    const adminChannel = item.entry.message_channels?.admin_command;
+    const publicChannel = item.entry.message_channels?.public_keyword;
     return (
       <button
         key={item.value}
@@ -1048,6 +1072,28 @@ function InteractionRuleEditor({
             <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">
               {title}
               {item.entry.description ? ` · ${item.entry.description}` : ""}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {dispatchLabels.map((label) => (
+                <Badge key={label} variant="outline" className="h-5 px-1.5 text-[11px]">
+                  {label}
+                </Badge>
+              ))}
+              {adminChannel ? (
+                <Badge variant="secondary" className="h-5 px-1.5 text-[11px]">
+                  管理:{interactionChannelLabel(adminChannel)}
+                </Badge>
+              ) : null}
+              {publicChannel ? (
+                <Badge variant="secondary" className="h-5 px-1.5 text-[11px]">
+                  群内:{interactionChannelLabel(publicChannel)}
+                </Badge>
+              ) : null}
+              {item.entry.money_channel ? (
+                <Badge variant="outline" className="h-5 px-1.5 text-[11px]">
+                  转账:{interactionChannelLabel(item.entry.money_channel)}
+                </Badge>
+              ) : null}
             </div>
           </div>
           <Badge variant={isActive ? "secondary" : "outline"} className="shrink-0">

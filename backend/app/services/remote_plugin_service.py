@@ -803,8 +803,15 @@ def lint_plugin_metadata_files(plugin_dir: Path) -> list[str]:
                             for item in send_via
                         ):
                             warnings.append(f"plugin.json interaction_entries[{idx}] result_contract.send_via 含有未支持值")
-                    else:
-                        warnings.append(f"plugin.json interaction_entries[{idx}] 建议声明 result_contract")
+                    raw_dispatch_modes = raw_entry.get("dispatch_modes")
+                    if isinstance(raw_dispatch_modes, list) and raw_dispatch_modes:
+                        unsupported = [
+                            str(item).strip()
+                            for item in raw_dispatch_modes
+                            if str(item).strip() not in {"admin_command", "public_keyword"}
+                        ]
+                        if unsupported:
+                            warnings.append(f"plugin.json interaction_entries[{idx}] dispatch_modes 含有未支持值")
                     if not raw_entry.get("interaction_profile"):
                         warnings.append(f"plugin.json interaction_entries[{idx}] 建议声明 interaction_profile")
 
