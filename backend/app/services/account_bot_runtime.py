@@ -1361,10 +1361,31 @@ def _seconds_until_local_midnight(now: float | None = None) -> int:
     return max(60, int(next_midnight - ts))
 
 
+def _interaction_payment_payer_user_id(incoming: Incoming, data: dict[str, Any] | None = None) -> int | None:
+    payload = data if isinstance(data, dict) else {}
+    payer_id = _int_or_none(payload.get("payer_user_id"))
+    if payer_id is not None:
+        return payer_id
+    event_type = str(
+        payload.get("event_type")
+        or (payload.get("event") if isinstance(payload.get("event"), dict) else {}).get("type")
+        or (payload.get("source") if isinstance(payload.get("source"), dict) else {}).get("type")
+        or ""
+    ).strip()
+    if event_type == "payment_confirmed":
+        return incoming.reply_to_user_id
+    return None
+
+
+def _interaction_payment_payer_name(incoming: Incoming, data: dict[str, Any] | None = None) -> str:
+    payload = data if isinstance(data, dict) else {}
+    return str(payload.get("payer_name") or incoming.reply_to_display_name or "").strip()
+
+
 def _interaction_session_user_id(incoming: Incoming, data: dict[str, Any] | None = None) -> int | None:
     payload = data if isinstance(data, dict) else {}
     return (
-        _int_or_none(payload.get("payer_user_id"))
+        _interaction_payment_payer_user_id(incoming, payload)
         or _int_or_none(payload.get("sender_user_id"))
         or incoming.user_id
     )
@@ -1380,7 +1401,10 @@ async def _save_interaction_session(
     entry_key = str(rule.get("module_action") or "").strip()
     if not module_key or not entry_key:
         return
-    session_user_id = _interaction_session_user_id(incoming, data)
+    session_user_id = _interaction_session_user_id(
+        incoming,
+        {**(data or {}), "event_type": event_type},
+    )
     payload = {
         "account_id": incoming.account_id,
         "chat_id": incoming.chat_id,
@@ -2481,6 +2505,14 @@ def _interaction_source_envelope(incoming: Incoming, event_type: str) -> dict[st
 
 def _interaction_actor_envelope(incoming: Incoming, data: dict[str, Any] | None = None) -> dict[str, Any]:
     payload = data if isinstance(data, dict) else {}
+    payer_user_id = _interaction_payment_payer_user_id(incoming, payload)
+    if payer_user_id is not None:
+        payer_name = _interaction_payment_payer_name(incoming, payload)
+        return {
+            "user_id": payer_user_id,
+            "display_name": payer_name or None,
+            "username": incoming.reply_to_username,
+        }
     return {
         "user_id": _int_or_none(payload.get("sender_user_id")) or incoming.user_id,
         "display_name": str(payload.get("sender_name") or incoming.display_name or "").strip() or None,
@@ -2548,8 +2580,8 @@ def _interaction_settlement_envelope(
     mode = str(payout_mode or "manual").strip().lower()
     if mode not in {"auto", "manual"}:
         mode = "manual"
-    winner_user_id = _int_or_none(data.get("sender_user_id") or data.get("payer_user_id"))
-    winner_name = str(data.get("sender_name") or data.get("payer_name") or "").strip() or None
+    winner_user_id = _int_or_none(data.get("payer_user_id") or data.get("sender_user_id"))
+    winner_name = str(data.get("payer_name") or data.get("sender_name") or "").strip() or None
     return {
         "mode": mode,
         "status": "pending",
@@ -2572,8 +2604,9 @@ def _interaction_module_payload(
     data = dict(rule.get("module_config") or {}) if isinstance(rule.get("module_config"), dict) else {}
     data.update(dict(parsed or {}))
     prize = int(rule.get("module_prize") or rule.get("math_prize") or 123)
-    payer_user_id = _int_or_none(data.get("payer_user_id")) or incoming.user_id
-    payer_name = str(data.get("payer_name") or incoming.display_name or "")
+    data["event_type"] = event_type
+    payer_user_id = _interaction_payment_payer_user_id(incoming, data) or incoming.user_id
+    payer_name = _interaction_payment_payer_name(incoming, data) or incoming.display_name or ""
     event = _interaction_event_payload(incoming, rule, event_type, parsed)
     source = _interaction_source_envelope(incoming, event_type)
     actor = _interaction_actor_envelope(incoming, data)

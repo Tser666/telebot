@@ -14,6 +14,12 @@
 
 ## [Unreleased]
 
+## [0.31.5] — 2026-06-26 · patch · 交互玩法付款人归属修复
+
+### Fixed
+- 修复转账通知 Bot 回复付款人消息后触发交互玩法时，TelePilot 将通知 Bot 误作为玩法 actor / session owner，导致 21 点等 inline keyboard 玩法按钮点击只 ACK 但无后续响应的问题。
+- 交互玩法 payload 现在在 `payment_confirmed` 事件中优先使用显式 `payer_user_id`，没有时使用转账通知所回复消息的原始发送者作为付款人；通知 Bot 身份仍保留在 `sender_*` 与 source 字段中。
+
 ## [0.31.4] — 2026-06-25 · patch · CI 与无奖金入口兼容修复
 
 ### Fixed
