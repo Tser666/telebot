@@ -3083,15 +3083,15 @@ async def _apply_interaction_actions(
             text = str(action.get("text") or "").strip()
             if not text:
                 continue
-            edit_message_id = None
+            edit_message_id = _int_or_none(action.get("edit_message_id"))
             delete_message_id = None
-            if replace_message_id is not None and send_via == "interaction_bot":
+            if edit_message_id is None and replace_message_id is not None and send_via == "interaction_bot":
                 edit_message_id = replace_message_id
                 replace_message_id = None
-            elif replace_message_id is not None:
+            elif edit_message_id is None and replace_message_id is not None:
                 delete_message_id = replace_message_id
                 replace_message_id = None
-            ok, _result = await _send_interaction_action_message(
+            ok, result = await _send_interaction_action_message(
                 incoming,
                 text,
                 reply_to_message_id=reply_to_message_id,
@@ -3101,6 +3101,23 @@ async def _apply_interaction_actions(
             )
             if ok and delete_message_id is not None:
                 await _delete_interaction_placeholder(incoming, delete_message_id)
+            # support pin action
+            if ok and send_via == "interaction_bot" and action.get("pin"):
+                msg_id = edit_message_id or _interaction_delivery_message_id(result)
+                if msg_id is not None and incoming.chat_id is not None:
+                    token = await _resolve_interaction_action_token(incoming, send_via)
+                    if token:
+                        try:
+                            await account_bot_service.call_bot_api(token, "pinChatMessage", {"chat_id": incoming.chat_id, "message_id": msg_id})
+                        except Exception:
+                            pass
+            # support save_message_id_key (save sent message ID to Redis for later edits)
+            save_key = str(action.get("save_message_id_key") or "").strip()
+            if ok and save_key:
+                msg_id = _interaction_delivery_message_id(result)
+                if msg_id is not None:
+                    redis_client = get_redis()
+                    await redis_client.set(save_key, str(msg_id), ex=7200)
             continue
         if action_type in {"send_photo", "send_file"}:
             raw_photo = str(action.get("photo_base64") or action.get("file_base64") or "").strip()

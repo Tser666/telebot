@@ -14,6 +14,13 @@
 
 ## [Unreleased]
 
+## [0.31.6] — 2026-06-26 · patch · 交互玩法运行时增强
+
+### Added
+- `_apply_interaction_actions` 新增通用 `send_message` 扩展字段：`edit_message_id`（插件指定编辑目标消息）、`pin`（发送后置顶，默认不置顶）、`save_message_id_key`（发送后将 message_id 写入 Redis 供后续编辑）。
+- 交互 Bot 轮询配置新增 `callback_query` 事件订阅，按钮回调通过通用 `_try_handle_interaction_module_message` 路由到插件。
+
+
 ## [0.31.5] — 2026-06-26 · patch · 交互玩法付款人归属修复
 
 ### Fixed
