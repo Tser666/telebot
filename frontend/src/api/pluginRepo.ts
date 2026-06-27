@@ -4,6 +4,7 @@ import type {
   InstallFromRepoBody,
   PluginRepo,
   PluginRepoCreate,
+  PluginRepoCredentialUpdate,
   PluginRepoPlugin,
 } from "@/types/pluginRepo";
 
@@ -16,6 +17,14 @@ export async function fetchPluginRepos(): Promise<PluginRepo[]> {
 
 export async function addPluginRepo(body: PluginRepoCreate): Promise<PluginRepo> {
   const { data } = await api.post<PluginRepo>(BASE, body);
+  return data;
+}
+
+export async function updatePluginRepoCredential(
+  id: number,
+  body: PluginRepoCredentialUpdate,
+): Promise<PluginRepo> {
+  const { data } = await api.put<PluginRepo>(`${BASE}/${id}/credential`, body);
   return data;
 }
 

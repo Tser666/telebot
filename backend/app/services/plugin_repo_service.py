@@ -25,11 +25,14 @@ import hashlib
 import logging
 import re
 import shutil
+from base64 import b64encode
 from pathlib import Path
+from urllib.parse import urlparse
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..crypto import decrypt_str, encrypt_str
 from ..db.models.account import Account
 from ..db.models.feature import FEATURE_STATE_DISABLED, AccountFeature, Feature
 from ..db.models.plugin import (
@@ -42,7 +45,6 @@ from ..db.models.plugin import (
 from ..db.models.plugin_repo import PluginRepo
 from ..schemas.plugin_repo import PluginRepoPlugin
 from ..settings import settings
-from . import remote_plugin_service as rps
 from .remote_plugin_service import (
     DuplicatePluginName,
     InvalidPluginMetadata,
@@ -63,6 +65,21 @@ from .remote_plugin_service import (
 )
 
 log = logging.getLogger(__name__)
+
+PLUGIN_REPO_AUTH_NONE = "none"
+PLUGIN_REPO_AUTH_GITHUB_TOKEN = "github_token"
+
+
+async def git_env_for_source_url(db: AsyncSession, source_url: str) -> dict[str, str] | None:
+    """返回已保存插件仓库 URL 对应的 git 临时凭证环境。"""
+    if not source_url or source_url.startswith("local://"):
+        return None
+    row = (
+        await db.execute(select(PluginRepo).where(PluginRepo.url == source_url.strip()))
+    ).scalar_one_or_none()
+    if row is None:
+        return None
+    return _github_token_env(row.url, _repo_credential(row))
 
 
 # ─────────────────────────────────────────────────────
@@ -87,6 +104,10 @@ class DuplicatePluginRepo(PluginRepoError):
 
 class PluginNotInRepo(PluginRepoError):
     """仓库内找不到指定名字的插件。"""
+
+
+class InvalidPluginRepoCredential(PluginRepoError):
+    """插件仓库凭证不合法。"""
 
 
 # ─────────────────────────────────────────────────────
@@ -115,7 +136,78 @@ def _cache_dir_for(url: str) -> Path:
     return _cache_root() / digest
 
 
-async def _ensure_repo_cached(url: str, *, force_refresh: bool = False) -> Path:
+def _normalize_repo_auth_type(auth_type: str | None, token: str | None = None) -> str:
+    raw = str(auth_type or "").strip().lower()
+    if raw in {"", "public"}:
+        return PLUGIN_REPO_AUTH_GITHUB_TOKEN if token and token.strip() else PLUGIN_REPO_AUTH_NONE
+    if raw == PLUGIN_REPO_AUTH_NONE:
+        return PLUGIN_REPO_AUTH_NONE
+    if raw in {"github", PLUGIN_REPO_AUTH_GITHUB_TOKEN, "token", "pat"}:
+        return PLUGIN_REPO_AUTH_GITHUB_TOKEN
+    raise InvalidPluginRepoCredential(
+        "BAD_REPO_CREDENTIAL",
+        "插件仓库凭证类型仅支持 github_token 或 none",
+    )
+
+
+def _validate_github_token(token: str) -> str:
+    value = token.strip()
+    if not value:
+        raise InvalidPluginRepoCredential(
+            "BAD_REPO_CREDENTIAL",
+            "GitHub Token 不能为空；如不需要私有仓库凭证请清除凭证。",
+        )
+    if any(ch.isspace() for ch in value):
+        raise InvalidPluginRepoCredential(
+            "BAD_REPO_CREDENTIAL",
+            "GitHub Token 不能包含空白字符。",
+        )
+    if len(value) < 8:
+        raise InvalidPluginRepoCredential(
+            "BAD_REPO_CREDENTIAL",
+            "GitHub Token 长度过短。",
+        )
+    return value
+
+
+def _repo_credential(row: PluginRepo) -> str | None:
+    token_enc = getattr(row, "credential_enc", None)
+    if not token_enc:
+        return None
+    try:
+        return decrypt_str(str(token_enc))
+    except ValueError as exc:
+        raise InvalidPluginRepoCredential(
+            "REPO_CREDENTIAL_DECRYPT_FAILED",
+            "插件仓库凭证无法解密，通常是 MASTER_KEY 已变更。请恢复原 MASTER_KEY，或重新保存该仓库凭证。",
+        ) from exc
+
+
+def _github_token_env(url: str, token: str | None) -> dict[str, str] | None:
+    if not token:
+        return None
+    parsed = urlparse(url.strip())
+    if parsed.scheme.lower() != "https" or parsed.hostname not in {"github.com", "www.github.com"}:
+        raise InvalidPluginRepoCredential(
+            "BAD_REPO_CREDENTIAL_TARGET",
+            "GitHub Token 仅支持 https://github.com/... 插件仓库。SSH 私有仓库请使用服务器侧 SSH key。",
+        )
+    # 不把 token 拼进 URL，避免污染 DB、缓存 key、git remote 和错误日志。
+    basic = b64encode(f"x-access-token:{token}".encode()).decode("ascii")
+    return {
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
+        "GIT_CONFIG_VALUE_0": f"Authorization: Basic {basic}",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+
+
+async def _ensure_repo_cached(
+    url: str,
+    *,
+    force_refresh: bool = False,
+    token: str | None = None,
+) -> Path:
     """确保仓库已克隆到本地缓存；返回缓存目录路径。
 
     - 首次：``git clone <url>``
@@ -123,6 +215,7 @@ async def _ensure_repo_cached(url: str, *, force_refresh: bool = False) -> Path:
     - 失败：清理半完成的克隆目录，向上抛 ``GitOperationFailed``
     """
     _validate_source_url(url)
+    git_env = _github_token_env(url, token)
     target = _cache_dir_for(url)
 
     if not target.exists() or force_refresh and target.exists() and not (target / ".git").exists():
@@ -131,7 +224,7 @@ async def _ensure_repo_cached(url: str, *, force_refresh: bool = False) -> Path:
             shutil.rmtree(target, ignore_errors=True)
         target.parent.mkdir(parents=True, exist_ok=True)
         try:
-            await _run_git("clone", url, str(target), timeout=180.0)
+            await _run_git("clone", url, str(target), timeout=180.0, env=git_env)
         except Exception:
             if target.exists():
                 shutil.rmtree(target, ignore_errors=True)
@@ -140,7 +233,7 @@ async def _ensure_repo_cached(url: str, *, force_refresh: bool = False) -> Path:
 
     # 缓存命中：普通列表读取允许用旧副本兜底；强制刷新必须暴露失败，避免 UI 误报成功。
     try:
-        await _run_git("fetch", "--all", "--prune", cwd=target, timeout=60.0)
+        await _run_git("fetch", "--all", "--prune", cwd=target, timeout=60.0, env=git_env)
         # 用 origin 的默认分支做硬重置；--ff-only 在分支变更时会失败，硬重置更鲁棒
         head = (await _run_git(
             "symbolic-ref", "refs/remotes/origin/HEAD", cwd=target, timeout=10.0,
@@ -212,7 +305,11 @@ async def list_plugins_in_repo(
     """
     row = await _get_repo(db, repo_id)
 
-    repo_dir = await _ensure_repo_cached(row.url, force_refresh=force_refresh)
+    repo_dir = await _ensure_repo_cached(
+        row.url,
+        force_refresh=force_refresh,
+        token=_repo_credential(row),
+    )
     raw = _scan_plugins(repo_dir)
 
     installed_rows = (
@@ -285,6 +382,8 @@ async def create_repo(
     *,
     name: str | None = None,
     description: str | None = None,
+    auth_type: str | None = None,
+    credential: str | None = None,
 ) -> PluginRepo:
     """新增仓库行。
 
@@ -301,12 +400,51 @@ async def create_repo(
     if existing is not None:
         raise DuplicatePluginRepo("REPO_EXISTS", f"仓库已保存: {url}")
 
+    normalized_auth_type = _normalize_repo_auth_type(auth_type, credential)
+    credential_enc: str | None = None
+    if normalized_auth_type == PLUGIN_REPO_AUTH_GITHUB_TOKEN:
+        token = _validate_github_token(credential or "")
+        _github_token_env(url, token)
+        credential_enc = encrypt_str(token)
+
     row = PluginRepo(
         url=url,
         name=(name or "").strip() or _name_from_url(url),
         description=(description or "").strip(),
+        auth_type=normalized_auth_type,
+        credential_enc=credential_enc,
     )
     db.add(row)
+    await db.flush()
+    return row
+
+
+async def update_repo_credential(
+    db: AsyncSession,
+    repo_id: int,
+    *,
+    auth_type: str | None,
+    token: str | None,
+) -> PluginRepo:
+    """更新或清除插件仓库凭证。"""
+    row = await _get_repo(db, repo_id)
+    if not (token or "").strip() or str(auth_type or "").strip().lower() in {
+        PLUGIN_REPO_AUTH_NONE,
+        "public",
+    }:
+        row.auth_type = PLUGIN_REPO_AUTH_NONE
+        row.credential_enc = None
+        await db.flush()
+        return row
+    normalized_auth_type = _normalize_repo_auth_type(auth_type, token)
+    if normalized_auth_type == PLUGIN_REPO_AUTH_NONE:
+        row.auth_type = PLUGIN_REPO_AUTH_NONE
+        row.credential_enc = None
+    else:
+        value = _validate_github_token(token or "")
+        _github_token_env(row.url, value)
+        row.auth_type = normalized_auth_type
+        row.credential_enc = encrypt_str(value)
     await db.flush()
     return row
 
@@ -358,7 +496,7 @@ async def install_plugin_from_repo(
       7. 触发 worker 热加载
     """
     row = await _get_repo(db, repo_id)
-    repo_dir = await _ensure_repo_cached(row.url)
+    repo_dir = await _ensure_repo_cached(row.url, token=_repo_credential(row))
 
     # 扫描定位插件子目录
     raw = _scan_plugins(repo_dir)
@@ -382,14 +520,7 @@ async def install_plugin_from_repo(
     _validate_runtime_plugin_shape(target_dir, meta)
     final_name = meta.name
 
-    # 单插件仓库（target_dir == repo_dir）走 remote_plugin_service.install 复用 clone
-    # 路径，行为与“直接粘 URL 装”完全等价
-    if target_dir == repo_dir:
-        return await rps.install(
-            db, row.url, default_enabled=default_enabled,
-        )
-
-    # 多插件仓库子目录 → 复制 target_dir 到 plugins/installed/<final_name>/
+    # 统一从缓存副本复制。公开仓库与私有仓库行为一致；私有仓库不会触发二次无凭证 clone。
     install_path = _plugin_dir(final_name)
     staging = install_path.parent / f"{install_path.name}.installing"
 

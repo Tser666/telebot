@@ -25,6 +25,7 @@ def test_redactor_masks_text_and_nested_fields() -> None:
     assert out["nested"]["api_key"] == "***"
     assert out["proxy_url"] == "http://***:***@example.com:8080"
     assert redact_text("Bearer abcdefghijklmnop") == "Bearer ***"
+    assert redact_text("Authorization: Basic eC1hY2Nlc3MtdG9rZW46Z2hwX3NlY3JldDEyMw==") == "Authorization: Basic ***"
     assert redact_text("socks5://user:pass@127.0.0.1:1080") == "socks5://***:***@127.0.0.1:1080"
     bot_url = "https://api.telegram.org/bot123456:secret-token/getUpdates"
     redacted_url = redact_text(bot_url)

@@ -47,6 +47,14 @@ async def test_plugin_repo_routes_require_login() -> None:
         assert r.status_code == 401
         assert r.json()["error"]["code"] == "AUTH_REQUIRED"
 
+        r = await c.put(
+            "/api/plugin-repos/1/credential",
+            headers=_csrf_headers(),
+            json={"auth_type": "github_token", "token": "ghp_private123"},
+        )
+        assert r.status_code == 401
+        assert r.json()["error"]["code"] == "AUTH_REQUIRED"
+
         r = await c.get("/api/plugin-repos/local/plugins")
         assert r.status_code == 401
         assert r.json()["error"]["code"] == "AUTH_REQUIRED"

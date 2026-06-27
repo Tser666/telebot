@@ -26,6 +26,7 @@ import ast
 import asyncio
 import json
 import logging
+import os
 import re
 import shutil
 import tempfile
@@ -54,6 +55,7 @@ from ..worker.ipc import CMD_RELOAD_CONFIG, publish_cmd_with_ack
 
 # 直接复用现有 loader 的配置热更新路径；installed 插件在 loader 里按 DB 双开关按需加载
 from ..worker.plugins.loader import reload_account_config
+from .redactor import redact_text
 
 log = logging.getLogger(__name__)
 
@@ -486,7 +488,12 @@ def _derive_name_from_url(url: str) -> str:
     return last
 
 
-async def _run_git(*args: str, cwd: str | Path | None = None, timeout: float = 120.0) -> str:
+async def _run_git(
+    *args: str,
+    cwd: str | Path | None = None,
+    timeout: float = 120.0,
+    env: dict[str, str] | None = None,
+) -> str:
     """以子进程跑 ``git <args>``；失败抛 ``GitOperationFailed``。返回 stdout（已解码）。
 
     Args:
@@ -502,6 +509,7 @@ async def _run_git(*args: str, cwd: str | Path | None = None, timeout: float = 1
             "git",
             *args,
             cwd=str(cwd) if cwd else None,
+            env={**os.environ, **env} if env else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -524,13 +532,13 @@ async def _run_git(*args: str, cwd: str | Path | None = None, timeout: float = 1
         await proc.wait()
         raise GitOperationFailed(
             "GIT_TIMEOUT",
-            f"git {' '.join(args)} 超时（{timeout}s）",
+            f"git {redact_text(' '.join(args))} 超时（{timeout}s）",
         ) from None
     if proc.returncode != 0:
         msg = (stderr or b"").decode("utf-8", errors="replace").strip()
         raise GitOperationFailed(
             "GIT_FAILED",
-            f"git {' '.join(args)} 失败 (rc={proc.returncode}): {msg}",
+            f"git {redact_text(' '.join(args))} 失败 (rc={proc.returncode}): {redact_text(msg)}",
         )
     return (stdout or b"").decode("utf-8", errors="replace")
 
@@ -925,12 +933,25 @@ def _find_plugin_metadata_in_repo(repo_dir: Path, name: str) -> tuple[PluginMeta
     )
 
 
+async def _git_env_for_installed_source(
+    db: AsyncSession,
+    source_url: str,
+) -> dict[str, str] | None:
+    """复用插件仓库保存的私有仓库凭证。"""
+    if not source_url:
+        return None
+    from . import plugin_repo_service
+
+    return await plugin_repo_service.git_env_for_source_url(db, source_url)
+
+
 async def _copy_plugin_from_source_url(
     *,
     name: str,
     source_url: str,
     target: Path,
     replace_existing: bool,
+    git_env: dict[str, str] | None = None,
 ) -> None:
     """Clone ``source_url`` and copy plugin ``name`` into ``target``.
 
@@ -959,7 +980,7 @@ async def _copy_plugin_from_source_url(
     try:
         with tempfile.TemporaryDirectory(prefix="telepilot-plugin-update-") as tmp:
             repo_dir = Path(tmp) / "repo"
-            await _run_git("clone", "--depth", "1", source_url, str(repo_dir), timeout=180.0)
+            await _run_git("clone", "--depth", "1", source_url, str(repo_dir), timeout=180.0, env=git_env)
             _, source_dir = _find_plugin_metadata_in_repo(repo_dir, name)
             shutil.copytree(
                 source_dir,
@@ -1017,7 +1038,8 @@ async def check_remote_plugin_update(db: AsyncSession, row: InstalledPlugin) -> 
             source_url = str(row.source_url or "")
             if not source_url:
                 raise RemotePluginError("SOURCE_URL_MISSING", f"插件 {row.key} 缺少 source_url，无法检查更新")
-            await _run_git("clone", "--depth", "1", source_url, str(repo_dir), timeout=180.0)
+            git_env = await _git_env_for_installed_source(db, source_url)
+            await _run_git("clone", "--depth", "1", source_url, str(repo_dir), timeout=180.0, env=git_env)
             meta, plugin_dir = _find_plugin_metadata_in_repo(repo_dir, row.key)
             _set_remote_update_info(
                 row,
@@ -1031,7 +1053,7 @@ async def check_remote_plugin_update(db: AsyncSession, row: InstalledPlugin) -> 
             row,
             latest_version=row.version,
             update_available=False,
-            last_update_check_error=f"{type(exc).__name__}: {exc}",
+            last_update_check_error=redact_text(f"{type(exc).__name__}: {exc}"),
         )
     await db.flush()
     return row
@@ -1431,26 +1453,30 @@ async def update(db: AsyncSession, name: str) -> RemotePluginView:
         raise RemotePluginNotFound("PLUGIN_NOT_FOUND", f"插件不存在: {name}")
 
     target = Path(row.installed_path or _existing_plugin_dir(name))
+    source_url = str(row.source_url or "")
+    git_env = await _git_env_for_installed_source(db, source_url) if source_url else None
     restored_from_source = False
     if not target.exists():
         await _copy_plugin_from_source_url(
             name=name,
-            source_url=str(row.source_url or ""),
+            source_url=source_url,
             target=target,
             replace_existing=False,
+            git_env=git_env,
         )
         restored_from_source = True
 
     # git pull（带 timeout）。如果插件是从多插件仓库子目录复制安装的，
     # 安装目录没有 .git，此时临时 clone source_url 后按 plugin.json.name 定位子目录覆盖。
     if (target / ".git").exists():
-        await _run_git("pull", "--ff-only", cwd=target, timeout=60.0)
+        await _run_git("pull", "--ff-only", cwd=target, timeout=60.0, env=git_env)
     elif not restored_from_source:
         await _copy_plugin_from_source_url(
             name=name,
-            source_url=str(row.source_url or ""),
+            source_url=source_url,
             target=target,
             replace_existing=True,
+            git_env=git_env,
         )
 
     meta = _read_plugin_metadata(target, fallback_name=name)

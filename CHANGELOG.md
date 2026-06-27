@@ -20,6 +20,24 @@
 
 ## [Unreleased]
 
+## [0.34.3] — 2026-06-27 · patch（补丁版本） · 私有插件仓库兼容
+
+### Added
+- 插件仓库支持 GitHub 私有仓库：添加仓库或编辑已保存仓库时可填写 GitHub Token，后端使用 `MASTER_KEY` 加密保存，前端和 API 只展示是否已配置凭证。
+- 新增 `PUT /api/plugin-repos/{id}/credential`，用于更新或清除插件仓库凭证。
+- 新增 `plugin_repo.auth_type` 与 `plugin_repo.credential_enc` 数据库字段，并补充 Alembic 迁移。
+
+### Changed
+- 插件仓库拉取私有 GitHub 仓库时改用临时 git extraheader 注入 token，不把 token 拼进仓库 URL、缓存 key、git remote 或 API 响应。
+- 从插件仓库安装插件统一从已刷新的仓库缓存复制，避免私有单插件仓库二次无凭证 clone 失败。
+- 从私有插件仓库安装的插件在检查更新和执行更新时会复用对应仓库保存的凭证。
+
+### Fixed
+- git 失败、超时和更新检查错误中的敏感 token 会统一脱敏，避免私有仓库凭证出现在错误提示或日志中。
+
+### Tests
+- 补充私有 GitHub 仓库凭证、git extraheader、错误脱敏、凭证清除和鉴权路由回归测试。
+
 ## [0.34.2] — 2026-06-27 · patch（补丁版本） · 分支审查与插件文档校准
 
 ### Fixed

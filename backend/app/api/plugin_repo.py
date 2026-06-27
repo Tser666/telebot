@@ -5,7 +5,12 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ..deps import CurrentUser, DBSession
-from ..schemas.plugin_repo import PluginRepoCreate, PluginRepoOut, PluginRepoPlugin
+from ..schemas.plugin_repo import (
+    PluginRepoCreate,
+    PluginRepoCredentialUpdate,
+    PluginRepoOut,
+    PluginRepoPlugin,
+)
 from ..schemas.remote_plugin import RemotePluginOut
 from ..services import plugin_repo_service as svc
 from ..services.plugin_repo_service import (
@@ -36,8 +41,14 @@ async def list_plugin_repos(db: DBSession, _user: CurrentUser):
 async def create_plugin_repo(body: PluginRepoCreate, db: DBSession, _user: CurrentUser):
     """保存一个新仓库（仅写库；浏览插件请单独调 ``/{id}/plugins``）。"""
     try:
+        credential = body.credential
         row = await svc.create_repo(
-            db, body.url, name=body.name, description=body.description,
+            db,
+            body.url,
+            name=body.name,
+            description=body.description,
+            auth_type=credential.auth_type if credential else None,
+            credential=credential.token if credential else None,
         )
         await db.commit()
         await db.refresh(row)
@@ -49,6 +60,30 @@ async def create_plugin_repo(body: PluginRepoCreate, db: DBSession, _user: Curre
     except PluginRepoError as e:
         raise HTTPException(400, detail={"code": e.code, "message": e.message}) from e
     except RemotePluginError as e:
+        raise HTTPException(400, detail={"code": e.code, "message": e.message}) from e
+
+
+@router.put("/{repo_id}/credential", response_model=PluginRepoOut)
+async def update_plugin_repo_credential(
+    repo_id: int,
+    body: PluginRepoCredentialUpdate,
+    db: DBSession,
+    _user: CurrentUser,
+):
+    """更新或清除插件仓库凭证。token 不会在响应中回显。"""
+    try:
+        row = await svc.update_repo_credential(
+            db,
+            repo_id,
+            auth_type=body.auth_type,
+            token=body.token,
+        )
+        await db.commit()
+        await db.refresh(row)
+        return row
+    except PluginRepoNotFound as e:
+        raise HTTPException(404, detail={"code": e.code, "message": e.message}) from e
+    except PluginRepoError as e:
         raise HTTPException(400, detail={"code": e.code, "message": e.message}) from e
 
 

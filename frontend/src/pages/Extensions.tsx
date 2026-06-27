@@ -19,6 +19,7 @@ import {
   FileText,
   GitFork,
   Globe2,
+  KeyRound,
   ListChecks,
   Network,
   Power,
@@ -96,6 +97,7 @@ import {
   refreshRepoPlugins,
   installLocalPlugin,
   installFromRepo,
+  updatePluginRepoCredential,
 } from "@/api/pluginRepo";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -545,6 +547,8 @@ function RemoteInstallCard() {
   const qc = useQueryClient();
   const [addUrl, setAddUrl] = useState("");
   const [addName, setAddName] = useState("");
+  const [addToken, setAddToken] = useState("");
+  const [repoTokens, setRepoTokens] = useState<Record<number, string>>({});
   const [expandedRepoId, setExpandedRepoId] = useState<number | null>(null);
   const [refreshingRepoId, setRefreshingRepoId] = useState<number | null>(null);
 
@@ -577,12 +581,38 @@ function RemoteInstallCard() {
 
   // 添加仓库
   const addRepoMut = useMutation({
-    mutationFn: () => addPluginRepo({ url: addUrl.trim(), name: addName.trim() || undefined }),
+    mutationFn: () => addPluginRepo({
+      url: addUrl.trim(),
+      name: addName.trim() || undefined,
+      credential: addToken.trim()
+        ? { auth_type: "github_token", token: addToken.trim() }
+        : undefined,
+    }),
     onSuccess: (row) => {
       toast.success(`已添加仓库 ${row.name || row.url}`);
       setAddUrl("");
       setAddName("");
+      setAddToken("");
       qc.invalidateQueries({ queryKey: PLUGIN_REPOS_QK });
+    },
+    onError: (err) => toast.error(getErrMsg(err)),
+  });
+
+  const updateRepoCredentialMut = useMutation({
+    mutationFn: ({ id, token }: { id: number; token: string }) =>
+      updatePluginRepoCredential(id, {
+        auth_type: token.trim() ? "github_token" : "none",
+        token: token.trim() || null,
+      }),
+    onSuccess: (row) => {
+      toast.success(row.has_credentials ? "仓库凭证已保存" : "仓库凭证已清除");
+      setRepoTokens((prev) => {
+        const next = { ...prev };
+        delete next[row.id];
+        return next;
+      });
+      qc.invalidateQueries({ queryKey: PLUGIN_REPOS_QK });
+      qc.invalidateQueries({ queryKey: ["repo-plugins", row.id] });
     },
     onError: (err) => toast.error(getErrMsg(err)),
   });
@@ -636,21 +666,31 @@ function RemoteInstallCard() {
       </CardHeader>
       <CardContent className="space-y-4">
         {/* 添加仓库 */}
-        <div className="flex gap-2">
-          <input
-            className="flex h-9 w-40 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        <div className="grid gap-2 md:grid-cols-[160px_minmax(220px,1fr)_minmax(180px,280px)_auto]">
+          <Input
+            className="h-9 rounded-md bg-background"
             placeholder="仓库名（可选）"
             value={addName}
             onChange={(e) => setAddName(e.target.value)}
+            disabled={addRepoMut.isPending}
           />
-          <input
-            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          <Input
+            className="h-9 rounded-md bg-background"
             placeholder="https://github.com/user/repo.git"
             value={addUrl}
             onChange={(e) => setAddUrl(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && addUrl.trim()) addRepoMut.mutate();
             }}
+            disabled={addRepoMut.isPending}
+          />
+          <Input
+            className="h-9 rounded-md bg-background"
+            type="password"
+            autoComplete="off"
+            placeholder="GitHub Token（私有库可选）"
+            value={addToken}
+            onChange={(e) => setAddToken(e.target.value)}
             disabled={addRepoMut.isPending}
           />
           <Button
@@ -667,6 +707,9 @@ function RemoteInstallCard() {
               </>
             )}
           </Button>
+          <p className="text-xs text-muted-foreground md:col-span-4">
+            私有 GitHub 仓库请填写 fine-grained token，至少授予对应仓库 Contents 读取权限。Token 会加密保存且不会回显。
+          </p>
         </div>
 
         {/* 仓库列表 */}
@@ -691,6 +734,12 @@ function RemoteInstallCard() {
                       {repo.url}
                     </span>
                   )}
+                  {repo.has_credentials ? (
+                    <MetaBadge tone="success" className="shrink-0">
+                      <KeyRound className="mr-1 h-3 w-3" />
+                      私有凭证
+                    </MetaBadge>
+                  ) : null}
                   <MetaBadge tone="outline" className="shrink-0">
                     {expandedRepoId === repo.id && pluginsQ.isLoading ? "加载中…" : "仓库"}
                   </MetaBadge>
@@ -728,6 +777,43 @@ function RemoteInstallCard() {
                 {/* 展开：仓库内插件列表 */}
                 {expandedRepoId === repo.id && (
                   <div className="border-t px-3 py-2">
+                    <div className="mb-3 grid gap-2 rounded-md bg-muted/30 p-2 sm:grid-cols-[minmax(180px,1fr)_auto_auto] sm:items-center">
+                      <Input
+                        className="h-8 rounded-md bg-background"
+                        type="password"
+                        autoComplete="off"
+                        placeholder={repo.has_credentials ? "输入新 GitHub Token 可替换凭证" : "GitHub Token（私有库可选）"}
+                        value={repoTokens[repo.id] ?? ""}
+                        onChange={(event) =>
+                          setRepoTokens((prev) => ({ ...prev, [repo.id]: event.target.value }))
+                        }
+                        disabled={updateRepoCredentialMut.isPending}
+                      />
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8"
+                        disabled={updateRepoCredentialMut.isPending || !(repoTokens[repo.id] ?? "").trim()}
+                        onClick={() =>
+                          updateRepoCredentialMut.mutate({
+                            id: repo.id,
+                            token: repoTokens[repo.id] ?? "",
+                          })
+                        }
+                      >
+                        <KeyRound className="mr-1 h-3.5 w-3.5" />
+                        保存凭证
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 text-muted-foreground hover:text-destructive"
+                        disabled={updateRepoCredentialMut.isPending || !repo.has_credentials}
+                        onClick={() => updateRepoCredentialMut.mutate({ id: repo.id, token: "" })}
+                      >
+                        清除
+                      </Button>
+                    </div>
                     {pluginsQ.isLoading ? (
                       <div className="flex h-16 items-center justify-center">
                         <Spinner className="text-primary" />

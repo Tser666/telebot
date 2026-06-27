@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from base64 import b64decode
+from types import SimpleNamespace
+
 import pytest
 
 from app.services import plugin_repo_service as svc
+from app.services.remote_plugin_service import GitOperationFailed
 
 
 @pytest.mark.asyncio
@@ -40,3 +44,171 @@ async def test_non_forced_cached_repo_keeps_old_copy_on_git_failure(tmp_path, mo
     monkeypatch.setattr(svc, "_run_git", _run_git_fail)
 
     assert await svc._ensure_repo_cached(url, force_refresh=False) == target
+
+
+def test_github_token_uses_extraheader_env_without_url_mutation() -> None:
+    env = svc._github_token_env("https://github.com/example/private-plugins.git", "ghp_secret123")
+
+    assert env is not None
+    assert env["GIT_CONFIG_KEY_0"] == "http.https://github.com/.extraheader"
+    assert env["GIT_CONFIG_VALUE_0"].startswith("Authorization: Basic ")
+    encoded = env["GIT_CONFIG_VALUE_0"].removeprefix("Authorization: Basic ")
+    assert b64decode(encoded.encode()).decode() == "x-access-token:ghp_secret123"
+    assert "github.com/example/private-plugins.git" not in str(env.values())
+    assert "ghp_secret123" not in str(env.values())
+
+
+def test_github_token_only_applies_to_github_https() -> None:
+    with pytest.raises(svc.InvalidPluginRepoCredential):
+        svc._github_token_env("https://gitlab.com/example/private.git", "ghp_secret123")
+    with pytest.raises(svc.InvalidPluginRepoCredential):
+        svc._github_token_env("git@github.com:example/private.git", "ghp_secret123")
+
+
+@pytest.mark.asyncio
+async def test_ensure_repo_cached_passes_private_github_env(tmp_path, monkeypatch) -> None:
+    url = "https://github.com/example/private-plugins.git"
+    target = tmp_path / "cache" / "repo"
+    calls: list[tuple[tuple[str, ...], dict[str, str] | None]] = []
+
+    monkeypatch.setattr(svc, "_cache_root", lambda: tmp_path / "cache")
+    monkeypatch.setattr(svc, "_cache_dir_for", lambda _url: target)
+
+    async def _run_git_capture(*args, **kwargs):
+        calls.append((tuple(args), kwargs.get("env")))
+        target.mkdir(parents=True, exist_ok=True)
+        (target / ".git").mkdir(exist_ok=True)
+        return ""
+
+    monkeypatch.setattr(svc, "_run_git", _run_git_capture)
+
+    assert await svc._ensure_repo_cached(url, token="ghp_private123") == target
+    assert calls[0][0] == ("clone", url, str(target))
+    assert calls[0][1]["GIT_CONFIG_VALUE_0"].startswith("Authorization: Basic ")
+    assert "ghp_private123" not in calls[0][1]["GIT_CONFIG_VALUE_0"]
+
+
+@pytest.mark.asyncio
+async def test_run_git_redacts_private_token_in_errors(monkeypatch) -> None:
+    class _FakeProc:
+        returncode = 128
+
+        async def communicate(self):
+            return b"", b"fatal: Authentication failed for https://x-access-token:ghp_secret123@github.com/private/repo.git"
+
+    async def _fake_exec(*_args, **_kwargs):
+        return _FakeProc()
+
+    monkeypatch.setattr(svc.shutil, "which", lambda _name: "/usr/bin/git")
+    monkeypatch.setattr("app.services.remote_plugin_service.asyncio.create_subprocess_exec", _fake_exec)
+
+    with pytest.raises(GitOperationFailed) as ex:
+        await svc._run_git("clone", "https://x-access-token:ghp_secret123@github.com/private/repo.git")
+
+    assert "ghp_secret123" not in ex.value.message
+    assert "***:***@github.com" in ex.value.message
+
+
+@pytest.mark.asyncio
+async def test_create_repo_encrypts_github_token(monkeypatch) -> None:
+    stored: list[object] = []
+
+    class _Result:
+        def scalar_one_or_none(self):
+            return None
+
+    class _DB:
+        async def execute(self, _stmt):
+            return _Result()
+
+        def add(self, row):
+            stored.append(row)
+
+        async def flush(self):
+            return None
+
+    monkeypatch.setattr(svc, "encrypt_str", lambda value: f"enc:{value}")
+
+    row = await svc.create_repo(
+        _DB(),
+        "https://github.com/example/private-plugins.git",
+        name="private",
+        auth_type="github_token",
+        credential="ghp_private123",
+    )
+
+    assert row.auth_type == "github_token"
+    assert row.credential_enc == "enc:ghp_private123"
+    assert row.has_credentials is True
+    assert stored == [row]
+
+
+@pytest.mark.asyncio
+async def test_update_repo_credential_can_clear(monkeypatch) -> None:
+    repo = SimpleNamespace(
+        id=1,
+        url="https://github.com/example/private-plugins.git",
+        auth_type="github_token",
+        credential_enc="enc:old",
+    )
+
+    class _Result:
+        def scalar_one_or_none(self):
+            return repo
+
+    class _DB:
+        async def execute(self, _stmt):
+            return _Result()
+
+        async def flush(self):
+            return None
+
+    row = await svc.update_repo_credential(_DB(), 1, auth_type="none", token=None)
+
+    assert row.auth_type == "none"
+    assert row.credential_enc is None
+
+
+@pytest.mark.asyncio
+async def test_update_repo_credential_empty_token_clears_even_with_default_auth_type() -> None:
+    repo = SimpleNamespace(
+        id=1,
+        url="https://github.com/example/private-plugins.git",
+        auth_type="github_token",
+        credential_enc="enc:old",
+    )
+
+    class _Result:
+        def scalar_one_or_none(self):
+            return repo
+
+    class _DB:
+        async def execute(self, _stmt):
+            return _Result()
+
+        async def flush(self):
+            return None
+
+    row = await svc.update_repo_credential(_DB(), 1, auth_type="github_token", token="")
+
+    assert row.auth_type == "none"
+    assert row.credential_enc is None
+
+
+@pytest.mark.asyncio
+async def test_create_repo_explicit_github_auth_requires_token() -> None:
+    class _Result:
+        def scalar_one_or_none(self):
+            return None
+
+    class _DB:
+        async def execute(self, _stmt):
+            return _Result()
+
+    with pytest.raises(svc.InvalidPluginRepoCredential):
+        await svc.create_repo(
+            _DB(),
+            "https://github.com/example/private-plugins.git",
+            auth_type="github_token",
+            credential=None,
+        )

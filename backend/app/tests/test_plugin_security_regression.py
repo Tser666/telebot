@@ -1056,7 +1056,7 @@ class TestPluginRepoInstallFlow:
             extra_py="import httpx\nhttpx.get('https://example.com')\n",
         )
 
-        async def _cached(_url: str):
+        async def _cached(_url: str, **_kwargs):
             return repo_dir
 
         monkeypatch.setattr(repo_svc, "_ensure_repo_cached", _cached)
