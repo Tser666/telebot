@@ -3995,6 +3995,76 @@ async def test_solo_owner_session_blocks_other_user_callback(monkeypatch) -> Non
 
 
 @pytest.mark.asyncio
+async def test_paid_pool_session_does_not_block_plain_message_before_plugin(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    rule = {
+        "id": "ten-half-paid",
+        "name": "十点半",
+        "enabled": True,
+        "chat_ids": [-100123],
+        "trigger_mode": "both",
+        "action": "module",
+        "module_key": "ten_half",
+        "module_action": "start_ten_half",
+        "module_session_scope": "chat",
+        "participant_policy": "paid_pool",
+    }
+    redis = _MemoryRedis()
+    await redis.set(
+        account_bot_runtime._interaction_session_key(1, rule, -100123, None),
+        json.dumps(
+            {
+                "account_id": 1,
+                "chat_id": -100123,
+                "rule_id": "ten-half-paid",
+                "module_key": "ten_half",
+                "entry_key": "start_ten_half",
+                "started_by_user_id": 111,
+                "event_type": "payment_confirmed",
+            },
+            ensure_ascii=False,
+        ),
+    )
+    run_entry = AsyncMock(return_value=(True, None, []))
+    send = AsyncMock()
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: redis)
+    monkeypatch.setattr(account_bot_runtime, "_run_worker_interaction_entry", run_entry)
+    monkeypatch.setattr(account_bot_service, "send_message", send)
+    monkeypatch.setattr(
+        account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(return_value={"enabled": True, "rules": [rule]}),
+    )
+
+    await account_bot_runtime._handle_interaction_update(
+        1,
+        "bbot-token",
+        {
+            "update_id": 16,
+            "message": {
+                "message_id": 123,
+                "text": "1",
+                "from": {"id": 222, "first_name": "路过"},
+                "chat": {"id": -100123, "type": "supergroup"},
+            },
+        },
+    )
+
+    run_entry.assert_awaited_once()
+    payload = run_entry.await_args.kwargs["payload"]
+    assert payload["event_type"] == "message"
+    assert payload["message_text"] == "1"
+    send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_transfer_notice_uses_first_matching_interaction_rule(monkeypatch) -> None:
     class _DB:
         async def __aenter__(self):

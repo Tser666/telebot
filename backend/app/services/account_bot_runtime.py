@@ -3315,7 +3315,7 @@ async def _try_handle_interaction_module_message(db: Any, incoming: Incoming) ->
         session = await _load_interaction_session(incoming, rule)
         if session is None:
             continue
-        participant_block = _interaction_participant_block_message(incoming, rule, session)
+        participant_block = _interaction_participant_block_message(incoming, rule, session) if is_callback else None
         if participant_block:
             if is_callback:
                 await _answer_callback(
