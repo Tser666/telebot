@@ -8,8 +8,9 @@ Config Schema 说明：
 
 from __future__ import annotations
 
-from app.db.models.feature import FEATURE_AUTO_REPLY
 from app.worker.plugins.manifest import Manifest
+
+FEATURE_AUTO_REPLY = "auto_reply"
 
 # 顶层导出常量；loader 扫描时读取
 MANIFEST = Manifest(

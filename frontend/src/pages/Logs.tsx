@@ -70,6 +70,22 @@ type RuntimeSourceFilter = "" | "event" | "plugin" | "system";
 type RuntimeLevelFilter = "" | "debug" | "info" | "warn" | "error";
 type NormalizedRuntimeLevel = "debug" | "info" | "warn" | "error" | "unknown";
 type RawTab = "runtime" | "audit";
+type DiagnosisTone = "success" | "warn" | "danger" | "neutral";
+
+interface DiagnosisResult {
+  tone: DiagnosisTone;
+  title: string;
+  message: string;
+  nextStep: string;
+  reasonCode?: string | null;
+  pluginKey?: string | null;
+  entryKey?: string | null;
+  traceId?: string | null;
+}
+
+type TimelineItem =
+  | { kind: "span"; ts: string; span: EventSpanItem }
+  | { kind: "action"; ts: string; action: EventActionItem };
 
 const RUNTIME_LEVEL_RANK: Record<string, number> = {
   debug: 0,
@@ -84,13 +100,28 @@ const LOW_VALUE_RUNTIME_PATTERNS = [
   "插件配置已热更新",
   "账号 Bot 配置已热更新",
   "配置已热更新",
+  "reload_config 完成",
+  "reload_config completed",
+  "hot reload 完成",
 ];
+
+const LOW_VALUE_AUDIT_ACTIONS = new Set([
+  "auth.login",
+  "auth.logout",
+]);
+
+const NORMAL_REASON_CODES = new Set([
+  "matched",
+  "command_matched",
+  "callback_query",
+  "session_control_action",
+]);
 
 function parseMainTab(value: string | null): MainTab {
   if (value === "events" || value === "plugins" || value === "commands" || value === "actions" || value === "raw") {
     return value;
   }
-  return "overview";
+  return "raw";
 }
 
 export function Logs() {
@@ -98,7 +129,7 @@ export function Logs() {
   const initialTraceId = searchParams.get("trace_id") || "";
   const [mainTab, setMainTab] = useState<MainTab>(() => {
     const tab = parseMainTab(searchParams.get("tab"));
-    return initialTraceId && tab === "overview" ? "events" : tab;
+    return initialTraceId && tab === "raw" ? "events" : tab;
   });
   const [accountId, setAccountId] = useState(() => searchParams.get("account_id") || searchParams.get("aid") || "");
   const [keyword, setKeyword] = useState(() => searchParams.get("keyword") || "");
@@ -204,7 +235,7 @@ export function Logs() {
     <PageShell>
       <PageHeader
         title="日志中心"
-        description="按 trace_id 追踪消息、插件、命令和发送动作；原始日志用于展开查看底层运行和审计细节。"
+        description="默认先看原始运行日志；需要排查某条消息为什么没触发、插件为什么没响应时，再用 trace_id 进入消息链路。"
         icon={ScrollText}
       />
 
@@ -212,7 +243,7 @@ export function Logs() {
         <CardHeader>
           <SectionHeader
             title="排查过滤"
-            description="先选账号和关键词，再进入消息链路、插件诊断或动作发送深挖。"
+            description="按账号、关键词、trace、Chat ID 或用户 ID 缩小范围；这些条件会同步作用到下方日志视图。"
             meta={(
               <SignalPill
                 tone={autoRefresh ? "success" : "neutral"}
@@ -342,6 +373,9 @@ export function Logs() {
 
       <Tabs value={mainTab} onValueChange={(v) => setMainTab(v as MainTab)}>
         <TabsList className="flex h-auto flex-wrap justify-start gap-1">
+          <TabsTrigger value="raw" className="gap-1.5">
+            <ServerCog className="h-4 w-4" /> 原始日志
+          </TabsTrigger>
           <TabsTrigger value="overview" className="gap-1.5">
             <Activity className="h-4 w-4" /> 总览
           </TabsTrigger>
@@ -357,10 +391,9 @@ export function Logs() {
           <TabsTrigger value="actions" className="gap-1.5">
             <MousePointerClick className="h-4 w-4" /> 动作发送
           </TabsTrigger>
-          <TabsTrigger value="raw" className="gap-1.5">
-            <ServerCog className="h-4 w-4" /> 原始日志
-          </TabsTrigger>
         </TabsList>
+
+        <LogToolGuide activeTab={mainTab} />
 
         <TabsContent value="overview">
           <OverviewPanel
@@ -498,6 +531,48 @@ function OverviewPanel({
         <RecentActionCard title="最近失败动作" actions={overview.recent_failed_actions} timezone={timezone} onTraceSelect={onTraceSelect} />
         <RecentPluginCard title="最近插件异常" plugins={overview.recent_plugin_errors} timezone={timezone} />
       </div>
+    </div>
+  );
+}
+
+function LogToolGuide({ activeTab }: { activeTab: MainTab }) {
+  const guides: Record<MainTab, { title: string; text: string; tone: DiagnosisTone }> = {
+    raw: {
+      title: "先看连续日志",
+      text: "查关键词、trace、Chat ID、Message ID；看到 open_trace 后进入消息链路看插件阶段和发送动作。",
+      tone: "neutral",
+    },
+    events: {
+      title: "查单条消息",
+      text: "用于回答：这条消息有没有进 TelePilot、命中了哪个插件、卡在哪个阶段、为什么没响应。",
+      tone: "warn",
+    },
+    plugins: {
+      title: "查插件状态",
+      text: "用于回答：插件有没有加载成功、最近一次调用是否失败、失败 trace 是哪一条。",
+      tone: "warn",
+    },
+    commands: {
+      title: "查命令触发",
+      text: "用于回答：管理员命令是否被识别、权限是否通过、后续有没有进入插件或动作发送。",
+      tone: "neutral",
+    },
+    actions: {
+      title: "查发送动作",
+      text: "用于回答：插件请求发消息、编辑、按钮或结算后，平台最终用哪个通道执行以及是否失败。",
+      tone: "neutral",
+    },
+    overview: {
+      title: "看整体健康",
+      text: "用于快速确认 Worker、DB、Redis、交互 Bot 和最近异常数量，定位范围后再回到原始日志或消息链路。",
+      tone: "neutral",
+    },
+  };
+  const guide = guides[activeTab];
+  return (
+    <div className={`mt-3 rounded-md border px-3 py-2 text-sm ${diagnosisToneClass(guide.tone)}`}>
+      <span className="font-medium">{guide.title}</span>
+      <span className="ml-2 text-muted-foreground">{guide.text}</span>
     </div>
   );
 }
@@ -764,6 +839,7 @@ function TraceDetailCard({
       </Card>
     );
   }
+  const diagnosis = buildTraceDiagnosis(detail);
   return (
     <Card>
       <CardHeader>
@@ -779,6 +855,7 @@ function TraceDetailCard({
         />
       </CardHeader>
       <CardContent className="space-y-4">
+        <TraceDiagnosisPanel detail={detail} diagnosis={diagnosis} timezone={timezone} />
         <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground md:grid-cols-4">
           <InfoCell label="事件" value={detail.event_type} />
           <InfoCell label="来源" value={detail.source_channel || "-"} />
@@ -805,6 +882,49 @@ function TraceDetailCard({
   );
 }
 
+function TraceDiagnosisPanel({
+  detail,
+  diagnosis,
+  timezone,
+}: {
+  detail: EventTraceDetail;
+  diagnosis: DiagnosisResult;
+  timezone?: string;
+}) {
+  const pluginKeys = Array.from(new Set(detail.spans.map((span) => span.plugin_key).filter(Boolean))).join(", ");
+  const entryKeys = Array.from(new Set(detail.spans.map((span) => span.entry_key).filter(Boolean))).join(", ");
+  return (
+    <section className={`rounded-md border p-3 ${diagnosisToneClass(diagnosis.tone)}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusBadge status={detail.status} />
+            <span className="font-medium">排查结论：{diagnosis.title}</span>
+          </div>
+          <p className="mt-2 text-sm">{diagnosis.message}</p>
+        </div>
+        <span className="shrink-0 text-xs text-muted-foreground">{formatDateTime(detail.started_at, timezone)}</span>
+      </div>
+      <div className="mt-3 grid gap-2 text-xs md:grid-cols-4">
+        <InfoCell label="触发来源" value={`${detail.source_channel || "-"} / ${detail.event_type}`} />
+        <InfoCell label="发起人" value={detail.sender_name || detail.sender_user_id || "-"} />
+        <InfoCell label="命中插件" value={pluginKeys || (detail.plugin_count ? `${detail.plugin_count} 个` : "未命中")} />
+        <InfoCell label="入口" value={entryKeys || diagnosis.entryKey || "-"} />
+      </div>
+      {diagnosis.reasonCode || diagnosis.pluginKey ? (
+        <div className="mt-2 flex flex-wrap gap-1.5 text-xs text-muted-foreground">
+          {diagnosis.pluginKey ? <span>插件 {diagnosis.pluginKey}</span> : null}
+          {diagnosis.entryKey ? <span>入口 {diagnosis.entryKey}</span> : null}
+          {diagnosis.reasonCode ? <span>{reasonDisplay(diagnosis.reasonCode)}</span> : null}
+        </div>
+      ) : null}
+      <div className="mt-3 rounded-md border border-current/10 bg-background/60 px-3 py-2 text-sm">
+        下一步：{diagnosis.nextStep}
+      </div>
+    </section>
+  );
+}
+
 function Timeline({
   spans,
   actions,
@@ -814,16 +934,33 @@ function Timeline({
   actions: EventActionItem[];
   timezone?: string;
 }) {
-  const items = [
+  const [showAll, setShowAll] = useState(false);
+  const items = useMemo<TimelineItem[]>(() => [
     ...spans.map((span) => ({ kind: "span" as const, ts: span.started_at, span })),
     ...actions.map((action) => ({ kind: "action" as const, ts: action.created_at, action })),
-  ].sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+  ].sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime()), [actions, spans]);
+  const visibleItems = useMemo(() => showAll ? items : pickDiagnosticTimelineItems(items), [items, showAll]);
+  const hiddenCount = Math.max(0, items.length - visibleItems.length);
+  const problemCount = items.filter(isProblemTimelineItem).length;
 
   if (!items.length) return <EmptyHint text="该 trace 暂无 span/action 明细" />;
   return (
     <div className="space-y-2">
-      {items.map((item, index) => (
-        <div key={`${item.kind}-${index}`} className="rounded-md border p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-sm font-medium">
+          关键时间线
+          <span className="ml-2 text-xs font-normal text-muted-foreground">
+            {problemCount ? `${problemCount} 个异常/告警` : "默认隐藏低价值阶段"}
+          </span>
+        </div>
+        {hiddenCount || showAll ? (
+          <Button type="button" variant="ghost" size="sm" onClick={() => setShowAll((v) => !v)}>
+            {showAll ? "只看关键" : `显示全部 ${items.length} 项`}
+          </Button>
+        ) : null}
+      </div>
+      {visibleItems.map((item, index) => (
+        <div key={`${item.kind}-${index}-${item.ts}`} className={`rounded-md border p-3 ${timelineItemClass(item)}`}>
           {item.kind === "span" ? (
             <div className="space-y-1">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -904,9 +1041,7 @@ function PluginDiagnostics({
                 <span className="break-all font-medium">{plugin.plugin_key}</span>
                 <StatusBadge status={plugin.last_invocation_status || plugin.load_status} />
               </div>
-              <div className="mt-2 text-xs text-muted-foreground">
-                {plugin.last_load_error || plugin.last_trace_id || "暂无异常"}
-              </div>
+              <PluginStatusSnippet plugin={plugin} />
             </button>
           )) : <EmptyHint text="暂无插件运行状态" />}
         </CardContent>
@@ -919,13 +1054,114 @@ function PluginDiagnostics({
         <CardContent className="space-y-3">
           {detailLoading ? <InlineLoading /> : detailError ? <ErrorHint text="插件详情加载失败" error={detailError} /> : detail ? (
             <>
+              <PluginDiagnosisPanel detail={detail} selectedPluginKey={selectedPluginKey} timezone={timezone} onTraceSelect={onTraceSelect} />
               <PluginStatusList statuses={detail.statuses} timezone={timezone} onTraceSelect={onTraceSelect} />
+              <PluginSpanIssues spans={detail.recent_spans} timezone={timezone} onTraceSelect={onTraceSelect} />
               <TraceMiniList traces={detail.recent_traces} timezone={timezone} onTraceSelect={onTraceSelect} />
-              <JsonBlock title="最近 span" value={detail.recent_spans} />
+              <details className="rounded-md border p-3">
+                <summary className="cursor-pointer text-sm font-medium">展开最近 span 原始数据</summary>
+                <div className="mt-3">
+                  <JsonBlock title="recent_spans" value={detail.recent_spans} />
+                </div>
+              </details>
             </>
           ) : <EmptyHint text="尚未选择插件" />}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+function PluginStatusSnippet({ plugin }: { plugin: PluginRuntimeStatusItem }) {
+  const bad = plugin.last_load_error || isFailedStatus(plugin.last_invocation_status) || isFailedStatus(plugin.load_status);
+  if (plugin.last_load_error) {
+    return (
+      <div className="mt-2 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
+        加载失败：{plugin.last_load_error}
+      </div>
+    );
+  }
+  if (bad) {
+    return (
+      <div className="mt-2 text-xs text-destructive">
+        最近调用失败{plugin.last_trace_id ? `，trace=${plugin.last_trace_id}` : ""}
+      </div>
+    );
+  }
+  return (
+    <div className="mt-2 text-xs text-muted-foreground">
+      {plugin.last_trace_id ? `最近 trace：${plugin.last_trace_id}` : "暂无异常"}
+    </div>
+  );
+}
+
+function PluginDiagnosisPanel({
+  detail,
+  selectedPluginKey,
+  timezone,
+  onTraceSelect,
+}: {
+  detail: PluginRuntimeDetail;
+  selectedPluginKey: string;
+  timezone?: string;
+  onTraceSelect: (traceId: string) => void;
+}) {
+  const diagnosis = buildPluginDiagnosis(detail, selectedPluginKey);
+  return (
+    <section className={`rounded-md border p-3 ${diagnosisToneClass(diagnosis.tone)}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="font-medium">排查结论：{diagnosis.title}</div>
+          <p className="mt-2 text-sm">{diagnosis.message}</p>
+        </div>
+        {diagnosis.traceId ? (
+          <Button type="button" variant="outline" size="sm" onClick={() => onTraceSelect(diagnosis.traceId as string)}>
+            查看 trace
+          </Button>
+        ) : null}
+      </div>
+      <div className="mt-3 grid gap-2 text-xs md:grid-cols-3">
+        <InfoCell label="插件" value={selectedPluginKey || diagnosis.pluginKey || "-"} />
+        <InfoCell label="最近调用" value={latestPluginInvokedAt(detail, timezone)} />
+        <InfoCell label="最近异常原因" value={diagnosis.reasonCode ? reasonDisplay(diagnosis.reasonCode) : "-"} />
+      </div>
+      <div className="mt-3 rounded-md border border-current/10 bg-background/60 px-3 py-2 text-sm">
+        下一步：{diagnosis.nextStep}
+      </div>
+    </section>
+  );
+}
+
+function PluginSpanIssues({
+  spans,
+  timezone,
+  onTraceSelect,
+}: {
+  spans: EventSpanItem[];
+  timezone?: string;
+  onTraceSelect: (traceId: string) => void;
+}) {
+  const issues = spans.filter((span) => isFailedStatus(span.status) || isWarnStatus(span.status) || isProblemReasonCode(span.reason_code)).slice(0, 8);
+  if (!issues.length) return null;
+  return (
+    <div className="space-y-2">
+      <div className="text-sm font-medium">最近异常阶段</div>
+      {issues.map((span) => (
+        <div key={span.span_id} className={`rounded-md border p-3 ${isFailedStatus(span.status) ? "border-destructive/30 bg-destructive/5" : "border-amber-300/60 bg-amber-50/50"}`}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <StatusBadge status={span.status} />
+              <Badge variant="secondary">{span.phase}</Badge>
+              {span.entry_key ? <Badge variant="outline">{span.entry_key}</Badge> : null}
+            </div>
+            <span className="text-xs text-muted-foreground">{formatDateTime(span.started_at, timezone)}</span>
+          </div>
+          <p className="mt-2 text-sm">{spanIssueText(span)}</p>
+          <Button type="button" variant="ghost" size="sm" className="mt-2 px-0" onClick={() => onTraceSelect(span.trace_id)}>
+            查看这次消息链路
+          </Button>
+        </div>
+      ))}
     </div>
   );
 }
@@ -1058,6 +1294,7 @@ function RawLogsPanel({
   const [wrapRuntimeLines, setWrapRuntimeLines] = useState(true);
   const [auditAction, setAuditAction] = useState("");
   const [showAuditDetail, setShowAuditDetail] = useState(false);
+  const [hideAuditNoise, setHideAuditNoise] = useState(true);
   const [wrapAuditLines, setWrapAuditLines] = useState(true);
   const inheritedFilters = [
     accountId ? `account=#${accountId}` : "全部账号",
@@ -1086,7 +1323,7 @@ function RawLogsPanel({
             <div className="min-w-0">
               <h3 className="text-base font-semibold">控制台运行日志</h3>
               <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-                展示实际写入的 runtime log，按时间连续阅读；消息链路、插件调用、发送动作的细节仍可去上方对应标签深挖。
+                查系统有没有收到消息、插件有没有启动、调用卡在哪一步、发送动作有没有失败。热更新和普通配置刷新默认隐藏。
               </p>
             </div>
             <span className="rounded-md border border-border/70 bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
@@ -1137,21 +1374,23 @@ function RawLogsPanel({
           <div className="min-w-0">
             <h3 className="text-base font-semibold">控制台审计日志</h3>
             <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-              记录 Web 面板里的配置、启停、插件安装更新和高风险操作，按 action 精确筛选。
+              查 Web 面板里是谁在什么时候改了配置、启停插件、安装更新插件。它不负责解释消息为什么没响应。
             </p>
           </div>
-          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3 md:items-end">
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4 md:items-end">
             <div className="space-y-1.5 md:col-span-1">
               <Label>操作类型</Label>
               <Input value={auditAction} onChange={(e) => setAuditAction(e.target.value)} placeholder="account_bot.test" />
             </div>
             <SwitchField label="显示 detail" checked={showAuditDetail} onCheckedChange={setShowAuditDetail} />
+            <SwitchField label="隐藏登录噪声" checked={hideAuditNoise} onCheckedChange={setHideAuditNoise} />
             <SwitchField label="自动换行" checked={wrapAuditLines} onCheckedChange={setWrapAuditLines} />
           </div>
         </section>
         <AuditLogConsole
           action={auditAction}
           keyword={keyword}
+          hideNoise={hideAuditNoise}
           showDetail={showAuditDetail}
           wrapLines={wrapAuditLines}
           timezone={timezone}
@@ -1241,12 +1480,14 @@ function RuntimeLogConsole({
 function AuditLogConsole({
   action,
   keyword,
+  hideNoise,
   showDetail,
   wrapLines,
   timezone,
 }: {
   action: string;
   keyword: string;
+  hideNoise: boolean;
   showDetail: boolean;
   wrapLines: boolean;
   timezone?: string;
@@ -1257,7 +1498,12 @@ function AuditLogConsole({
   });
   const endpointMissing = isAxiosError(logsQ.error) &&
     (logsQ.error.response?.status === 404 || logsQ.error.response?.status === 405);
-  const visibleRows = logsQ.data ?? [];
+  const visibleRows = useMemo(() => {
+    return (logsQ.data ?? []).filter((row) => {
+      if (hideNoise && !action.trim() && isLowValueAuditLog(row)) return false;
+      return true;
+    });
+  }, [action, hideNoise, logsQ.data]);
   const visibleText = useMemo(
     () => visibleRows.flatMap((row) => auditConsoleText(row, timezone, showDetail)).join("\n"),
     [showDetail, timezone, visibleRows],
@@ -1307,16 +1553,20 @@ function RuntimeConsoleRow({
   timezone?: string;
 }) {
   const level = normalizeRuntimeLevel(row.level);
-  const line = runtimeConsoleLine(row, timezone);
-  const traceId = pickString(row.detail, ["trace_id", "context.trace_id", "event.trace_id"]);
+  const parts = runtimeConsoleParts(row, timezone);
   return (
-    <div className={`border-b border-white/5 last:border-b-0 ${runtimeConsoleLevelClass(level)} hover:bg-white/[0.035]`}>
+    <div className={`border-b border-white/5 text-zinc-100 last:border-b-0 hover:bg-white/[0.035] ${runtimeConsoleRowClass(level)}`}>
       <div className={`${consoleLineClass(wrapLines)} ${isLowValueRuntimeLog(row) ? "opacity-55" : ""}`}>
-        <HighlightedMessage text={line} keyword={keyword} />
-        {traceId ? (
+        <span className="text-zinc-500">[{parts.timestamp}] </span>
+        <span className={`font-semibold ${runtimeConsoleLevelBadgeClass(level)}`}>[{parts.levelLabel}]</span>
+        <span className="text-zinc-500"> [{parts.meta.join(" ")}] </span>
+        <span className="text-zinc-100">
+          <HighlightedMessage text={parts.message} keyword={keyword} />
+        </span>
+        {parts.traceId ? (
           <>
             {" "}
-            <Link className="text-sky-300 underline-offset-2 hover:underline" to={`/logs?tab=events&trace_id=${encodeURIComponent(traceId)}`}>
+            <Link className="text-sky-300 underline-offset-2 hover:underline" to={`/logs?tab=events&trace_id=${encodeURIComponent(parts.traceId)}`}>
               open_trace
             </Link>
           </>
@@ -1424,6 +1674,248 @@ function ConsoleEmpty({ text }: { text: string }) {
   );
 }
 
+function buildTraceDiagnosis(detail: EventTraceDetail): DiagnosisResult {
+  const failedAction = detail.actions.find((action) => isFailedStatus(action.status) || action.error_code || action.error_message);
+  if (failedAction) {
+    return {
+      tone: "danger",
+      title: "发送动作失败",
+      message: actionErrorLabel(failedAction),
+      nextStep: "打开“动作发送”或查看下方关键时间线，确认请求通道、实际通道、目标会话和 Telegram API 错误。",
+      reasonCode: failedAction.error_code,
+      pluginKey: failedAction.plugin_key,
+      traceId: failedAction.trace_id,
+    };
+  }
+
+  const failedSpan = detail.spans.find((span) => isFailedStatus(span.status));
+  if (failedSpan) {
+    return {
+      tone: "danger",
+      title: failedSpan.plugin_key ? "插件执行失败" : "链路阶段失败",
+      message: spanIssueText(failedSpan),
+      nextStep: failedSpan.plugin_key
+        ? "打开“插件诊断”查看该插件最近错误；若这里是 handler_error，优先看插件抛出的原始异常。"
+        : "查看该阶段的 reason 和 detail，确认是订阅、权限、会话、Contract Guard 还是运行时链路问题。",
+      reasonCode: failedSpan.reason_code,
+      pluginKey: failedSpan.plugin_key,
+      entryKey: failedSpan.entry_key,
+      traceId: failedSpan.trace_id,
+    };
+  }
+
+  const runtimeError = detail.related_runtime_logs.find((row) => {
+    const level = normalizeRuntimeLevel(row.level);
+    return level === "error" || level === "warn";
+  });
+  if (runtimeError) {
+    return {
+      tone: normalizeRuntimeLevel(runtimeError.level) === "error" ? "danger" : "warn",
+      title: "运行日志有异常",
+      message: runtimeError.message,
+      nextStep: "展开高级数据里的 related_runtime_logs，或回到原始日志用 trace_id 搜索同一段上下文。",
+      reasonCode: pickString(runtimeError.detail, ["reason_code", "error_code"]),
+      pluginKey: pickString(runtimeError.detail, ["plugin_key", "feature_key"]),
+      traceId: pickString(runtimeError.detail, ["trace_id", "context.trace_id"]),
+    };
+  }
+
+  const warningSpan = detail.spans.find((span) => isWarnStatus(span.status) || isProblemReasonCode(span.reason_code));
+  if (warningSpan) {
+    return {
+      tone: "warn",
+      title: reasonDisplay(warningSpan.reason_code) || "链路有告警",
+      message: spanIssueText(warningSpan),
+      nextStep: "如果消息没有响应，先看是否是订阅未命中、过滤条件未命中、插件未启用或发送通道不满足。",
+      reasonCode: warningSpan.reason_code,
+      pluginKey: warningSpan.plugin_key,
+      entryKey: warningSpan.entry_key,
+      traceId: warningSpan.trace_id,
+    };
+  }
+
+  if (!detail.plugin_count && detail.event_type !== "session_close") {
+    return {
+      tone: "warn",
+      title: "未命中插件",
+      message: "消息进入了 TelePilot，但没有进入任何插件处理阶段。",
+      nextStep: "检查触发关键词、事件订阅、允许会话、插件启用状态和规则作用账号。",
+    };
+  }
+
+  if (isFailedStatus(detail.status)) {
+    return {
+      tone: "danger",
+      title: "链路失败",
+      message: "该 trace 标记为失败，但当前明细没有返回更具体的失败阶段。",
+      nextStep: "用 trace_id 回到原始运行日志搜索同一时间段，确认是否有插件异常或 Trace 写入降级。",
+    };
+  }
+
+  if (isWarnStatus(detail.status)) {
+    return {
+      tone: "warn",
+      title: "链路有告警",
+      message: "该 trace 不是完全失败，但存在跳过或告警状态。",
+      nextStep: "看关键时间线里的 warn/skipped 阶段，确认是否是预期过滤，还是规则配置不匹配。",
+    };
+  }
+
+  return {
+    tone: "success",
+    title: "链路已完成",
+    message: detail.action_count ? "消息已进入插件或动作发送链路，并完成记录。" : "消息已处理完成，但没有产生发送动作。",
+    nextStep: detail.action_count ? "如仍觉得群里没有响应，打开“动作发送”确认实际发送通道和目标会话。" : "如果本来应该回复，检查插件是否返回了发送动作或是否被配置为只记录不发送。",
+  };
+}
+
+function buildPluginDiagnosis(detail: PluginRuntimeDetail, selectedPluginKey: string): DiagnosisResult {
+  const loadError = detail.statuses.find((status) => status.last_load_error);
+  if (loadError) {
+    return {
+      tone: "danger",
+      title: "插件加载失败",
+      message: loadError.last_load_error || "插件加载失败",
+      nextStep: "先修 manifest、依赖或入口模块；加载失败时不会进入正常消息触发流程。",
+      pluginKey: loadError.plugin_key,
+      traceId: loadError.last_trace_id,
+    };
+  }
+
+  const failedSpan = detail.recent_spans.find((span) => isFailedStatus(span.status));
+  if (failedSpan) {
+    return {
+      tone: "danger",
+      title: "最近调用失败",
+      message: spanIssueText(failedSpan),
+      nextStep: "点击 trace 查看这一次消息的完整链路，再根据 phase 判断是订阅、执行、契约还是发送动作失败。",
+      reasonCode: failedSpan.reason_code,
+      pluginKey: failedSpan.plugin_key || selectedPluginKey,
+      entryKey: failedSpan.entry_key,
+      traceId: failedSpan.trace_id,
+    };
+  }
+
+  const warnSpan = detail.recent_spans.find((span) => isWarnStatus(span.status) || isProblemReasonCode(span.reason_code));
+  if (warnSpan) {
+    return {
+      tone: "warn",
+      title: "最近调用有告警",
+      message: spanIssueText(warnSpan),
+      nextStep: "如果插件没有响应，优先确认订阅条件、触发词、会话策略和 Contract Guard 提示。",
+      reasonCode: warnSpan.reason_code,
+      pluginKey: warnSpan.plugin_key || selectedPluginKey,
+      entryKey: warnSpan.entry_key,
+      traceId: warnSpan.trace_id,
+    };
+  }
+
+  const badStatus = detail.statuses.find((status) => isFailedStatus(status.last_invocation_status) || isFailedStatus(status.load_status));
+  if (badStatus) {
+    return {
+      tone: "danger",
+      title: "状态记录异常",
+      message: `${badStatus.plugin_key} 当前状态为 ${badStatus.last_invocation_status || badStatus.load_status}`,
+      nextStep: "查看运行状态和最近 trace，确认异常是否仍在发生。",
+      pluginKey: badStatus.plugin_key,
+      traceId: badStatus.last_trace_id,
+    };
+  }
+
+  return {
+    tone: "success",
+    title: "插件最近状态正常",
+    message: detail.recent_traces.length ? "最近调用没有发现失败阶段。" : "暂无最近调用记录。",
+    nextStep: detail.recent_traces.length ? "若群内无响应，请到消息链路按关键词或 Chat ID 查对应消息。" : "先触发一次插件，再回到这里看是否产生 trace。",
+    pluginKey: selectedPluginKey,
+  };
+}
+
+function spanIssueText(span: EventSpanItem): string {
+  const reason = reasonDisplay(span.reason_code);
+  if (span.message && reason && span.message !== reasonLabel(span.reason_code)) return `${reason}：${span.message}`;
+  return span.message || reason || "阶段没有返回具体错误消息";
+}
+
+function latestPluginInvokedAt(detail: PluginRuntimeDetail, timezone?: string): string {
+  const latest = detail.statuses
+    .map((status) => status.last_invoked_at)
+    .filter((value): value is string => Boolean(value))
+    .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0];
+  return latest ? formatDateTime(latest, timezone) : "-";
+}
+
+function pickDiagnosticTimelineItems(items: TimelineItem[]): TimelineItem[] {
+  const selected = new Set<number>();
+  items.forEach((item, index) => {
+    if (index === 0 || index === items.length - 1 || isProblemTimelineItem(item) || isImportantTimelineItem(item)) {
+      selected.add(index);
+    }
+  });
+  if (selected.size > 10) {
+    const problemIndexes = items
+      .map((item, index) => (isProblemTimelineItem(item) ? index : -1))
+      .filter((index) => index >= 0);
+    return items.filter((item, index) => index === 0 || index === items.length - 1 || problemIndexes.includes(index)).slice(0, 10);
+  }
+  return items.filter((_, index) => selected.has(index)).slice(0, 10);
+}
+
+function isImportantTimelineItem(item: TimelineItem): boolean {
+  if (item.kind === "action") return true;
+  const phase = item.span.phase.toLowerCase();
+  return [
+    "subscription",
+    "subscription_match",
+    "command",
+    "command_match",
+    "plugin_invoke",
+    "plugin_return",
+    "contract_guard",
+    "delivery",
+    "settlement",
+  ].some((key) => phase.includes(key));
+}
+
+function isProblemTimelineItem(item: TimelineItem): boolean {
+  if (item.kind === "action") return isFailedStatus(item.action.status) || Boolean(item.action.error_code || item.action.error_message);
+  return isFailedStatus(item.span.status) || isWarnStatus(item.span.status) || isProblemReasonCode(item.span.reason_code);
+}
+
+function timelineItemClass(item: TimelineItem): string {
+  if (item.kind === "action") {
+    if (isFailedStatus(item.action.status) || item.action.error_code || item.action.error_message) {
+      return "border-destructive/30 bg-destructive/5";
+    }
+    return "";
+  }
+  if (isFailedStatus(item.span.status)) return "border-destructive/30 bg-destructive/5";
+  if (isWarnStatus(item.span.status) || isProblemReasonCode(item.span.reason_code)) return "border-amber-300/60 bg-amber-50/50";
+  return "";
+}
+
+function isFailedStatus(status?: string | null): boolean {
+  const value = (status || "").toLowerCase();
+  return value === "failed" || value === "error";
+}
+
+function isWarnStatus(status?: string | null): boolean {
+  const value = (status || "").toLowerCase();
+  return value === "warning" || value === "warn" || value === "skipped";
+}
+
+function isProblemReasonCode(code?: string | null): boolean {
+  if (!code) return false;
+  return !NORMAL_REASON_CODES.has(code);
+}
+
+function diagnosisToneClass(tone: DiagnosisTone): string {
+  if (tone === "success") return "border-emerald-200 bg-emerald-50/70 text-emerald-950";
+  if (tone === "danger") return "border-destructive/30 bg-destructive/5 text-foreground";
+  if (tone === "warn") return "border-amber-300 bg-amber-50/70 text-amber-950";
+  return "border-border bg-muted/30 text-foreground";
+}
+
 function runtimeSourceLabel(source?: string | null): string {
   const value = (source || "").toLowerCase();
   if (value === "event" || value === "interaction" || value === "account_bot") return "消息事件";
@@ -1481,7 +1973,11 @@ function isLowValueRuntimeLog(row: RuntimeLogItem): boolean {
   return LOW_VALUE_RUNTIME_PATTERNS.some((pattern) => row.message.includes(pattern));
 }
 
-function runtimeConsoleLine(row: RuntimeLogItem, timezone?: string): string {
+function isLowValueAuditLog(row: AuditLogItem): boolean {
+  return LOW_VALUE_AUDIT_ACTIONS.has(row.action);
+}
+
+function runtimeConsoleParts(row: RuntimeLogItem, timezone?: string) {
   const detail = row.detail ?? {};
   const traceId = pickString(detail, ["trace_id", "context.trace_id", "event.trace_id"]);
   const pluginKey = pickString(detail, ["plugin_key", "feature_key", "module_key"]);
@@ -1503,7 +1999,18 @@ function runtimeConsoleLine(row: RuntimeLogItem, timezone?: string): string {
     reasonCode ? `reason=${reasonCode}` : null,
   ].filter(Boolean);
   const level = normalizeRuntimeLevel(row.level).toUpperCase().padEnd(5);
-  return `[${formatConsoleTimestamp(row.created_at, timezone)}] [${level}] [${meta.join(" ")}] ${compactConsoleText(row.message)}`;
+  return {
+    timestamp: formatConsoleTimestamp(row.created_at, timezone),
+    levelLabel: level,
+    meta,
+    message: compactConsoleText(row.message),
+    traceId,
+  };
+}
+
+function runtimeConsoleLine(row: RuntimeLogItem, timezone?: string): string {
+  const parts = runtimeConsoleParts(row, timezone);
+  return `[${parts.timestamp}] [${parts.levelLabel}] [${parts.meta.join(" ")}] ${parts.message}`;
 }
 
 function runtimeConsoleText(row: RuntimeLogItem, timezone: string | undefined, showDetail: boolean): string[] {
@@ -1571,12 +2078,18 @@ function consoleLineClass(wrapLines: boolean): string {
   return `${wrapping} px-3 py-1.5 font-mono text-[11px] leading-5`;
 }
 
-function runtimeConsoleLevelClass(level: NormalizedRuntimeLevel): string {
+function runtimeConsoleRowClass(level: NormalizedRuntimeLevel): string {
+  if (level === "error") return "bg-red-950/10";
+  if (level === "warn") return "bg-amber-950/10";
+  return "";
+}
+
+function runtimeConsoleLevelBadgeClass(level: NormalizedRuntimeLevel): string {
   if (level === "error") return "text-red-300";
-  if (level === "warn") return "text-amber-200";
+  if (level === "warn") return "text-amber-300";
+  if (level === "info") return "text-sky-300";
   if (level === "debug") return "text-zinc-500";
-  if (level === "unknown") return "text-zinc-300";
-  return "text-zinc-100";
+  return "text-zinc-300";
 }
 
 function ConsoleJson({ value, wrapLines }: { value?: Record<string, unknown> | null; wrapLines: boolean }) {
