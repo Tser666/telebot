@@ -2502,6 +2502,7 @@ def _make_logger(redis: Any, account_id: int, plugin_key: str):
 
     async def _writer(level: str, message: str, **detail: Any) -> None:
         source = str(detail.pop("source", "plugin"))
+        detail.pop("plugin_key", None)
         await _log(
             redis,
             account_id,

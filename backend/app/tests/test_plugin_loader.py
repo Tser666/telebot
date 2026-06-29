@@ -1289,6 +1289,47 @@ async def test_userbot_event_bus_deprecated_send_via_log_context_does_not_duplic
 
 
 @pytest.mark.asyncio
+async def test_invoke_interaction_entry_ctx_log_does_not_duplicate_plugin_key() -> None:
+    class _InteractionLogPlugin(Plugin):
+        key = "_test_interaction_log"
+        display_name = "交互入口日志测试"
+
+        async def on_interaction(self, ctx: PluginContext, entry_key: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
+            assert entry_key == "start"
+            assert payload["trace_id"] == "evt_interaction_log"
+            if ctx.log is not None:
+                await ctx.log("info", "interaction log ok")
+            return [{"type": "send_message", "text": "ok"}]
+
+    redis = _FakeRedis()
+    state = loader_mod._AccountState(account_id=15)
+    state.instances["_test_interaction_log"] = _InteractionLogPlugin()
+    state.contexts["_test_interaction_log"] = PluginContext(
+        account_id=15,
+        feature_key="_test_interaction_log",
+        log=loader_mod._make_logger(redis, 15, "_test_interaction_log"),
+    )
+    loader_mod._STATES[15] = state
+    try:
+        actions = await loader_mod.invoke_interaction_entry(
+            15,
+            plugin_key="_test_interaction_log",
+            entry_key="start",
+            payload={"trace_id": "evt_interaction_log"},
+        )
+
+        assert actions == [{"type": "send_message", "text": "ok", "send_via": "interaction_bot"}]
+        assert redis.list_pushes
+        payload = json.loads(redis.list_pushes[-1][1])
+        assert payload["message"] == "interaction log ok"
+        assert payload["detail"]["trace_id"] == "evt_interaction_log"
+        assert payload["detail"]["plugin_key"] == "_test_interaction_log"
+        assert payload["detail"]["entry_key"] == "start"
+    finally:
+        loader_mod._STATES.pop(15, None)
+
+
+@pytest.mark.asyncio
 async def test_userbot_event_bus_trace_switch_disables_trace(monkeypatch) -> None:
     from app.worker.plugins.base import _REGISTRY, register
 
