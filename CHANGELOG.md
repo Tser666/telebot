@@ -20,6 +20,24 @@
 
 ## [Unreleased]
 
+## [0.40.3] — 2026-06-29 · patch（补丁版本） · 最终版签收与收束执行补丁
+
+### Fixed
+- 修正 README 项目状态中的当前版本号，确保用户可见版本与四处发布版本文件保持一致。
+- 修复关闭 `event_bus_delivery_enabled` 后外部付款通知仍会进入 Event Bus 投递的问题，关闭后会记录降级原因并回退旧规则链路。
+- 修复关闭 `trace_enabled` 后 scheduler 仍创建 Trace 和写入 `event_action` 的问题，关闭后定时任务继续执行但只保留旧日志级别排障。
+
+### Changed
+- 插件仓库展开列表常态展示插件 usage 摘要、事件订阅、能力声明和高风险能力提示，不再只在批量更新确认弹窗中展示最终版契约信息。
+
+### Docs
+- 为全量 Event Bus 与 Trace 最终版计划补充“最终版签收执行补丁”和“最终版收束补丁”，把最终版收敛为 D1-D12 施工映射、G0-G6 签收闸门、证据状态机、业务页验收剧本、部署回滚底线和最终报告硬格式。
+- 新增 `0.40.3` 最终版证据台账，登记当前本地/远端 commit、服务器仍为 `0.37.0`、未跟踪文件处理和 D1-D12 当前签收状态。
+
+### Tests
+- 补齐 inline_query、chosen_inline_result、answer_inline_query、UserBot Event Bus、付款通知 Event Bus、scheduler Trace 回滚开关和系统设置写回的最终版门禁回归测试。
+- 重新执行最终版自动验证组：后端 ruff、D1-D6/D12 扩展目标 pytest、全量 pytest、插件示例验证、已安装交互插件验证、Alembic head/offline SQL、前端类型检查和生产构建均通过。
+
 ## [0.40.2] — 2026-06-29 · patch（补丁版本） · 最终版执行封条与证据同步
 
 ### Docs

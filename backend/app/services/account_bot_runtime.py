@@ -958,13 +958,18 @@ async def _handle_interaction_update(aid: int, token: str, update: dict[str, Any
             if incoming.user_id is not None and _int_or_none(cfg.get("interaction_bot_id")) == incoming.user_id:
                 await record_span(trace, "route", TRACE_STATUS_SKIPPED, component="interaction_bot", reason_code="bot_self_message")
                 return
-            if await _try_handle_transfer_notice(db, incoming):
+            event_bus_delivery_enabled = flags.get("event_bus_delivery_enabled", True)
+            if await _try_handle_transfer_notice(
+                db,
+                incoming,
+                event_bus_enabled=event_bus_delivery_enabled,
+            ):
                 final_status = TRACE_STATUS_OK
                 await record_span(trace, "route", TRACE_STATUS_OK, component="transfer_notice")
                 return
             event_bus_handled, event_bus_ok = (
                 await _try_handle_event_bus_subscriptions(db, incoming, cfg)
-                if flags.get("event_bus_delivery_enabled", True)
+                if event_bus_delivery_enabled
                 else (False, True)
             )
             if event_bus_handled:
@@ -977,7 +982,7 @@ async def _handle_interaction_update(aid: int, token: str, update: dict[str, Any
                     reason_code=None if event_bus_ok else "plugin_runtime_error",
                 )
                 return
-            if not flags.get("event_bus_delivery_enabled", True):
+            if not event_bus_delivery_enabled:
                 await record_span(
                     trace,
                     "subscription_match",
@@ -4818,7 +4823,12 @@ async def _remember_transfer_bot_id(db: Any, account_id: int, bot_id: int) -> No
         log.debug("remember transfer bot id failed aid=%s bot_id=%s", account_id, bot_id, exc_info=True)
 
 
-async def _try_handle_transfer_notice(db: Any, incoming: Incoming) -> bool:
+async def _try_handle_transfer_notice(
+    db: Any,
+    incoming: Incoming,
+    *,
+    event_bus_enabled: bool = True,
+) -> bool:
     if incoming.callback_id or incoming.chat_id is None or incoming.user_id is None:
         return False
 
@@ -4845,7 +4855,18 @@ async def _try_handle_transfer_notice(db: Any, incoming: Incoming) -> bool:
             incoming.user_id,
         )
         return False
-    event_bus_handled, event_bus_ok = await _try_handle_event_bus_payment_notice(db, incoming, cfg, parsed)
+    if event_bus_enabled:
+        event_bus_handled, event_bus_ok = await _try_handle_event_bus_payment_notice(db, incoming, cfg, parsed)
+    else:
+        event_bus_handled, event_bus_ok = False, True
+        await record_span(
+            trace_log_context(incoming.trace_id),
+            "subscription_match",
+            TRACE_STATUS_SKIPPED,
+            component="event_bus_payment_notice",
+            reason_code="event_bus_delivery_disabled",
+            message="Event Bus 新投递路径已通过运行设置关闭，付款通知回退旧规则链路。",
+        )
     if event_bus_handled:
         await _audit_transfer_notice(db, incoming, parsed)
         if not event_bus_ok:

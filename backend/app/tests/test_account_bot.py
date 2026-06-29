@@ -2442,6 +2442,247 @@ async def test_interaction_update_respects_inline_updates_switch_at_runtime(monk
     account_bot_runtime._try_handle_event_bus_subscriptions.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_interaction_inline_query_routes_through_event_bus_and_records_trace(monkeypatch) -> None:
+    class _Result:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return [SimpleNamespace(feature_key="inline_demo")]
+
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def execute(self, _stmt):  # noqa: ANN001
+            return _Result()
+
+        async def get(self, *_args):  # noqa: ANN002
+            return SimpleNamespace(tg_user_id=999)
+
+    trace = SimpleNamespace(trace_id="evt_inline")
+    run_entry = AsyncMock(return_value=(
+        True,
+        None,
+        [{
+            "type": "answer_inline_query",
+            "results": [{"type": "article", "id": "1", "title": "Demo", "input_message_content": {"message_text": "ok"}}],
+        }],
+    ))
+    apply_actions = AsyncMock()
+    record_span = AsyncMock()
+    monkeypatch.setattr(
+        account_bot_runtime,
+        "_event_framework_flags",
+        AsyncMock(return_value={"trace_enabled": True, "event_bus_delivery_enabled": True, "inline_updates_enabled": True}),
+    )
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(account_bot_runtime, "start_trace", AsyncMock(return_value=trace))
+    monkeypatch.setattr(account_bot_runtime, "record_span", record_span)
+    monkeypatch.setattr(account_bot_runtime, "finish_trace", AsyncMock())
+    monkeypatch.setattr(account_bot_runtime, "_try_handle_interaction_payment_confirm", AsyncMock(return_value=False))
+    monkeypatch.setattr(account_bot_service, "get_transfer_notice_config", AsyncMock(return_value={"enabled": True, "chat_ids": []}))
+    monkeypatch.setattr(account_bot_runtime, "_try_handle_transfer_notice", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        account_bot_service,
+        "declared_module_event_subscriptions",
+        lambda _key: [{
+            "source": ["interaction_bot"],
+            "events": ["inline_query"],
+            "scope": "inline_all",
+            "entry_key": "inline",
+        }],
+    )
+    monkeypatch.setattr(account_bot_service, "plugin_declares_telegram_native_raw", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(account_bot_runtime, "_run_worker_interaction_entry", run_entry)
+    monkeypatch.setattr(account_bot_runtime, "_guard_interaction_actions", AsyncMock(side_effect=lambda _incoming, _rule, actions: actions))
+    monkeypatch.setattr(account_bot_runtime, "_apply_interaction_actions", apply_actions)
+    monkeypatch.setattr(account_bot_runtime, "_try_handle_interaction_rule_command_or_keyword", AsyncMock(return_value=False))
+    monkeypatch.setattr(account_bot_runtime, "_try_handle_interaction_module_message", AsyncMock(return_value=False))
+    monkeypatch.setattr(account_bot_runtime, "_try_handle_math_answer", AsyncMock(return_value=False))
+
+    await account_bot_runtime._handle_interaction_update(
+        1,
+        "bbot-token",
+        {
+            "update_id": 11,
+            "inline_query": {
+                "id": "iq-1",
+                "query": "玩法",
+                "offset": "",
+                "chat_type": "sender",
+                "from": {"id": 111, "first_name": "AAA"},
+            },
+        },
+    )
+
+    account_bot_runtime.start_trace.assert_awaited_once()
+    run_entry.assert_awaited_once()
+    payload = run_entry.await_args.kwargs["payload"]
+    assert payload["event_type"] == "inline_query"
+    assert payload["trace_id"] == "evt_inline"
+    assert payload["inline_query"]["id"] == "iq-1"
+    assert payload["trigger"]["dispatch_mode"] == "event_subscription"
+    apply_actions.assert_awaited_once()
+    assert apply_actions.await_args.args[1][0]["type"] == "answer_inline_query"
+    assert any(
+        call.kwargs.get("component") == "event_bus"
+        and call.kwargs.get("reason_code") == "matched"
+        for call in record_span.await_args_list
+    )
+    account_bot_runtime.finish_trace.assert_awaited_once_with(trace, account_bot_runtime.TRACE_STATUS_OK)
+
+
+@pytest.mark.asyncio
+async def test_interaction_chosen_inline_result_routes_through_event_bus(monkeypatch) -> None:
+    class _Result:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return [SimpleNamespace(feature_key="inline_demo")]
+
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def execute(self, _stmt):  # noqa: ANN001
+            return _Result()
+
+        async def get(self, *_args):  # noqa: ANN002
+            return SimpleNamespace(tg_user_id=999)
+
+    trace = SimpleNamespace(trace_id="evt_chosen_inline")
+    run_entry = AsyncMock(return_value=(True, None, []))
+    monkeypatch.setattr(
+        account_bot_runtime,
+        "_event_framework_flags",
+        AsyncMock(return_value={"trace_enabled": True, "event_bus_delivery_enabled": True, "inline_updates_enabled": True}),
+    )
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(account_bot_runtime, "start_trace", AsyncMock(return_value=trace))
+    monkeypatch.setattr(account_bot_runtime, "record_span", AsyncMock())
+    monkeypatch.setattr(account_bot_runtime, "finish_trace", AsyncMock())
+    monkeypatch.setattr(account_bot_runtime, "_try_handle_interaction_payment_confirm", AsyncMock(return_value=False))
+    monkeypatch.setattr(account_bot_service, "get_transfer_notice_config", AsyncMock(return_value={"enabled": True, "chat_ids": []}))
+    monkeypatch.setattr(account_bot_runtime, "_try_handle_transfer_notice", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        account_bot_service,
+        "declared_module_event_subscriptions",
+        lambda _key: [{
+            "source": ["interaction_bot"],
+            "events": ["chosen_inline_result"],
+            "scope": "inline_all",
+            "entry_key": "chosen",
+        }],
+    )
+    monkeypatch.setattr(account_bot_service, "plugin_declares_telegram_native_raw", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(account_bot_runtime, "_run_worker_interaction_entry", run_entry)
+    monkeypatch.setattr(account_bot_runtime, "_guard_interaction_actions", AsyncMock(side_effect=lambda _incoming, _rule, actions: actions))
+    monkeypatch.setattr(account_bot_runtime, "_apply_interaction_actions", AsyncMock())
+    monkeypatch.setattr(account_bot_runtime, "_try_handle_interaction_rule_command_or_keyword", AsyncMock(return_value=False))
+    monkeypatch.setattr(account_bot_runtime, "_try_handle_interaction_module_message", AsyncMock(return_value=False))
+    monkeypatch.setattr(account_bot_runtime, "_try_handle_math_answer", AsyncMock(return_value=False))
+
+    await account_bot_runtime._handle_interaction_update(
+        1,
+        "bbot-token",
+        {
+            "update_id": 12,
+            "chosen_inline_result": {
+                "result_id": "result-1",
+                "query": "玩法",
+                "from": {"id": 111, "first_name": "AAA"},
+            },
+        },
+    )
+
+    run_entry.assert_awaited_once()
+    payload = run_entry.await_args.kwargs["payload"]
+    assert payload["event_type"] == "chosen_inline_result"
+    assert payload["chosen_inline_result"]["result_id"] == "result-1"
+    assert payload["trigger"]["entry_key"] == "chosen"
+    account_bot_runtime.finish_trace.assert_awaited_once_with(trace, account_bot_runtime.TRACE_STATUS_OK)
+
+
+@pytest.mark.asyncio
+async def test_interaction_delivery_executor_answer_inline_query_records_success_and_failure(monkeypatch) -> None:
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="123:token",
+        update_id=10,
+        user_id=20,
+        chat_id=None,
+        message_id=None,
+        text="玩法",
+        inline_query_id="iq-ok",
+        trace_id="evt_inline_action",
+    )
+    answer_inline = AsyncMock()
+    record_action = AsyncMock()
+    monkeypatch.setattr(account_bot_service, "answer_inline_query", answer_inline)
+    monkeypatch.setattr("app.services.interaction.delivery.record_action", record_action)
+    executor = InteractionDeliveryExecutor(
+        incoming=incoming,
+        write_log=AsyncMock(),
+        run_worker_action=AsyncMock(),
+        log_context=account_bot_runtime._interaction_log_context,
+        trace_context=account_bot_runtime._interaction_trace_context,
+    )
+
+    await executor.apply([
+        {
+            "type": "answer_inline_query",
+            "results": [{"type": "article", "id": "1"}],
+            "cache_time": 3,
+            "is_personal": True,
+        }
+    ])
+
+    answer_inline.assert_awaited_once_with(
+        "123:token",
+        "iq-ok",
+        results=[{"type": "article", "id": "1"}],
+        cache_time=3,
+        is_personal=True,
+        next_offset="",
+        button=None,
+    )
+    assert record_action.await_args_list[0].args[2] == account_bot_runtime.TRACE_STATUS_OK
+    assert record_action.await_args_list[0].kwargs["actual_send_via"] == "interaction_bot"
+
+    missing_incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="123:token",
+        update_id=11,
+        user_id=20,
+        chat_id=None,
+        message_id=None,
+        text="玩法",
+        trace_id="evt_inline_action_missing",
+    )
+    missing_executor = InteractionDeliveryExecutor(
+        incoming=missing_incoming,
+        write_log=AsyncMock(),
+        run_worker_action=AsyncMock(),
+        log_context=account_bot_runtime._interaction_log_context,
+        trace_context=account_bot_runtime._interaction_trace_context,
+    )
+    await missing_executor.apply([{"type": "answer_inline_query", "results": []}])
+
+    assert answer_inline.await_count == 1
+    assert record_action.await_count == 2
+    assert record_action.await_args_list[1].args[2] == account_bot_runtime.TRACE_STATUS_FAILED
+    assert record_action.await_args_list[1].kwargs["error_code"] == "inline_query_id_missing"
+
+
 def test_worker_defer_interaction_entry_error_log_only_for_math10_fallback() -> None:
     assert worker_runtime._should_defer_interaction_entry_error_log(
         "math10",
@@ -6371,6 +6612,111 @@ async def test_transfer_notice_prefers_event_bus_payment_subscription(monkeypatc
     assert payload["payment"]["amount"] == 100
     assert payload["source_actor"]["type"] == "external_bot"
     legacy_execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_transfer_notice_respects_event_bus_delivery_switch(monkeypatch) -> None:
+    class _Result:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return [SimpleNamespace(feature_key="payment_plugin")]
+
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def execute(self, _stmt):  # noqa: ANN001
+            return _Result()
+
+        async def get(self, model, *_args):  # noqa: ANN002
+            if model is Account:
+                return SimpleNamespace(tg_username="owner", display_name="Owner", tg_user_id=999)
+            return None
+
+        async def commit(self):
+            return None
+
+    trace = SimpleNamespace(trace_id="evt_payment_disabled")
+    run_entry = AsyncMock(return_value=(True, None, [{"type": "send_message", "text": "payment ok"}]))
+    legacy_execute = AsyncMock(return_value=True)
+    record_span = AsyncMock()
+    monkeypatch.setattr(
+        account_bot_runtime,
+        "_event_framework_flags",
+        AsyncMock(return_value={"trace_enabled": True, "event_bus_delivery_enabled": False, "inline_updates_enabled": True}),
+    )
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(account_bot_runtime, "start_trace", AsyncMock(return_value=trace))
+    monkeypatch.setattr(account_bot_runtime, "finish_trace", AsyncMock())
+    monkeypatch.setattr(account_bot_runtime, "record_span", record_span)
+    monkeypatch.setattr(account_bot_runtime.audit, "write", AsyncMock())
+    monkeypatch.setattr(account_bot_runtime, "_run_worker_interaction_entry", run_entry)
+    monkeypatch.setattr(account_bot_runtime, "_execute_interaction_rule", legacy_execute)
+    monkeypatch.setattr(account_bot_runtime, "_guard_interaction_actions", AsyncMock(side_effect=lambda _incoming, _rule, actions: actions))
+    monkeypatch.setattr(account_bot_runtime, "_apply_interaction_actions", AsyncMock())
+    monkeypatch.setattr(account_bot_service, "plugin_declares_telegram_native_raw", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        account_bot_service,
+        "declared_module_event_subscriptions",
+        lambda _key: [
+            {
+                "source": ["external_payment_notice"],
+                "events": ["payment_confirmed"],
+                "scope": "all_allowed_chats",
+                "entry_key": "on_payment",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(
+            return_value={
+                "enabled": True,
+                "trusted_bot_id": 456,
+                "rules": [
+                    {
+                        "id": "legacy-paid",
+                        "enabled": True,
+                        "chat_ids": [-100123],
+                        "trigger_texts": ["转账成功"],
+                        "receiver_text": "BBB",
+                        "amount": 100,
+                        "action": "module",
+                        "module_key": "legacy_game",
+                        "module_action": "start_paid_game",
+                    },
+                ],
+            }
+        ),
+    )
+
+    await account_bot_runtime._handle_interaction_update(
+        1,
+        "bbot-token",
+        {
+            "update_id": 7,
+            "message": {
+                "message_id": 70,
+                "text": "转账成功\nAAA 射出 100\nBBB 接收 100",
+                "from": {"id": 456, "is_bot": True, "first_name": "Abot"},
+                "chat": {"id": -100123, "type": "supergroup"},
+            },
+        },
+    )
+
+    run_entry.assert_not_awaited()
+    legacy_execute.assert_awaited_once()
+    assert any(
+        call.kwargs.get("component") == "event_bus_payment_notice"
+        and call.kwargs.get("reason_code") == "event_bus_delivery_disabled"
+        for call in record_span.await_args_list
+    )
 
 
 @pytest.mark.asyncio

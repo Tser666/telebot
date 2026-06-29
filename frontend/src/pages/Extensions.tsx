@@ -1022,26 +1022,56 @@ function RemoteInstallCard() {
                       <div className="space-y-1">
                         {(pluginsQ.data ?? []).map((p) => {
                           const canUpdate = !!p.installed && !!p.update_available;
+                          const events = pluginEventSubscriptionLabels(p.event_subscriptions);
+                          const capabilities = pluginCapabilityLabels(p.capabilities);
+                          const risks = pluginContractRiskWarnings({
+                            capabilities: p.capabilities,
+                            event_subscriptions: p.event_subscriptions,
+                          });
                           return (
                           <div
                             key={p.name}
-                            className="flex flex-col gap-2 rounded px-2 py-1.5 hover:bg-accent/30 sm:flex-row sm:items-center"
+                            className="flex flex-col gap-2 rounded-md px-2 py-2 hover:bg-accent/30 sm:flex-row sm:items-start"
                           >
                             <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-medium">{p.display_name || p.name}</span>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="min-w-0 text-sm font-medium">{p.display_name || p.name}</span>
                                 <span className="font-mono text-xs text-muted-foreground">v{p.version}</span>
                                 {canUpdate ? (
                                   <MetaBadge tone="success">可更新</MetaBadge>
                                 ) : p.installed ? (
                                   <MetaBadge>已安装</MetaBadge>
                                 ) : null}
+                                {risks.length > 0 ? <MetaBadge tone="danger">高风险能力</MetaBadge> : null}
                               </div>
                               {p.description && (
                                 <p className="truncate text-xs text-muted-foreground">{p.description}</p>
                               )}
+                              <p className="mt-1 text-xs text-muted-foreground">{compactUsageText(p.usage)}</p>
+                              <div className="mt-2 flex flex-wrap gap-1.5">
+                                <MetaBadge tone="outline">订阅 {p.event_subscriptions?.length ?? 0}</MetaBadge>
+                                {events.slice(0, 4).map((label) => (
+                                  <MetaBadge key={`${p.name}-event-${label}`}>{label}</MetaBadge>
+                                ))}
+                                {events.length > 4 ? <MetaBadge tone="outline">+{events.length - 4}</MetaBadge> : null}
+                                <MetaBadge tone="outline">能力 {capabilities.length}</MetaBadge>
+                                {capabilities.slice(0, 3).map((label) => (
+                                  <MetaBadge key={`${p.name}-cap-${label}`} tone="warn">{label}</MetaBadge>
+                                ))}
+                                {capabilities.length > 3 ? <MetaBadge tone="outline">+{capabilities.length - 3}</MetaBadge> : null}
+                              </div>
+                              {risks.length > 0 ? (
+                                <div className="mt-2 space-y-1 text-xs text-destructive">
+                                  {risks.slice(0, 2).map((risk) => (
+                                    <div key={`${p.name}-risk-${risk}`} className="flex gap-1.5">
+                                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                                      <span>{risk}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : null}
                               {canUpdate && p.installed_version && (
-                                <p className="text-xs text-muted-foreground">
+                                <p className="mt-1 text-xs text-muted-foreground">
                                   当前 {formatPluginVersion(p.installed_version)}，仓库 {formatPluginVersion(p.version)}
                                 </p>
                               )}

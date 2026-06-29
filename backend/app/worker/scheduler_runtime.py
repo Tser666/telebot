@@ -26,6 +26,7 @@ from app.db.base import AsyncSessionLocal
 from app.db.models.command import LLMProvider
 from app.db.models.feature import FEATURE_SCHEDULER
 from app.db.models.rule import Rule
+from app.db.models.system import SystemSetting
 from app.services.event_trace import (
     TRACE_STATUS_FAILED,
     TRACE_STATUS_OK,
@@ -84,6 +85,17 @@ def _scheduler_trace_context(ctx: PluginContext, *, action: dict[str, Any] | Non
     return context
 
 
+async def _scheduler_trace_enabled() -> bool:
+    try:
+        async with AsyncSessionLocal() as db:
+            row = await db.get(SystemSetting, "log_retention")
+        raw = row.value if row is not None and isinstance(row.value, dict) else {}
+        return bool(raw.get("trace_enabled", True))
+    except Exception:  # noqa: BLE001
+        log.debug("load scheduler trace switch failed, using default", exc_info=True)
+        return True
+
+
 async def _record_scheduler_action(
     ctx: PluginContext,
     action: dict[str, Any],
@@ -91,6 +103,10 @@ async def _record_scheduler_action(
     **detail: Any,
 ) -> None:
     context = _scheduler_trace_context(ctx, action=action)
+    if not context.get("trace_id") and isinstance(action.get("context"), dict):
+        context = dict(action["context"])
+    if not context.get("trace_id"):
+        return
     detail.setdefault("plugin_key", str(getattr(ctx, "feature_key", "") or FEATURE_SCHEDULER))
     detail.setdefault("component", "scheduler")
     await record_action(context, action, status, **detail)
@@ -352,25 +368,27 @@ class SchedulerRuleExecutor:
             return False
 
         action_type = str(action.get("type") or "send_message").lower()
-        trace = await start_trace(
-            {
-                "event_type": "scheduler_fire",
-                "source": {
-                    "type": "scheduler_fire",
-                    "channel": "scheduler",
-                    "account_id": ctx.account_id,
-                },
-                "message": {},
-                "chat": {},
-                "sender": {},
-                "trigger": {
-                    "rule_id": rule_id,
-                    "action_type": action_type,
-                    "feature_key": getattr(ctx, "feature_key", FEATURE_SCHEDULER),
-                },
-                "raw": {"action": action},
-            }
-        )
+        trace = None
+        if await _scheduler_trace_enabled():
+            trace = await start_trace(
+                {
+                    "event_type": "scheduler_fire",
+                    "source": {
+                        "type": "scheduler_fire",
+                        "channel": "scheduler",
+                        "account_id": ctx.account_id,
+                    },
+                    "message": {},
+                    "chat": {},
+                    "sender": {},
+                    "trigger": {
+                        "rule_id": rule_id,
+                        "action_type": action_type,
+                        "feature_key": getattr(ctx, "feature_key", FEATURE_SCHEDULER),
+                    },
+                    "raw": {"action": action},
+                }
+            )
         previous_trace = getattr(ctx, "_scheduler_trace", None)
         previous_entry_key = getattr(ctx, "_scheduler_entry_key", None)
         ctx._scheduler_trace = trace
@@ -384,25 +402,28 @@ class SchedulerRuleExecutor:
                 await self.action_call_llm(ctx, action)
             else:
                 raise ValueError(f"unknown action.type={action_type}")
-            await finish_trace(trace, TRACE_STATUS_OK, rule_id=rule_id, action_type=action_type)
+            if trace is not None:
+                await finish_trace(trace, TRACE_STATUS_OK, rule_id=rule_id, action_type=action_type)
             return True
         except SchedulerCommandBlockedError as exc:
             cfg["last_error"] = str(exc)
             if ctx.log is not None:
                 await ctx.log("info", f"[scheduler] rule={rule_id} blocked: {exc}")
-            await finish_trace(trace, TRACE_STATUS_FAILED, rule_id=rule_id, action_type=action_type, error=str(exc))
+            if trace is not None:
+                await finish_trace(trace, TRACE_STATUS_FAILED, rule_id=rule_id, action_type=action_type, error=str(exc))
             return False
         except Exception as exc:  # noqa: BLE001
             cfg["last_error"] = f"{type(exc).__name__}: {exc}"
             if ctx.log is not None:
                 await ctx.log("error", f"[scheduler] rule={rule_id} fire failed: {type(exc).__name__}: {exc}")
-            await finish_trace(
-                trace,
-                TRACE_STATUS_FAILED,
-                rule_id=rule_id,
-                action_type=action_type,
-                error=f"{type(exc).__name__}: {exc}",
-            )
+            if trace is not None:
+                await finish_trace(
+                    trace,
+                    TRACE_STATUS_FAILED,
+                    rule_id=rule_id,
+                    action_type=action_type,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
             return False
         finally:
             ctx._scheduler_trace = previous_trace

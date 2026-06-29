@@ -271,6 +271,33 @@ async def test_scheduler_send_message_records_trace_action(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_scheduler_send_message_respects_trace_enabled_switch(monkeypatch) -> None:
+    executor = SchedulerRuleExecutor()
+    start_trace = AsyncMock(return_value="evt_scheduler_disabled")
+    finish_trace = AsyncMock()
+    record_action = AsyncMock()
+    monkeypatch.setattr(scheduler_runtime, "_scheduler_trace_enabled", AsyncMock(return_value=False))
+    monkeypatch.setattr(scheduler_runtime, "start_trace", start_trace)
+    monkeypatch.setattr(scheduler_runtime, "finish_trace", finish_trace)
+    monkeypatch.setattr(scheduler_runtime, "record_action", record_action)
+    ctx = SimpleNamespace(
+        account_id=42,
+        feature_key="scheduler",
+        engine=SimpleNamespace(acquire=AsyncMock(return_value=SimpleNamespace(allowed=True, wait_seconds=0))),
+        client=SimpleNamespace(send_message=AsyncMock(return_value=SimpleNamespace(id=88))),
+        log=AsyncMock(),
+    )
+
+    ok = await executor.fire(ctx, 9, {"action": {"type": "send_message", "target_chat_id": 123, "text": "hello"}})
+
+    assert ok is True
+    ctx.client.send_message.assert_awaited_once_with(123, "hello")
+    start_trace.assert_not_awaited()
+    finish_trace.assert_not_awaited()
+    record_action.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_scheduler_send_message_failure_records_failed_action(monkeypatch) -> None:
     executor = SchedulerRuleExecutor()
     trace = "evt_scheduler_fail"

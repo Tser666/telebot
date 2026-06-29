@@ -1,6 +1,6 @@
 # TelePilot 全量 Telegram 消息事件总线与链路日志重构计划
 
-> 当前执行入口：如果代码已经处于 `0.40.x` 封口阶段，后续不要再从 0.38/0.39/0.40 的历史施工阶段重新解释方向，而是直接按第 24 节《最终版执行版协议》、第 25 节《最终版落地总则》、第 26 节《最终版执行锁定补丁》、第 27 节《最终版可实现性锁定》、第 28 节《最终版执行冻结清单》和第 29 节《最终版执行封条》执行。前文所有章节作为设计依据、任务来源和验收细则；若前文与第 24/25/26/27/28/29 节冲突，以第 24/25/26/27/28/29 节更严格的封版口径为准。
+> 当前执行入口：如果代码已经处于 `0.40.x` 封口阶段，后续不要再从 0.38/0.39/0.40 的历史施工阶段重新解释方向，而是直接按第 24 节《最终版执行版协议》、第 25 节《最终版落地总则》、第 26 节《最终版执行锁定补丁》、第 27 节《最终版可实现性锁定》、第 28 节《最终版执行冻结清单》、第 29 节《最终版执行封条》、第 30 节《最终版签收执行补丁》和第 31 节《最终版收束补丁》执行。前文所有章节作为设计依据、任务来源和验收细则；若前文与第 24/25/26/27/28/29/30/31 节冲突，以第 24/25/26/27/28/29/30/31 节更严格的封版口径为准。
 
 ## 0. 审查结论
 
@@ -4446,3 +4446,469 @@ MessageOps / Delivery Executor：
 - 任一硬门禁命中：必须说 `No-Go / 阻塞`，先修复再谈发布。
 
 这就是最终封条：不再新增愿景，不再放宽门槛，不再把半落地当完成。按封条执行到底，最终版可以实现；没有证据时，计划会自动阻止错误宣称。
+
+## 30. 最终版签收执行补丁
+
+本节用于回答最后一个执行问题：如何保证“按计划做完”之后真的能成为所谓的最终版，而不是又变成一份更长的愿景清单。结论是：后续执行不再新增产品范围，只按本节的状态机、闸门、复验点和失败回退来推进。
+
+### 30.1 最终版是证据状态，不是主观状态
+
+最终版只能由证据台账推导出来。执行过程中所有口头状态必须落到下面状态机之一：
+
+```text
+No-Go / 阻塞
+  -> 本地可测
+  -> 业务页可测
+  -> 分支发布可测
+  -> 服务器已部署
+  -> 真实链路可追踪
+  -> 回滚已演练
+  -> Go / 已完成
+```
+
+状态升级规则：
+
+- `本地可测`：D1-D6、D3/D9 的自动验证和文档审计通过。
+- `业务页可测`：D7-D8 的桌面和窄屏/PWA 业务页验收通过。
+- `分支发布可测`：D10 的版本、CHANGELOG、commit、远端分支一致。
+- `服务器已部署`：D11 的备份、迁移、健康检查和远端版本一致。
+- `真实链路可追踪`：至少一组真实或同版本 fixture trace 覆盖普通消息、管理员命令、插件 action、失败 action。
+- `回滚已演练`：D12 三个开关完成关闭和恢复，并记录降级表现。
+- `Go / 已完成`：D1-D12 全部有当前 commit 证据，且没有命中第 24.5 节硬门禁。
+
+任何阶段只要发现硬门禁，立即降回 `No-Go / 阻塞`。不能用“前面很多项都通过了”抵消硬门禁。
+
+### 30.2 执行者现场事实冻结
+
+每次继续执行前，必须先现场采集事实，不能沿用历史聊天、历史台账或子 Agent 自述。
+
+最低事实冻结命令：
+
+```bash
+git rev-parse --show-toplevel
+git status --short --branch -uall
+git rev-parse HEAD
+git ls-remote origin refs/heads/codex/0.33-interaction-framework
+rg -n "__version__|version =|\"version\"|APP_VERSION" backend/app/__init__.py backend/pyproject.toml frontend/package.json frontend/src/lib/version.ts
+curl -fsS https://telebot.260505.xyz/api/system/version
+```
+
+事实冻结必须写入 `docs/release/<version>-final-evidence.md`：
+
+- 当前本地 commit。
+- 当前远端分支 commit。
+- 当前服务器版本。
+- 工作树未提交和未跟踪文件的处理结论。
+- 本轮证据是否仍绑定当前 commit。
+
+如果工作树有未跟踪文件，例如临时 `frontend/pnpm-workspace.yaml`，必须明确“不纳入发布、不 stage、不删除”。如果该文件影响构建或部署，先处理影响；如果不影响，只登记，不为了干净工作树而擅自删除。
+
+### 30.3 七个签收闸门
+
+最终版签收只允许按七个闸门推进。每个闸门完成后更新证据台账；如果失败，按“重跑边界”从对应闸门重新开始。
+
+| 闸门 | 目标 | 必须证据 | 失败时回到 |
+| --- | --- | --- | --- |
+| G0 事实冻结 | 当前分支、版本、工作树、远端和服务器状态明确 | 命令输出摘要、commit、服务器版本 | G0 |
+| G1 契约硬门禁 | 入口、协议、动作、旧通道、native_raw、回滚开关没有硬断链 | ruff、目标 pytest、全量 pytest、关键 diff review | G1 |
+| G2 文档示例 | 开发者只按新版主路径即可写插件 | 文档 grep 分类、示例验证、插件验证脚本 | G2，必要时回 G1 |
+| G3 业务页验收 | 日志、交互、插件、仓库、配置、设置页面可排障 | URL、视口、状态、失败截图或描述 | G3，字段不一致回 G1 |
+| G4 发布检查点 | 版本、中文 CHANGELOG、证据台账、commit、push 一致 | 版本 grep、git diff/check、远端 SHA | G4，发现代码变更回 G1 |
+| G5 服务器部署 | `144.24.5.159` 运行当前分支 | 备份路径、远端 commit、版本 API、迁移、docker/health | G5，部署后代码变更回 G1 |
+| G6 链路和回滚 | 真实或 fixture trace 可查，三个回滚开关可关闭恢复 | trace_id、reason_code、event_action、开关前后值 | G6，开关无效回 G1 |
+
+G0-G6 全部通过后，才能执行最终报告。最终报告不是新的闸门，只是把台账结论压缩给用户和朋友看。
+
+### 30.4 自动验证组的当前口径
+
+最终版的自动验证组固定如下。命令失败时必须记录第一条可行动错误；环境失败必须说明解释器、依赖或服务状态，不能写成代码失败。
+
+```bash
+cd backend && .venv/bin/ruff check app ../scripts/validate-plugin-examples.py
+cd backend && .venv/bin/pytest -q
+backend/.venv/bin/python scripts/validate-plugin-examples.py
+backend/.venv/bin/python scripts/validate-installed-interaction-plugins.py
+cd backend && .venv/bin/alembic heads
+cd backend && .venv/bin/alembic upgrade head --sql >/tmp/telepilot-alembic-final.sql
+cd frontend && ./node_modules/.bin/tsc -b --pretty false
+cd frontend && ./node_modules/.bin/vite build
+git diff --check
+```
+
+针对最终版硬门禁，还必须保留目标测试组。测试名如因重构变化，先用 `rg` 找等价测试，并在台账中写清替代关系。
+
+```bash
+cd backend && .venv/bin/pytest -q \
+  app/tests/test_account_bot.py::test_interaction_plain_message_routes_to_worker_entry_as_message \
+  app/tests/test_account_bot.py::test_interaction_callback_routes_to_worker_entry_and_answers_callback \
+  app/tests/test_account_bot_auto_award.py::test_account_bot_auto_award_records_trace_action \
+  app/tests/test_worker_command.py \
+  app/tests/test_plugin_security_regression.py \
+  app/tests/test_scheduler_runtime.py
+```
+
+全量 pytest 通过不能替代目标测试组，因为目标测试组证明的是最终版硬门禁是否关闭。
+
+### 30.5 业务页验收剧本
+
+业务页验收不能只写“页面正常”。每个页面必须记录 URL、视口、账号/Bot 上下文、通过状态和失败原因。
+
+| 页面 | 桌面必须看 | 窄屏/PWA 必须看 |
+| --- | --- | --- |
+| `/logs` | 总览、消息链路、插件诊断、命令链路、动作发送、原始日志 fallback；成功、未命中、插件失败、动作失败、旧 notice 失败 | 底部导航不重叠，筛选和详情可操作，长 reason_code/错误文本不撑破 |
+| `/interaction?aid=1` | 顶部账号/Bot 选择、规则列表、规则详情、插件入口、触发词、会话状态、最近错误 | 列表压缩后仍能开关规则和进入详情，保存按钮不遮挡内容 |
+| `/plugins` | usage、订阅、能力、风险、规范警告、安装/移除状态 | 插件名长文本、警告、按钮不换行错乱 |
+| `/plugins/manage?tab=plugins` | 仓库刷新、单仓库一键更新、私有库和 `tree/<branch>` URL 提示、更新失败脱敏 | 操作按钮可触达，错误信息不横向溢出 |
+| 真实插件配置页 | 使用说明、总开关、插件配置、插件预览；缺 usage 时红色高级警告 | 底部导航、保存操作条、长配置字段不重叠 |
+| `/settings` | Trace/Event Bus/Inline 回滚开关、高级风险提示、保存反馈 | 开关说明和状态不被底部导航遮挡 |
+
+如果没有线上登录态，G3 不能签收，只能写 `半落地` 或 `可测 / 待服务器实测`。可以用本地已登录环境或固定 fixture 做补充，但不能把未登录页面当业务页验收。
+
+### 30.6 部署和回滚执行底线
+
+部署到 `144.24.5.159` 前必须满足：
+
+- 已有正确 SSH 用户、密钥或等价部署通道。
+- 已备份 `.env`、compose 文件和数据库，并记录路径。
+- 当前分支已推送，远端 SHA 可核对。
+- 当前证据台账至少达到 `分支发布可测`。
+
+推荐部署命令：
+
+```bash
+cd /opt/telepilot
+./deploy/backup.sh
+TELEPILOT_UPDATE_BRANCH=codex/0.33-interaction-framework make prod-update
+```
+
+部署后必须记录：
+
+```bash
+git rev-parse HEAD
+docker compose ps
+docker compose logs --tail=100 web
+curl -fsS http://127.0.0.1:8000/healthz
+curl -fsS https://telebot.260505.xyz/api/system/version
+```
+
+回滚演练必须逐个进行，不能一次性全关：
+
+1. 记录 `trace_enabled` 当前值，关闭，触发或导入一条降级场景，确认降级提示或旧日志 fallback，再恢复原值。
+2. 记录 `event_bus_delivery_enabled` 当前值，关闭，确认旧规则兜底或 degraded 标记，再恢复原值。
+3. 记录 `inline_updates_enabled` 当前值，关闭，确认 inline update 不进入新投递或有明确跳过 reason，再恢复原值。
+
+如果没有权限读取或修改这些开关，最终状态不能是 `Go / 已完成`。
+
+### 30.7 真实链路最小证明集
+
+最终版不要求线上证明所有理论场景，但至少要证明下面四类链路；Inline 和付款如果不适合真实触发，可以用同版本 fixture 补充，但必须写明原因。
+
+| 链路 | 最低输入 | 必须看到 |
+| --- | --- | --- |
+| 普通消息未命中 | 允许群内一条无关键词文本 | `event_trace` receive/normalize，`event_span` skipped，稳定 reason_code |
+| 管理员命令 | 账号主人或管理员命令 | command parse、permission、handler/plugin、userbot_reply 或 action |
+| 插件正常 action | 玩家关键词、按钮或测试插件 | matched/delivered、plugin invoke、`event_action.status=success`、actual_send_via |
+| 插件失败 action | 缺目标 message_id、旧 notice、缺 token 或测试失败动作 | `event_action.status=failed/skipped`、reason_code/error_code、中文说明 |
+
+可选但强烈建议证明：
+
+- callback_query 的 `answer_callback` 成功或失败。
+- inline_query 的 `answer_inline_query` 成功或失败。
+- payment_confirmed / external_payment_notice 的 payer/player/settlement 归属。
+- `telegram_native_raw` 声明插件和未声明插件的对照。
+
+### 30.8 文档最终审计边界
+
+开发文档最终审计的目标不是删除所有旧词，而是确保旧词不会作为推荐主路径出现。
+
+必须逐条分类的 grep：
+
+```bash
+rg -n "notice|bbot_notice|notice_bot|raw_event|payload\\[\"text\"\\]|event\\.reply|event\\.respond|ctx\\.client|旧规则驱动" README.md docs examples scripts backend frontend
+rg -n "event_subscriptions|capabilities|ctx\\.messages|MessageOps|Trace|reason_code|send_channel_deprecated|native_raw" README.md docs examples scripts backend frontend
+```
+
+允许保留的命中：
+
+- 历史背景。
+- 迁移说明。
+- 废弃值失败测试。
+- 兼容层实现。
+- 风险说明。
+
+不允许保留的命中：
+
+- 新插件最小示例仍使用旧平铺 payload。
+- 文档建议插件使用 `notice` / `bbot_notice` / `notice_bot` 发送。
+- 文档建议通过 `ctx.client` 或 `event.reply/respond` 直发可见消息。
+- 文档把旧交互规则写成唯一运行主路径。
+
+### 30.9 版本和发布材料规则
+
+如果本轮只修改计划文档、证据台账或未推送的草稿，不强制 bump 版本。只要准备提交、推送稳定检查点、部署、PR 或 release，就必须按项目规则判断版本：
+
+- 破坏兼容：`MAJOR（主版本）`，0.x 阶段一般仍需单独确认。
+- 新能力或入口重组：`MINOR（次版本）`。
+- 封口修复、文档、验收补强、UI 小修：`PATCH（补丁版本）`。
+
+发布检查点必须同步：
+
+- `backend/app/__init__.py`
+- `backend/pyproject.toml`
+- `frontend/package.json`
+- `frontend/src/lib/version.ts`
+- `CHANGELOG.md`
+- `docs/release/<version>-final-evidence.md`
+
+中文 CHANGELOG 只能写已经落地和已经验证的内容，不写“计划将支持”。commit、PR、release 文案必须使用中文。
+
+### 30.10 最终执行可以并行，但最终签收只能串行
+
+允许并行：
+
+- 只读 review agent 审查硬门禁和文档旧主路径。
+- UI agent 验收或修复业务页。
+- Docs agent 审计插件开发指南和示例。
+- Deploy agent 在主 Agent 授权和备份后执行远端部署。
+
+不允许并行：
+
+- 多个 agent 同时改同一运行时入口。
+- UI 先创造后端不存在字段。
+- Docs 先写未落地能力。
+- Release agent 在自动验证或浏览器验收前 bump/commit/push。
+- Deploy agent 在没有备份和正确分支证据时改远端。
+
+主 Agent 是唯一签收 owner。子 Agent 的报告只能作为证据线索，不能直接把 D 项标为 `已完成`。
+
+### 30.11 最终报告的硬格式
+
+最终报告开头必须先写结论，不能先讲进展。
+
+如果是 `Go / 已完成`，第一段必须包含：
+
+- 版本。
+- 本地 commit。
+- 远端 commit。
+- 服务器版本。
+- 证据台账文件。
+- D1-D12 全部通过。
+
+如果不是 `Go / 已完成`，第一段必须直接列出缺口，例如：
+
+```text
+结论：可测 / 待服务器实测。
+缺口：服务器仍是 0.37.0；SSH 无法进入 144.24.5.159；缺业务页登录态；缺真实 trace 和回滚演练。
+```
+
+不允许把缺口放在末尾，也不允许用“基本完成”“应该没问题”“只差实测”替代正式状态。
+
+### 30.12 为什么这版计划足以实现最终版
+
+本计划已经具备最终版落地所需的四个闭环：
+
+1. **产品闭环**：个人可信插件标准、UserBot 主控、交互 Bot 高频出口、转账/发奖仍走 userbot 或 settlement 的边界已经固定。
+2. **技术闭环**：Source Adapter、Event Bus、标准事件信封、MessageOps、Delivery Executor、Trace 和日志页的职责已经固定。
+3. **开发者闭环**：插件开发指南、示例、验证脚本和文档审计都围绕 `event_subscriptions`、`capabilities`、`ctx.messages` 和 Trace 排障。
+4. **发布闭环**：D1-D12、G0-G6、证据台账、服务器部署、真实 trace 和回滚演练组成了可复核签收链。
+
+因此，后续不需要再继续扩写愿景。只要按本节执行，完成 D1-D12 并把证据台账升级为 `Go / 已完成`，就可以稳定称为最终版；如果缺服务器、登录态、真实 trace 或回滚证据，计划会自动把结论降级为 `可测 / 待服务器实测` 或 `No-Go / 阻塞`，不会误报完成。
+
+## 31. 最终版收束补丁
+
+本节用于把前面的执行协议收束成最后一张施工图。它不新增产品能力，也不扩大 0.40.x 范围；它只回答一个问题：后续如果严格按计划执行，怎样确保结果不是“又一个阶段性版本”，而是真正可以签收的最终版框架落地。
+
+结论固定为：
+
+> 按第 31 节执行时，最终版只由 D1-D12 的当前 commit 证据决定。代码、页面、文档、发布、部署、真实 trace 和回滚演练全部闭环时，输出 `Go / 已完成`；缺服务器或真实链路证据时，输出 `可测 / 待服务器实测`；命中硬门禁时，输出 `No-Go / 阻塞`。
+
+### 31.1 最终版唯一收束路径
+
+后续执行不再新增章节、不再重新讨论“个人模式 / 标准模式”、不再扩展 Telegram 全 API。唯一收束路径如下：
+
+```text
+G0 事实冻结
+  -> G1 契约和运行时硬门禁
+  -> G2 文档、示例和验证脚本
+  -> G3 业务页桌面和窄屏验收
+  -> G4 版本、CHANGELOG、commit、push
+  -> G5 服务器备份、部署、迁移、健康检查
+  -> G6 真实 trace、失败 trace、回滚开关演练
+  -> Go / 已完成
+```
+
+每个闸门只能向前升级一次。后续任何代码、schema、前端类型、文档主路径或部署脚本变更，都必须回到最早受影响的闸门重新跑。例子：
+
+- 改后端事件字段：回到 G1，并重跑 G2/G3/G4。
+- 改插件开发指南示例：回到 G2，并重跑示例验证和文档 grep。
+- 改页面展示字段：回到 G3，并重跑前端 typecheck/build 和桌面/窄屏验收。
+- 部署后发现服务端代码变更：回到 G1，不允许只热修远端后直接报 Go。
+
+### 31.2 D1-D12 最终施工映射
+
+执行者只按下表推进。某项没有达到“最低签收证据”，就不能把该项写成 `已完成`。
+
+| D 项 | 必须关闭的断点 | 主要落点 | 最低自动证据 | 最低人工/远端证据 | 失败出口 |
+| --- | --- | --- | --- | --- | --- |
+| D1 主入口 Trace | 任一消息入口没有 trace | `account_bot_runtime.py`、`runtime.py`、`command.py`、`event_bus.py` | message、command、callback、inline、payment 目标测试 | trace 详情能看到 receive/normalize/start | `No-Go` |
+| D2 Event Bus decision | 插件被旧路径直调 | `event_bus.py`、loader、旧规则映射层 | decision matched/skipped/delivered 断言 | 日志页能解释未触发 reason_code | `No-Go` |
+| D3 新插件主路径 | 开发者仍需旧 payload 或旧规则 | `docs/PLUGIN-*.md`、`examples/plugins/*`、验证脚本 | 示例插件验证通过 | 文档复制最小示例可说明 message/command/callback/inline/payment | `可测`，若文档推荐旧主路径则 `No-Go` |
+| D4 native_raw 边界 | 未声明插件拿完整原生数据 | manifest parser、Contract Guard、Trace redactor | 声明/未声明对照测试 | 插件页和日志页显示能力、风险、是否下发 | `No-Go` |
+| D5 旧 notice 收口 | `notice` / `bbot_notice` 仍能发送 | Delivery、Contract Guard、验证脚本 | `send_channel_deprecated` 测试 | 日志页动作失败有中文迁移提示 | `No-Go` |
+| D6 action 全落库 | 发送失败或复合动作假成功 | `message_ops.py`、`delivery.py`、scheduler、settlement | send/edit/delete/pin/callback/inline/settlement 成功失败测试 | 动作页能按 trace/action 查到 requested/actual channel | `No-Go` |
+| D7 日志可排障 | 日志页只是旧 runtime log | Logs API、`Logs.tsx` | logs API 过滤测试、前端 typecheck/build | `/logs` 桌面和窄屏覆盖成功、未命中、插件失败、动作失败 | `可测`，核心问题不可解释则 `No-Go` |
+| D8 业务 UI 可操作 | 交互和插件配置仍靠旧入口猜状态 | `Interaction`、`Extensions`、插件配置、`Settings` | 前端 typecheck/build | `/interaction`、`/plugins`、仓库、配置页、`/settings` 桌面和窄屏验收 | `可测` |
+| D9 文档不漂移 | 文档仍推荐旧系统 | README、docs、examples、scripts | 旧词 grep 分类、新词 grep 覆盖 | 开发指南按最终七步可读 | `可测`，推荐旧主路径则 `No-Go` |
+| D10 发布材料一致 | 版本、CHANGELOG、commit、远端分支不一致 | 四处版本文件、`CHANGELOG.md`、证据台账 | version grep、`git diff --check` | 中文 commit、push 后远端 SHA 对齐 | `No-Go` |
+| D11 服务器上线 | 本地可测冒充线上完成 | 远端 `/opt/telepilot`、部署脚本、证据台账 | 远端迁移/health/version 命令 | 备份路径、远端 commit、docker 状态、线上 trace_id | 最多 `可测 / 待服务器实测` |
+| D12 回滚演练 | 开关只是字段、不能降级恢复 | system settings、runtime 开关、证据台账 | 设置 API roundtrip、运行时开关测试 | `trace_enabled`、`event_bus_delivery_enabled`、`inline_updates_enabled` 逐个关闭恢复 | `No-Go` |
+
+这张表是最终版施工总图。任何更细的任务卡、子 Agent 报告或临时修复，都必须能落回这 12 项之一；落不回去的事项不进入最终版范围。
+
+### 31.3 子 Agent 并行合同
+
+为了快，可以继续分配子 Agent，但每个子 Agent 必须拿到下面四件事：写入范围、禁区、验证命令、交付格式。主 Agent 保留唯一签收权。
+
+| 子任务 | 适合并行内容 | 写入范围 | 禁区 | 必须回报 |
+| --- | --- | --- | --- | --- |
+| Runtime Agent | D1、D2、D4、D5、D6、D12 的后端断点 | `backend/app/services/*`、`backend/app/worker/*`、后端测试 | 不改前端字段幻想，不恢复旧 notice，不绕过 Event Bus | 改动文件、目标测试、全量 pytest/ruff、reason_code/action 证据 |
+| UI Agent | D7、D8 的页面和窄屏/PWA | `frontend/src/pages/*`、相关组件和类型 | 不创造后端没有的字段，不把账号详情恢复成唯一入口 | URL、视口、截图或现象、typecheck/build |
+| Docs Agent | D3、D9 的开发文档和示例 | `README.md`、`docs/*`、`examples/*`、`scripts/validate-*` | 不推荐旧 payload、旧 `ctx.client`、旧 notice、旧规则主路径 | grep 分类、示例验证、文档入口清单 |
+| Release Agent | D10 的版本和发布材料 | 版本文件、`CHANGELOG.md`、证据台账 | 自动验证或浏览器验收前不 commit/push，不覆盖 main | 版本 grep、中文 CHANGELOG 摘要、待 stage 文件 |
+| Deploy Agent | D11、D12 的服务器部署和回滚 | 远端部署环境、证据台账 | 没备份不改远端，健康失败不报 Go | 备份路径、远端 commit、version/health、trace_id、开关前后值 |
+
+子 Agent 报告不能直接升级 D 项状态。主 Agent 必须复核命令、diff、页面或远端证据后，才能把证据台账从 `半落地` 升到 `可测` 或 `已完成`。
+
+### 31.4 最终版禁止借用的证据
+
+以下证据一律不能用于最终签收：
+
+- 历史聊天里说过“已经修了”。
+- 子 Agent 自述“测试通过”，但没有命令和当前 commit。
+- 旧版本、旧 commit、旧部署环境的测试输出。
+- 只打开未登录页面或空白壳页面，就宣称业务页验收通过。
+- 只看到 runtime log 有文本，就宣称 Trace 可排障。
+- 只跑全量 pytest，通过后替代旧 notice、native_raw、action failed、Event Bus decision 的目标测试。
+- 只部署成功但没有备份、远端版本、健康检查、真实 trace 或回滚演练。
+
+如果只能拿到上述证据，证据台账必须写“历史基线”或“不可签收”，不能写 `已完成`。
+
+### 31.5 最终版必须重跑的最小命令包
+
+进入 G4 发布检查点前，最低命令包固定如下。除非环境不可用且有等价替代证据，否则不能删减。
+
+```bash
+git status --short --branch -uall
+rg -n "__version__|version =|\"version\"|APP_VERSION" backend/app/__init__.py backend/pyproject.toml frontend/package.json frontend/src/lib/version.ts
+(
+  cd backend
+  .venv/bin/ruff check app ../scripts/validate-plugin-examples.py
+  .venv/bin/pytest -q
+)
+backend/.venv/bin/python scripts/validate-plugin-examples.py
+backend/.venv/bin/python scripts/validate-installed-interaction-plugins.py
+(
+  cd backend
+  .venv/bin/alembic heads
+  .venv/bin/alembic upgrade head --sql >/tmp/telepilot-alembic-final.sql
+)
+(
+  cd frontend
+  ./node_modules/.bin/tsc -b --pretty false
+  ./node_modules/.bin/vite build
+)
+rg -n "notice|bbot_notice|notice_bot|raw_event|payload\\[\"text\"\\]|event\\.reply|event\\.respond|ctx\\.client|旧规则驱动" README.md docs examples scripts backend frontend
+rg -n "event_subscriptions|capabilities|telegram_native_raw|native_raw_meta|answer_inline_query|chosen_inline_result|settlement|send_channel_deprecated" README.md docs backend frontend examples scripts
+git diff --check
+```
+
+目标测试组必须和全量测试一起保留：
+
+```bash
+(
+  cd backend
+  .venv/bin/pytest -q \
+  app/tests/test_account_bot.py::test_interaction_plain_message_routes_to_worker_entry_as_message \
+  app/tests/test_account_bot.py::test_interaction_callback_routes_to_worker_entry_and_answers_callback \
+  app/tests/test_account_bot.py::test_interaction_inline_query_routes_through_event_bus_and_records_trace \
+  app/tests/test_account_bot.py::test_interaction_chosen_inline_result_routes_through_event_bus \
+  app/tests/test_account_bot.py::test_interaction_delivery_executor_answer_inline_query_records_success_and_failure \
+  app/tests/test_account_bot_auto_award.py::test_account_bot_auto_award_records_trace_action \
+  app/tests/test_worker_command.py \
+  app/tests/test_plugin_security_regression.py \
+  app/tests/test_scheduler_runtime.py \
+  app/tests/test_plugin_loader.py \
+  app/tests/test_system_settings.py
+)
+```
+
+如果某个测试名已经改动，执行者必须先用 `rg` 找等价测试，把替代关系写入证据台账，再运行。不能静默跳过。
+
+### 31.6 最终版页面验收最低样本
+
+G3 至少验收以下样本。没有登录态时，不能把 G3 写成 `已完成`。
+
+| 页面 | 桌面视口 | 窄屏/PWA 视口 | 必须记录 |
+| --- | --- | --- | --- |
+| `/logs` | 1365px 以上 | 390px-480px | 成功链路、未命中、插件失败、动作失败、原始日志 fallback |
+| `/interaction?aid=1` | 1365px 以上 | 390px-480px | 账号/Bot 选择、规则列表、详情编辑、保存按钮、最近状态 |
+| `/plugins` | 1365px 以上 | 390px-480px | usage、订阅、能力、风险、规范警告、安装/移除状态 |
+| `/plugins/manage?tab=plugins` | 1365px 以上 | 390px-480px | 刷新、私有库、`tree/<branch>`、单仓库一键更新、错误脱敏 |
+| `/accounts/1/features/<plugin_key>?from=plugins` | 1365px 以上 | 390px-480px | 使用说明、总开关、配置容器、自定义样式、预览建议、缺 usage 红色警告 |
+| `/settings` | 1365px 以上 | 390px-480px | Trace/Event Bus/Inline/native_raw 开关、保存反馈、降级提示 |
+
+每页都必须检查长中文、长英文、长插件名、长 reason_code、长错误消息、底部导航、固定操作按钮。任何重叠、横向溢出或按钮不可触达，都不能把对应 UI 项写成 `已完成`。
+
+### 31.7 服务器最终版签收最低样本
+
+G5/G6 的最低远端证据固定为：
+
+```bash
+ssh <deploy-user>@144.24.5.159 'cd /opt/telepilot && git rev-parse HEAD'
+ssh <deploy-user>@144.24.5.159 'cd /opt/telepilot && docker compose ps'
+ssh <deploy-user>@144.24.5.159 'cd /opt/telepilot && docker compose logs --tail=100 web'
+curl -fsS https://telebot.260505.xyz/api/system/version
+curl -fsS https://telebot.260505.xyz/healthz
+```
+
+如果实际健康检查路径不是 `/healthz`，执行者必须用代码或部署配置确认真实路径，并把替代路径写入证据台账。
+
+服务器 trace 最少保留四条：
+
+- 普通消息未命中 trace。
+- 管理员命令 trace。
+- 插件成功 action trace。
+- 插件失败 action trace。
+
+Inline 和付款可以用同版本 fixture 补充，但必须在台账写清为什么不在线上真实触发。不能用“线上不方便”直接跳过。
+
+### 31.8 最终版完成判定伪代码
+
+最终收口时按下面伪代码判定，不再凭感觉判断：
+
+```text
+if hit_hard_gate:
+    status = "No-Go / 阻塞"
+elif any(D1..D10 missing current_commit_evidence):
+    status = "No-Go / 阻塞"
+elif D1..D10 passed and (D11 missing or D12 missing):
+    status = "可测 / 待服务器实测"
+elif D1..D12 passed and evidence_ledger.status == "Go / 已完成":
+    status = "Go / 已完成"
+else:
+    status = "No-Go / 阻塞"
+```
+
+其中 `current_commit_evidence` 的含义是：证据中的命令、页面、trace、远端版本或回滚记录，都能对应当前准备发布的 commit。历史 commit 证据不能自动继承。
+
+### 31.9 为什么按本节后可以实现最终版
+
+本节让“最终版”变成可执行结果，而不是口号，原因是：
+
+- 范围被收束到 D1-D12，不再继续发散。
+- 每个 D 项都有代码、测试、页面或远端证据要求，不能空口签收。
+- 子 Agent 可以并行，但状态升级由主 Agent 串行复核，避免互相覆盖。
+- 本地、浏览器、发布、服务器、真实 trace、回滚演练被拆成 G0-G6，任何缺口都会自动降级。
+- 允许残余风险和一票否决项已经明确，不会把旧通道、native_raw 越界、动作失败不落库这类问题带进最终版。
+
+所以，后续不需要再继续完善愿景；需要的是按第 31 节把证据跑全。证据跑全，最终版成立；证据缺失，结论自动降级。这就是 TelePilot 插件框架“最终版”的可实现边界。

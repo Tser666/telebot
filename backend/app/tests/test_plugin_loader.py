@@ -1167,6 +1167,176 @@ async def test_userbot_event_bus_ctx_client_send_message_records_action(monkeypa
         _REGISTRY.pop("_test_client_trace_dispatch", None)
 
 
+@pytest.mark.asyncio
+async def test_userbot_event_bus_trace_switch_disables_trace(monkeypatch) -> None:
+    from app.worker.plugins.base import _REGISTRY, register
+
+    legacy_calls: list[str] = []
+
+    @register
+    class _TraceOffPlugin(Plugin):
+        key = "_test_trace_off_dispatch"
+        display_name = "Trace 关闭测试"
+        message_channels = {"incoming"}
+        owner_only = False
+
+        async def on_message(self, ctx: PluginContext, event: Any) -> None:
+            legacy_calls.append(str(getattr(event, "raw_text", "")))
+
+    class _Event:
+        raw_text = "hello legacy"
+        text = "hello legacy"
+        chat_id = -1001
+        sender_id = 42
+        id = 90
+        is_private = False
+        is_group = True
+        is_channel = False
+
+        async def get_chat(self):
+            return None
+
+    fake_db = _FakeDB(
+        accounts={11: _FakeAcc(id=11)},
+        humanize={11: None},
+        afs=[_FakeAF(account_id=11, feature_key="_test_trace_off_dispatch", enabled=True, config={})],
+        rules=[],
+    )
+    monkeypatch.setattr(loader_mod, "AsyncSessionLocal", lambda: _fake_session_factory(fake_db))
+    monkeypatch.setattr(loader_mod, "_load_log_incoming_messages_setting", AsyncMock(return_value=False))
+    monkeypatch.setattr(loader_mod, "_load_event_framework_flags", AsyncMock(return_value={
+        "trace_enabled": False,
+        "event_bus_delivery_enabled": True,
+    }))
+    monkeypatch.setattr(loader_mod, "start_trace", AsyncMock())
+    monkeypatch.setattr(loader_mod, "record_span", AsyncMock())
+    monkeypatch.setattr(loader_mod, "finish_trace", AsyncMock())
+
+    captured: list[Any] = []
+
+    def _on(_filter):
+        def _wrap(fn):
+            captured.append(fn)
+            return fn
+
+        return _wrap
+
+    client = MagicMock()
+    client.on = _on
+    paused = asyncio.Event()
+    paused.set()
+
+    try:
+        await load_plugins_for_account(client, account_id=11, paused=paused, redis=_FakeRedis())
+        incoming_dispatch = captured[-1]
+        await incoming_dispatch(_Event())
+
+        assert legacy_calls == ["hello legacy"]
+        loader_mod.start_trace.assert_not_awaited()
+        assert all(call.args[0] is None for call in loader_mod.record_span.await_args_list)
+        loader_mod.finish_trace.assert_awaited_once()
+        assert loader_mod.finish_trace.await_args.args[0] is None
+    finally:
+        loader_mod._STATES.pop(11, None)
+        _REGISTRY.pop("_test_trace_off_dispatch", None)
+
+
+@pytest.mark.asyncio
+async def test_userbot_event_bus_delivery_switch_records_disabled_and_uses_legacy(monkeypatch) -> None:
+    from app.worker.plugins.base import _REGISTRY, register
+
+    event_calls: list[str] = []
+    legacy_calls: list[str] = []
+
+    @register
+    class _DeliveryOffPlugin(Plugin):
+        key = "_test_delivery_off_dispatch"
+        display_name = "Event Bus 关闭测试"
+        message_channels = {"incoming"}
+        owner_only = False
+
+        async def on_message(self, ctx: PluginContext, event: Any) -> None:
+            legacy_calls.append(str(getattr(event, "raw_text", "")))
+
+        async def on_event(self, ctx: PluginContext, payload: dict[str, Any]) -> list[dict[str, Any]]:
+            event_calls.append(str((payload.get("message") or {}).get("text") or ""))
+            return []
+
+    _DeliveryOffPlugin._manifest = Manifest(
+        key="_test_delivery_off_dispatch",
+        display_name="Event Bus 关闭测试",
+        event_subscriptions=[
+            {
+                "source": ["userbot"],
+                "events": ["message"],
+                "scope": "all_allowed_chats",
+                "entry_key": "main",
+            }
+        ],
+    )
+
+    class _Event:
+        raw_text = "hello fallback"
+        text = "hello fallback"
+        chat_id = -1001
+        sender_id = 42
+        id = 91
+        is_private = False
+        is_group = True
+        is_channel = False
+
+        async def get_chat(self):
+            return None
+
+    fake_db = _FakeDB(
+        accounts={12: _FakeAcc(id=12)},
+        humanize={12: None},
+        afs=[_FakeAF(account_id=12, feature_key="_test_delivery_off_dispatch", enabled=True, config={})],
+        rules=[],
+    )
+    trace = SimpleNamespace(trace_id="evt_loader_delivery_disabled")
+    monkeypatch.setattr(loader_mod, "AsyncSessionLocal", lambda: _fake_session_factory(fake_db))
+    monkeypatch.setattr(loader_mod, "_load_log_incoming_messages_setting", AsyncMock(return_value=False))
+    monkeypatch.setattr(loader_mod, "_load_event_framework_flags", AsyncMock(return_value={
+        "trace_enabled": True,
+        "event_bus_delivery_enabled": False,
+    }))
+    monkeypatch.setattr(loader_mod, "start_trace", AsyncMock(return_value=trace))
+    record_span = AsyncMock()
+    monkeypatch.setattr(loader_mod, "record_span", record_span)
+    monkeypatch.setattr(loader_mod, "finish_trace", AsyncMock())
+
+    captured: list[Any] = []
+
+    def _on(_filter):
+        def _wrap(fn):
+            captured.append(fn)
+            return fn
+
+        return _wrap
+
+    client = MagicMock()
+    client.on = _on
+    paused = asyncio.Event()
+    paused.set()
+
+    try:
+        await load_plugins_for_account(client, account_id=12, paused=paused, redis=_FakeRedis())
+        incoming_dispatch = captured[-1]
+        await incoming_dispatch(_Event())
+
+        assert event_calls == []
+        assert legacy_calls == ["hello fallback"]
+        assert any(
+            call.kwargs.get("reason_code") == "event_bus_delivery_disabled"
+            for call in record_span.await_args_list
+        )
+        loader_mod.finish_trace.assert_awaited_once()
+    finally:
+        loader_mod._STATES.pop(12, None)
+        _REGISTRY.pop("_test_delivery_off_dispatch", None)
+
+
 def test_userbot_native_raw_boolean_true_is_not_explicit_capability() -> None:
     class _Plugin(Plugin):
         key = "_test_native_raw_bool"
