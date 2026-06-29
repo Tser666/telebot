@@ -188,13 +188,13 @@ export function Logs() {
     refetchInterval: autoRefresh && mainTab === "commands" ? 5_000 : false,
   });
   const actionsQ = useQuery({
-    queryKey: ["logs", "trace", "actions", accountId, pluginKey, status, traceIdFilter, selectedTraceId, reasonCodeFilter],
+    queryKey: ["logs", "trace", "actions", accountId, pluginKey, status, traceIdFilter, reasonCodeFilter],
     queryFn: () =>
       listEventActions({
         account_id: accountId || undefined,
         plugin_key: pluginKey || undefined,
         status: status || undefined,
-        trace_id: traceIdFilter || selectedTraceId || undefined,
+        trace_id: traceIdFilter || undefined,
         reason_code: reasonCodeFilter || undefined,
         limit: 100,
       }),
@@ -274,14 +274,31 @@ export function Logs() {
             </div>
             <div className="space-y-1.5">
               <Label>Trace ID</Label>
-              <Input
-                value={traceId}
-                onChange={(e) => {
-                  setTraceId(e.target.value.trim());
-                  setSelectedTraceId(e.target.value.trim());
-                }}
-                placeholder="evt_..."
-              />
+              <div className="flex gap-2">
+                <Input
+                  className="min-w-0"
+                  value={traceId}
+                  onChange={(e) => {
+                    const nextTraceId = e.target.value.trim();
+                    setTraceId(nextTraceId);
+                    setSelectedTraceId(nextTraceId);
+                  }}
+                  placeholder="evt_..."
+                />
+                {traceIdFilter ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="shrink-0"
+                    onClick={() => {
+                      setTraceId("");
+                      setSelectedTraceId("");
+                    }}
+                  >
+                    清空
+                  </Button>
+                ) : null}
+              </div>
             </div>
             <div className="space-y-1.5">
               <Label>原因代码</Label>
@@ -357,7 +374,6 @@ export function Logs() {
             timezone={timezone}
             onTraceSelect={(traceId) => {
               setSelectedTraceId(traceId);
-              setTraceId(traceId);
               setMainTab("events");
             }}
           />
@@ -371,7 +387,6 @@ export function Logs() {
             selectedTraceId={selectedTraceId}
             onSelectTrace={(nextTraceId) => {
               setSelectedTraceId(nextTraceId);
-              setTraceId(nextTraceId);
             }}
             detail={traceDetailQ.data}
             detailLoading={traceDetailQ.isLoading}
@@ -393,7 +408,6 @@ export function Logs() {
             timezone={timezone}
             onTraceSelect={(traceId) => {
               setSelectedTraceId(traceId);
-              setTraceId(traceId);
               setMainTab("events");
             }}
           />
@@ -409,7 +423,6 @@ export function Logs() {
             selectedTraceId={selectedTraceId}
             onSelectTrace={(traceId) => {
               setSelectedTraceId(traceId);
-              setTraceId(traceId);
               setMainTab("events");
             }}
             timezone={timezone}
@@ -424,7 +437,6 @@ export function Logs() {
             timezone={timezone}
             onTraceSelect={(traceId) => {
               setSelectedTraceId(traceId);
-              setTraceId(traceId);
               setMainTab("events");
             }}
           />
