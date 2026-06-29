@@ -1547,8 +1547,11 @@ export interface CheckUpdateResult {
   current_commit: string | null;
   remote_commit: string | null;
   ahead: number;
+  remote?: string | null;
+  branch?: string | null;
   changed_files: string[];
   runtime_mode?: string | null;
+  update_executor?: string | null;
   action_required?:
     | "none"
     | "docs_only"
@@ -1573,7 +1576,12 @@ export interface PullUpdateResult {
   success: boolean;
   new_commit: string | null;
   summary: string | null;
+  job_id?: string | null;
+  status?: string | null;
+  remote?: string | null;
+  branch?: string | null;
   runtime_mode?: string | null;
+  update_executor?: string | null;
   action_required?:
     | "none"
     | "docs_only"
@@ -1597,4 +1605,21 @@ export interface PullUpdateResult {
 export interface RestartResult {
   success: boolean;
   error: string | null;
+}
+
+export interface UpdateJobStatus {
+  ok: boolean;
+  job_id: string;
+  status: "queued" | "running" | "succeeded" | "failed" | "unsupported" | "unknown" | string;
+  created_at?: number | null;
+  started_at?: number | null;
+  finished_at?: number | null;
+  returncode?: number | null;
+  remote?: string | null;
+  branch?: string | null;
+  new_commit?: string | null;
+  summary?: string | null;
+  error?: string | null;
+  logs: string[];
+  plan?: Record<string, unknown> | null;
 }

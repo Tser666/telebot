@@ -5,6 +5,7 @@ import type {
   AuditLogItem,
   BackendVersionInfo,
   CheckUpdateResult,
+  UpdateJobStatus,
   EventActionItem,
   EventTraceDetail,
   EventTraceSummary,
@@ -268,6 +269,10 @@ export async function checkUpdate(): Promise<CheckUpdateResult> {
 }
 export async function pullUpdate(): Promise<PullUpdateResult> {
   const { data } = await api.post<PullUpdateResult>("/api/system/pull-update");
+  return data;
+}
+export async function getUpdateJob(jobId: string): Promise<UpdateJobStatus> {
+  const { data } = await api.get<UpdateJobStatus>(`/api/system/update-jobs/${jobId}`);
   return data;
 }
 export async function restartApp(): Promise<RestartResult> {

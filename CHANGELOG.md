@@ -20,6 +20,23 @@
 
 ## [Unreleased]
 
+## [0.42.0] — 2026-06-29 · minor（次版本） · Web 面板自更新执行器
+
+### Added
+- 生产 Docker 栈新增内部 `updater` sidecar，仅在 Compose 内网监听，不暴露公网端口；Web 后端通过共享 token 调用它执行更新任务。
+- 检查更新机制支持当前分支 / `TELEPILOT_UPDATE_BRANCH`，不再写死 `origin/main`；生产候选分支也能在面板中检查和应用。
+- 更新任务改为后台 job，Web 面板可轮询显示更新状态和最近日志，避免 `docker compose` 重启 Web 容器时把请求中途打断。
+
+### Changed
+- `scripts/prod-up.sh` 与 `scripts/prod-update.sh` 会传递 `TELEPILOT_HOST_PROJECT_DIR`，让 updater 在容器内调用宿主 Docker 时仍能正确定位项目目录。
+- updater 触发完整更新时会跳过重建 updater 自身，避免自更新任务被中途杀掉；业务容器仍会按完整路径重建。
+- 更新弹窗展示目标分支、运行模式、执行器、变更分类和 job 日志；普通后端 / 前端变更继续走增量重建，部署脚本、Compose、Dockerfile、依赖等关键变更仍回退完整更新。
+- 部署文档补充 Web 自更新说明，明确首次启用 updater 仍需一次宿主机部署，后续常规补丁可从面板触发。
+
+### Tests
+- 补充分支选择、内部 updater 检查和更新 job 创建的单元测试。
+- 执行系统健康测试、后端 ruff、前端 TypeScript 构建检查、updater Python 编译检查和 Compose 配置渲染检查。
+
 ## [0.41.7] — 2026-06-29 · patch（补丁版本） · 交互消息参与者拦截修复
 
 ### Fixed
