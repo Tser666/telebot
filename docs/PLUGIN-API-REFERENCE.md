@@ -109,7 +109,7 @@ Event Bus 主路径示例：
 
 ```python
 async def on_event(self, ctx, payload):
-    message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
+    message = payload["message"]
     chat_id = message.get("chat_id") or (payload.get("chat") or {}).get("id")
     reply_to = message.get("message_id")
 

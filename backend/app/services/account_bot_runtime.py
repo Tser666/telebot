@@ -536,17 +536,51 @@ async def notify_account(account_id: int, text: str) -> int:
             if u.enabled and u.notify_enabled and u.last_chat_id is not None
         ]
     sent = 0
+    failed = 0
+    trace = None
+    final_status = TRACE_STATUS_SKIPPED
+    flags = await _event_framework_flags()
+    if targets and flags.get("trace_enabled", True):
+        trace = await start_trace(
+            {
+                "source": {
+                    "account_id": account_id,
+                    "channel": "account_bot",
+                    "type": "system_notice",
+                },
+                "message": {"text": text},
+            }
+        )
     for user in targets:
+        action = {
+            "type": "send_message",
+            "send_via": "account_bot",
+            "chat_id": int(user.last_chat_id),
+            "text": text,
+            "context": trace_log_context(trace, plugin_key="system_notify"),
+        }
         try:
-            await account_bot_service.send_message(
+            result = await account_bot_service.send_message(
                 token,
                 int(user.last_chat_id),
                 text,
                 parse_mode="HTML",
             )
+            await record_action(trace, action, TRACE_STATUS_OK, actual_send_via="account_bot", result=result)
             sent += 1
         except Exception:  # noqa: BLE001
+            failed += 1
+            await record_action(
+                trace,
+                action,
+                TRACE_STATUS_FAILED,
+                actual_send_via="account_bot",
+                error_code="telegram_api_error",
+                error="account bot notify failed",
+            )
             log.debug("account bot notify failed aid=%s tg_user=%s", account_id, user.tg_user_id, exc_info=True)
+    final_status = TRACE_STATUS_FAILED if failed else TRACE_STATUS_OK if sent else final_status
+    await finish_trace(trace, final_status, sent_count=sent, failed_count=failed, target_count=len(targets))
     return sent
 
 

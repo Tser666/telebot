@@ -8210,3 +8210,64 @@ async def test_notify_runtime_log_deduplicates_same_error(monkeypatch) -> None:
     await account_bot_runtime.notify_runtime_log(row)
 
     assert notify.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_notify_account_records_trace_action(monkeypatch) -> None:
+    class _Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def execute(self, *_args, **_kwargs):
+            return SimpleNamespace(
+                scalar_one_or_none=lambda: SimpleNamespace(
+                    account_id=7,
+                    enabled=True,
+                    bot_token_enc="enc-token",
+                )
+            )
+
+    trace = SimpleNamespace(trace_id="evt_notify_account")
+    send_message = AsyncMock(return_value={"message_id": 901})
+    record_action = AsyncMock()
+    finish_trace = AsyncMock()
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _Session())
+    monkeypatch.setattr(account_bot_runtime, "_event_framework_flags", AsyncMock(return_value={"trace_enabled": True}))
+    monkeypatch.setattr(account_bot_runtime, "start_trace", AsyncMock(return_value=trace))
+    monkeypatch.setattr(account_bot_runtime, "record_action", record_action)
+    monkeypatch.setattr(account_bot_runtime, "finish_trace", finish_trace)
+    monkeypatch.setattr(account_bot_service, "decrypt_bot_token", lambda _row: "bot-token")
+    monkeypatch.setattr(
+        account_bot_service,
+        "list_bot_users",
+        AsyncMock(
+            return_value=[
+                SimpleNamespace(
+                    enabled=True,
+                    notify_enabled=True,
+                    last_chat_id=12345,
+                    tg_user_id=67890,
+                )
+            ]
+        ),
+    )
+    monkeypatch.setattr(account_bot_service, "send_message", send_message)
+
+    sent = await account_bot_runtime.notify_account(7, "测试通知")
+
+    assert sent == 1
+    send_message.assert_awaited_once_with("bot-token", 12345, "测试通知", parse_mode="HTML")
+    record_action.assert_awaited_once()
+    assert record_action.await_args.args[0] is trace
+    assert record_action.await_args.args[1]["type"] == "send_message"
+    assert record_action.await_args.kwargs["actual_send_via"] == "account_bot"
+    finish_trace.assert_awaited_once_with(
+        trace,
+        account_bot_runtime.TRACE_STATUS_OK,
+        sent_count=1,
+        failed_count=0,
+        target_count=1,
+    )

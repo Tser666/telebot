@@ -1171,6 +1171,7 @@ async def test_userbot_event_bus_ctx_client_send_message_records_action(monkeypa
 async def test_userbot_event_bus_trace_switch_disables_trace(monkeypatch) -> None:
     from app.worker.plugins.base import _REGISTRY, register
 
+    event_calls: list[str] = []
     legacy_calls: list[str] = []
 
     @register
@@ -1182,6 +1183,23 @@ async def test_userbot_event_bus_trace_switch_disables_trace(monkeypatch) -> Non
 
         async def on_message(self, ctx: PluginContext, event: Any) -> None:
             legacy_calls.append(str(getattr(event, "raw_text", "")))
+
+        async def on_event(self, ctx: PluginContext, payload: dict[str, Any]) -> list[dict[str, Any]]:
+            event_calls.append(str((payload.get("message") or {}).get("text") or ""))
+            return []
+
+    _TraceOffPlugin._manifest = Manifest(
+        key="_test_trace_off_dispatch",
+        display_name="Trace 关闭测试",
+        event_subscriptions=[
+            {
+                "source": ["userbot"],
+                "events": ["message"],
+                "scope": "all_allowed_chats",
+                "entry_key": "main",
+            }
+        ],
+    )
 
     class _Event:
         raw_text = "hello legacy"
@@ -1211,6 +1229,7 @@ async def test_userbot_event_bus_trace_switch_disables_trace(monkeypatch) -> Non
     monkeypatch.setattr(loader_mod, "start_trace", AsyncMock())
     monkeypatch.setattr(loader_mod, "record_span", AsyncMock())
     monkeypatch.setattr(loader_mod, "finish_trace", AsyncMock())
+    monkeypatch.setattr(loader_mod, "update_plugin_runtime_status", AsyncMock())
 
     captured: list[Any] = []
 
@@ -1231,7 +1250,8 @@ async def test_userbot_event_bus_trace_switch_disables_trace(monkeypatch) -> Non
         incoming_dispatch = captured[-1]
         await incoming_dispatch(_Event())
 
-        assert legacy_calls == ["hello legacy"]
+        assert event_calls == ["hello legacy"]
+        assert legacy_calls == []
         loader_mod.start_trace.assert_not_awaited()
         assert all(call.args[0] is None for call in loader_mod.record_span.await_args_list)
         loader_mod.finish_trace.assert_awaited_once()

@@ -423,17 +423,17 @@ async def _start_userbot_message_trace(
 ) -> _UserbotEventBusDispatch:
     event_payload = normalize_userbot_event(state.account_id, event)
     flags = await _load_event_framework_flags()
-    if not flags.get("trace_enabled", True):
-        return _UserbotEventBusDispatch(trace=None, event_payload=event_payload)
-    trace = await start_trace(event_payload)
-    event_payload["trace_id"] = trace.trace_id
-    await record_span(
-        trace,
-        "receive",
-        TRACE_STATUS_OK,
-        component="userbot_message",
-        direction=event_label,
-    )
+    trace = None
+    if flags.get("trace_enabled", True):
+        trace = await start_trace(event_payload)
+        event_payload["trace_id"] = trace.trace_id
+        await record_span(
+            trace,
+            "receive",
+            TRACE_STATUS_OK,
+            component="userbot_message",
+            direction=event_label,
+        )
     if not flags.get("event_bus_delivery_enabled", True):
         await record_span(
             trace,

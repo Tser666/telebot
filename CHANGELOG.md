@@ -20,6 +20,21 @@
 
 ## [Unreleased]
 
+## [0.40.4] — 2026-06-29 · patch（补丁版本） · 最终版部署执行锁与发布复验
+
+### Docs
+- 继续补强全量 Event Bus 与 Trace 最终版计划，把最终版交付包、服务器部署目录探测、线上真实链路触发剧本、线上失败回滚剧本、插件开发指南最终审计清单、执行顺序锁和子 Agent 任务模板写入第 31 节。
+- 新增 `0.40.4` 最终版证据台账，绑定当前本地门禁、服务器部署、业务页验收、真实 Trace 和回滚演练的最终签收路径。
+
+### Fixed
+- 修复 UserBot 入口在 `trace_enabled=false` 时连 Event Bus decision 一起跳过的问题；现在关闭 Trace 只降级链路写库，新插件 Event Bus 投递仍按 `event_bus_delivery_enabled` 独立生效。
+- 补齐账号 Bot 系统通知和消息模板测试发送的 Trace/action 记录，用户可见 Bot 发送成功或失败会落 `event_action`，并尊重 `trace_enabled` 降级开关。
+- 修正插件 API 参考中 Event Bus 主路径示例的 `payload.get("message")` 歧义，改为直接读取标准信封 `payload["message"]`。
+
+### Tests
+- 补充 Trace 关闭但 UserBot Event Bus 仍投递、账号 Bot 通知 action、消息模板测试发送 action 的回归测试。
+- 重新执行最终版本地门禁：后端 ruff、D1-D6/D12 目标 pytest、全量 pytest、插件示例验证、已安装交互插件验证、Alembic head/offline SQL、前端类型检查和生产构建均通过。
+
 ## [0.40.3] — 2026-06-29 · patch（补丁版本） · 最终版签收与收束执行补丁
 
 ### Fixed
