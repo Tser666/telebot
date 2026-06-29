@@ -1326,9 +1326,16 @@ function RawLogsPanel({
                 查系统有没有收到消息、插件有没有启动、调用卡在哪一步、发送动作有没有失败。热更新和普通配置刷新默认隐藏。
               </p>
             </div>
-            <span className="rounded-md border border-border/70 bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
-              当前记录阈值：{runtimeMinLevelLabel(runtimeMinLevel)}
-            </span>
+            <div className="space-y-1 text-xs text-muted-foreground sm:text-right">
+              <span className="inline-flex rounded-md border border-border/70 bg-muted/40 px-2 py-1">
+                当前记录阈值：{runtimeMinLevelLabel(runtimeMinLevel)}
+              </span>
+              {runtimeMinLevel === "debug" ? (
+                <p className="max-w-lg sm:max-w-sm">
+                  debug 表示允许保留 debug 行；如果当前链路没有写入 debug，列表仍会以 info、warn 和 error 为主。
+                </p>
+              ) : null}
+            </div>
           </div>
           <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6 xl:items-end">
             <div className="space-y-1.5">
@@ -1696,7 +1703,7 @@ function buildTraceDiagnosis(detail: EventTraceDetail): DiagnosisResult {
       message: spanIssueText(failedSpan),
       nextStep: failedSpan.plugin_key
         ? "打开“插件诊断”查看该插件最近错误；若这里是 handler_error，优先看插件抛出的原始异常。"
-        : "查看该阶段的 reason 和 detail，确认是订阅、权限、会话、Contract Guard 还是运行时链路问题。",
+        : "查看该阶段的 reason 和 detail，确认是触发入口、权限、会话、Contract Guard 还是运行时链路问题。",
       reasonCode: failedSpan.reason_code,
       pluginKey: failedSpan.plugin_key,
       entryKey: failedSpan.entry_key,
@@ -1726,7 +1733,7 @@ function buildTraceDiagnosis(detail: EventTraceDetail): DiagnosisResult {
       tone: "warn",
       title: reasonDisplay(warningSpan.reason_code) || "链路有告警",
       message: spanIssueText(warningSpan),
-      nextStep: "如果消息没有响应，先看是否是订阅未命中、过滤条件未命中、插件未启用或发送通道不满足。",
+      nextStep: "如果消息没有响应，先看是否是触发入口未命中、过滤条件未命中、插件未启用或发送通道不满足。",
       reasonCode: warningSpan.reason_code,
       pluginKey: warningSpan.plugin_key,
       entryKey: warningSpan.entry_key,
@@ -1739,7 +1746,7 @@ function buildTraceDiagnosis(detail: EventTraceDetail): DiagnosisResult {
       tone: "warn",
       title: "未命中插件",
       message: "消息进入了 TelePilot，但没有进入任何插件处理阶段。",
-      nextStep: "检查触发关键词、事件订阅、允许会话、插件启用状态和规则作用账号。",
+      nextStep: "检查触发关键词、触发入口、允许会话、插件启用状态和规则作用账号。",
     };
   }
 
@@ -1788,7 +1795,7 @@ function buildPluginDiagnosis(detail: PluginRuntimeDetail, selectedPluginKey: st
       tone: "danger",
       title: "最近调用失败",
       message: spanIssueText(failedSpan),
-      nextStep: "点击 trace 查看这一次消息的完整链路，再根据 phase 判断是订阅、执行、契约还是发送动作失败。",
+      nextStep: "点击 trace 查看这一次消息的完整链路，再根据 phase 判断是触发入口、执行、契约还是发送动作失败。",
       reasonCode: failedSpan.reason_code,
       pluginKey: failedSpan.plugin_key || selectedPluginKey,
       entryKey: failedSpan.entry_key,
@@ -1802,7 +1809,7 @@ function buildPluginDiagnosis(detail: PluginRuntimeDetail, selectedPluginKey: st
       tone: "warn",
       title: "最近调用有告警",
       message: spanIssueText(warnSpan),
-      nextStep: "如果插件没有响应，优先确认订阅条件、触发词、会话策略和 Contract Guard 提示。",
+      nextStep: "如果插件没有响应，优先确认触发入口条件、触发词、会话策略和 Contract Guard 提示。",
       reasonCode: warnSpan.reason_code,
       pluginKey: warnSpan.plugin_key || selectedPluginKey,
       entryKey: warnSpan.entry_key,
@@ -1998,7 +2005,7 @@ function runtimeConsoleParts(row: RuntimeLogItem, timezone?: string) {
     actor ? `actor=${actor}` : null,
     reasonCode ? `reason=${reasonCode}` : null,
   ].filter(Boolean);
-  const level = normalizeRuntimeLevel(row.level).toUpperCase().padEnd(5);
+  const level = normalizeRuntimeLevel(row.level).toUpperCase();
   return {
     timestamp: formatConsoleTimestamp(row.created_at, timezone),
     levelLabel: level,
@@ -2573,7 +2580,7 @@ function reasonLabel(code?: string | null): string {
     empty_message_text: "消息文本为空",
     entry_key_missing: "入口缺失",
     event_bus_delivery_disabled: "Event Bus 投递已关闭",
-    event_type_not_subscribed: "事件类型未订阅",
+    event_type_not_subscribed: "事件类型不在触发入口内",
     filter_not_matched: "过滤条件未命中",
     handler_error: "处理器异常",
     inline_disabled: "Inline 已关闭",
@@ -2598,9 +2605,9 @@ function reasonLabel(code?: string | null): string {
     settlement_requires_userbot: "结算需要 UserBot",
     session_expired: "会话已过期",
     session_not_found: "会话不存在",
-    source_not_subscribed: "来源未订阅",
-    subscription_load_failed: "订阅加载失败",
-    subscription_not_matched: "订阅未命中",
+    source_not_subscribed: "来源不在触发入口内",
+    subscription_load_failed: "触发入口加载失败",
+    subscription_not_matched: "触发入口未命中",
     target_message_id_missing: "目标消息 ID 缺失",
     telegram_api_error: "Telegram API 错误",
     trace_write_failed: "Trace 写入降级",

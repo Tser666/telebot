@@ -8,6 +8,7 @@ import {
   BookOpen,
   Boxes,
   CalendarClock,
+  ChevronDown,
   FileText,
   History,
   MessageSquareText,
@@ -173,9 +174,9 @@ function moduleUpdateMessage(feature: FeatureInfo) {
   const current = moduleVersionLabel(feature.version);
   const latest = moduleVersionLabel(feature.latest_version);
   if (feature.latest_version) {
-    return `当前 ${current}，远程 ${latest}；请到“安装插件”更新。`;
+    return `当前 ${current}，远程 ${latest}；请到“插件管理”更新。`;
   }
-  return "远程插件有新版，请到“安装插件”更新。";
+  return "远程插件有新版，请到“插件管理”更新。";
 }
 
 function formatCompactNumber(value: number) {
@@ -190,6 +191,7 @@ export function PluginsHome() {
   const [searchParams] = useSearchParams();
   const [selectedAid, setSelectedAid] = useState<number | null>(null);
   const [guideExpanded, setGuideExpanded] = useState(false);
+  const [aiPanelExpanded, setAiPanelExpanded] = useState(false);
   const guideActive = searchParams.get("guide") === "1";
   const [bannerVisible, setBannerVisible] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -325,7 +327,7 @@ export function PluginsHome() {
               前往管理 Bot
             </Button>
             <Button size="sm" variant="outline" onClick={() => nav("/plugins/manage?tab=plugins")}>
-              前往插件安装
+              前往插件管理
             </Button>
             <Button
               size="sm"
@@ -441,7 +443,7 @@ export function PluginsHome() {
             </Button>
             <Button
               variant="outline"
-              className={`h-full min-h-[96px] justify-start whitespace-normal px-4 py-3 text-left ${
+              className={`h-full min-h-[96px] justify-start whitespace-normal border-primary/45 bg-primary/5 px-4 py-3 text-left shadow-md shadow-primary/10 hover:border-primary/70 hover:bg-primary/10 ${
                 guideActive ? "siri-glow" : ""
               }`}
               onClick={() => nav("/plugins/manage?tab=plugins")}
@@ -449,55 +451,70 @@ export function PluginsHome() {
               <span>
                 <span className="flex items-center gap-2 font-medium">
                   <PackagePlus className="h-4 w-4 text-primary" />
-                  安装插件
+                  插件管理
                 </span>
                 <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                  添加 Git 仓库安装远程插件；安装完成后回到本页按账号启用和配置。
+                  添加 Git 仓库，安装、更新和卸载插件；完成后回到本页按账号启用和配置。
                 </span>
               </span>
             </Button>
           </div>
-          {(settingsQ.data?.ai_enabled ?? true) ? (
+          {(settingsQ.data?.ai_enabled ?? false) ? (
             <div className="rounded-lg border px-4 py-3">
-              <SectionHeader
-                icon={Sparkles}
-                title="AI 插件入口"
-                description="AI 属于插件配置：先配置模型凭据，再创建指令模板，最后按账号启用；调用记录与排障集中在同一个工作台。"
-              />
-              <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-                <ToneRailCard
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <SectionHeader
                   icon={Sparkles}
-                  title="AI 工作台"
-                  value={<Button size="sm" variant="outline" onClick={() => nav("/ai")}>打开</Button>}
-                  valueClassName="flex flex-wrap gap-2"
-                  description="总览模型、指令模板和启用状态"
-                  tone="primary"
+                  title="AI 插件入口"
+                  description="AI 属于插件配置：先配置模型凭据，再创建指令模板，最后按账号启用；调用记录与排障集中在同一个工作台。"
                 />
-                <ToneRailCard
-                  icon={Package}
-                  title="模型提供商"
-                  value={<Button size="sm" variant="outline" onClick={() => nav("/ai?tab=providers")}>配置</Button>}
-                  valueClassName="flex flex-wrap gap-2"
-                  description="配置 OpenAI、Anthropic、Ollama 等"
-                  tone="neutral"
-                />
-                <ToneRailCard
-                  icon={History}
-                  title="近期调用"
-                  value={<Button size="sm" variant="outline" onClick={() => nav("/ai?tab=usage")}>查看</Button>}
-                  valueClassName="flex flex-wrap gap-2"
-                  description="查看成功率、耗时和错误原因"
-                  tone="success"
-                />
-                <ToneRailCard
-                  icon={BookOpen}
-                  title="帮助与示例"
-                  value={<Button size="sm" variant="outline" onClick={() => nav("/ai?help=1")}>前往</Button>}
-                  valueClassName="flex flex-wrap gap-2"
-                  description="浮层查看原理、示例和术语"
-                  tone="warn"
-                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="shrink-0"
+                  onClick={() => setAiPanelExpanded((value) => !value)}
+                  aria-expanded={aiPanelExpanded}
+                >
+                  {aiPanelExpanded ? "收起" : "展开"}
+                  <ChevronDown className={`ml-1 h-4 w-4 transition-transform ${aiPanelExpanded ? "rotate-180" : ""}`} />
+                </Button>
               </div>
+              {aiPanelExpanded ? (
+                <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+                  <ToneRailCard
+                    icon={Sparkles}
+                    title="AI 工作台"
+                    value={<Button size="sm" variant="outline" onClick={() => nav("/ai")}>打开</Button>}
+                    valueClassName="flex flex-wrap gap-2"
+                    description="总览模型、指令模板和启用状态"
+                    tone="primary"
+                  />
+                  <ToneRailCard
+                    icon={Package}
+                    title="模型提供商"
+                    value={<Button size="sm" variant="outline" onClick={() => nav("/ai?tab=providers")}>配置</Button>}
+                    valueClassName="flex flex-wrap gap-2"
+                    description="配置 OpenAI、Anthropic、Ollama 等"
+                    tone="neutral"
+                  />
+                  <ToneRailCard
+                    icon={History}
+                    title="近期调用"
+                    value={<Button size="sm" variant="outline" onClick={() => nav("/ai?tab=usage")}>查看</Button>}
+                    valueClassName="flex flex-wrap gap-2"
+                    description="查看成功率、耗时和错误原因"
+                    tone="success"
+                  />
+                  <ToneRailCard
+                    icon={BookOpen}
+                    title="帮助与示例"
+                    value={<Button size="sm" variant="outline" onClick={() => nav("/ai?help=1")}>前往</Button>}
+                    valueClassName="flex flex-wrap gap-2"
+                    description="浮层查看原理、示例和术语"
+                    tone="warn"
+                  />
+                </div>
+              ) : null}
             </div>
           ) : null}
           {guideActive ? (
@@ -528,7 +545,7 @@ export function PluginsHome() {
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-0 text-sm text-amber-900">
-            如需恢复，请确认已在“安装插件”中安装 Codex 图片生成，并检查该账号的 Codex 配置或运行日志。
+            如需恢复，请确认已在“插件管理”中安装 Codex 图片生成，并检查该账号的 Codex 配置或运行日志。
           </CardContent>
         </Card>
       ) : null}
@@ -766,12 +783,12 @@ function GuideContextCard({
       </div>
       <div className="mb-2 text-sm font-semibold">3. 启用指令模板或调用插件</div>
       <p className="text-xs leading-relaxed text-muted-foreground">
-        这一页主要看三处：先用“指令模板”复用指令；再看下方插件卡片，按账号启用和配置；需要外部能力时点“安装插件”添加远程插件。
+        这一页主要看三处：先用“指令模板”复用指令；再看下方插件卡片，按账号启用和配置；需要外部能力时点“插件管理”添加远程插件。
       </p>
       <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
         <div className="rounded-lg border bg-muted/30 p-2">A. 指令模板</div>
         <div className="rounded-lg border bg-muted/30 p-2">B. 插件启用状态</div>
-        <div className="rounded-lg border bg-muted/30 p-2">C. 安装插件</div>
+        <div className="rounded-lg border bg-muted/30 p-2">C. 插件管理</div>
       </div>
       <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted">
         <div
@@ -781,7 +798,7 @@ function GuideContextCard({
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
         <Button size="sm" onClick={onInstall}>
-          安装远程插件 <ArrowRight className="ml-1 h-4 w-4" />
+          管理远程插件 <ArrowRight className="ml-1 h-4 w-4" />
         </Button>
         <Button size="sm" variant="outline" onClick={onDone}>
           我学会了！
@@ -874,10 +891,22 @@ function FeatureZone({
                   }`}
                 >
                   <div className="min-w-0">
-                    <div className="break-words text-sm font-medium leading-5" title={f.display_name}>
-                      {f.display_name}
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="break-words text-sm font-medium leading-5" title={f.display_name}>
+                          {f.display_name}
+                        </div>
+                        <div className="break-all font-mono text-xs leading-5 text-muted-foreground">{f.key}</div>
+                      </div>
+                      <div className="flex shrink-0 flex-wrap gap-1.5 sm:justify-end">
+                        <FeatureCapabilityBadge show={Boolean(f.interaction_entries?.length)} tone="success">
+                          可交互
+                        </FeatureCapabilityBadge>
+                        <FeatureCapabilityBadge show={usesAI} tone="warn" title="插件会调用 TelePilot 的 AI 能力">
+                          AI 调用
+                        </FeatureCapabilityBadge>
+                      </div>
                     </div>
-                    <div className="break-all font-mono text-xs leading-5 text-muted-foreground">{f.key}</div>
                     {f.last_update_check_error ? (
                       <div className="mt-1 text-xs text-destructive">
                         更新检查失败：{f.last_update_check_error}
@@ -929,14 +958,11 @@ function FeatureZone({
                         >
                           有更新
                         </FeatureCapabilityBadge>
-                        <FeatureCapabilityBadge show={Boolean(f.interaction_entries?.length)}>
-                          可交互
-                        </FeatureCapabilityBadge>
                         <FeatureCapabilityBadge
                           show={eventLabels.length > 0}
                           title={eventLabels.join(" / ")}
                         >
-                          订阅 {eventLabels.length}
+                          触发入口 {eventLabels.length}
                         </FeatureCapabilityBadge>
                         <FeatureCapabilityBadge
                           show={capabilityLabels.length > 0}
@@ -944,9 +970,6 @@ function FeatureZone({
                           title={capabilityLabels.join(" / ")}
                         >
                           能力 {capabilityLabels.length}
-                        </FeatureCapabilityBadge>
-                        <FeatureCapabilityBadge show={usesAI} tone="warn" title="插件会调用 TelePilot 的 AI 能力">
-                          AI 调用
                         </FeatureCapabilityBadge>
                         <FeatureCapabilityBadge
                           show={highRiskContract}

@@ -124,7 +124,7 @@ import {
   pluginEventSubscriptionLabels,
   pluginOperationalCapabilityLabels,
 } from "@/types/pluginContract";
-import type { PluginRepoPlugin } from "@/types/pluginRepo";
+import type { PluginRepo, PluginRepoPlugin } from "@/types/pluginRepo";
 import type { RemotePlugin } from "@/types/remotePlugin";
 
 // ── 常量 ──────────────────────────────────────────────────────────
@@ -290,6 +290,58 @@ function remoteVersionTone(plugin: RemotePlugin): "neutral" | "success" | "warn"
   if (plugin.source_url?.startsWith("local://")) return "outline";
   if (plugin.last_update_check_at) return "success";
   return "neutral";
+}
+
+function normalizeSourceUrlForCompare(value?: string | null): string {
+  return (value || "")
+    .trim()
+    .replace(/\/+$/, "")
+    .replace(/\.git$/i, "")
+    .toLowerCase();
+}
+
+function shortSourceUrl(value?: string | null): string {
+  const raw = (value || "").trim();
+  if (!raw) return "-";
+  if (raw.startsWith("local://")) return "本地导入";
+  if (raw.startsWith("official://")) return "推荐源";
+  const urlText = raw.startsWith("git+ssh://") ? raw.replace(/^git\+/, "") : raw;
+  try {
+    const url = new URL(urlText);
+    const path = url.pathname.replace(/^\/+/, "").replace(/\.git$/i, "");
+    return path ? `${url.hostname}/${path}` : url.hostname;
+  } catch {
+    return raw.replace(/\.git$/i, "");
+  }
+}
+
+function repoNameForSourceUrl(sourceUrl: string | null | undefined, repos: PluginRepo[]): string | null {
+  const sourceKey = normalizeSourceUrlForCompare(sourceUrl);
+  if (!sourceKey) return null;
+  const matched = repos.find((repo) => normalizeSourceUrlForCompare(repo.url) === sourceKey);
+  return matched ? (matched.name || shortSourceUrl(matched.url)) : null;
+}
+
+function installSourceLibraryLabel(
+  source: string | null | undefined,
+  sourceUrl: string | null | undefined,
+  sourceLabel: string | null | undefined,
+  repos: PluginRepo[],
+): string {
+  const sourceValue = (source || "").toLowerCase();
+  if (sourceValue === "builtin") return "系统核心";
+  if (sourceValue === "official" || sourceUrl?.startsWith("official://")) return "推荐源";
+  if (sourceValue === "local" || sourceUrl?.startsWith("local://")) return "本地导入";
+  const repoName = repoNameForSourceUrl(sourceUrl, repos);
+  if (repoName) return repoName;
+  if (sourceUrl) return shortSourceUrl(sourceUrl);
+  if (sourceLabel && !["Git", "Plugin Repo", "Official", "Local", "ZIP"].includes(sourceLabel)) {
+    return sourceLabel;
+  }
+  if (sourceValue === "repo") return "插件仓库";
+  if (sourceValue === "git") return "Git";
+  if (sourceValue === "zip") return "ZIP";
+  return sourceLabel || source || "-";
 }
 
 function parseManageTab(value: string | null): TabValue {
@@ -557,7 +609,8 @@ function OfficialPluginsCard() {
     onError: (err) => toast.error(getErrMsg(err)),
   });
 
-  const items = officialQ.data ?? [];
+  const allItems = officialQ.data ?? [];
+  const items = allItems.filter((plugin) => FIRST_RECOMMENDED_PLUGIN_KEYS.has(plugin.name));
 
   return (
     <Card>
@@ -565,8 +618,8 @@ function OfficialPluginsCard() {
         <SectionHeader
           icon={Sparkles}
           title="推荐插件"
-          description="这里展示 TelePilot 预置的推荐插件来源。首次部署只建议安装自动回复和自动复读；其他插件按你的插件库规划自行选择。"
-          meta={<SignalPill tone="neutral" label="推荐源" value={items.length} className="h-8" />}
+          description="这些条目来自 TelePilot 预置推荐源，只保留首次部署建议安装的自动回复和自动复读；更多插件请添加自己的 Git 插件仓库。"
+          meta={<SignalPill tone="neutral" label="推荐项" value={items.length} className="h-8" />}
         />
       </CardHeader>
       <CardContent>
@@ -577,22 +630,17 @@ function OfficialPluginsCard() {
         ) : officialQ.isError ? (
           <p className="py-3 text-sm text-destructive">推荐插件源加载失败：{getErrMsg(officialQ.error)}</p>
         ) : items.length === 0 ? (
-          <p className="py-3 text-sm text-muted-foreground">当前镜像未发现推荐插件来源。</p>
+          <p className="py-3 text-sm text-muted-foreground">当前推荐源没有发现自动回复或自动复读。</p>
         ) : (
           <div className="grid gap-2 lg:grid-cols-2">
             {items.map((plugin) => {
-              const recommended = FIRST_RECOMMENDED_PLUGIN_KEYS.has(plugin.name);
               return (
                 <div key={plugin.name} className="flex flex-col gap-3 rounded-md border px-3 py-3 sm:flex-row sm:items-center">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-medium">{plugin.display_name || plugin.name}</span>
                       <span className="font-mono text-xs text-muted-foreground">v{plugin.version}</span>
-                      {recommended ? (
-                        <MetaBadge tone="success">首次推荐</MetaBadge>
-                      ) : (
-                        <MetaBadge tone="outline">插件库</MetaBadge>
-                      )}
+                      <MetaBadge tone="success">首次推荐</MetaBadge>
                       {plugin.installed ? <MetaBadge>已安装</MetaBadge> : null}
                       {plugin.update_available ? <MetaBadge tone="warn">有更新</MetaBadge> : null}
                     </div>
@@ -1106,7 +1154,7 @@ function RemoteInstallCard() {
                               )}
                               <p className="mt-1 text-xs text-muted-foreground">{compactUsageText(p.usage)}</p>
                               <div className="mt-2 flex flex-wrap gap-1.5">
-                                <MetaBadge tone="outline">订阅 {p.event_subscriptions?.length ?? 0}</MetaBadge>
+                                <MetaBadge tone="outline">触发入口 {p.event_subscriptions?.length ?? 0}</MetaBadge>
                                 {events.slice(0, 4).map((label) => (
                                   <MetaBadge key={`${p.name}-event-${label}`}>{label}</MetaBadge>
                                 ))}
@@ -1197,7 +1245,7 @@ function RemoteInstallCard() {
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">{compactUsageText(plugin.usage)}</p>
                     <div className="mt-2 flex flex-wrap gap-1.5">
-                      <MetaBadge tone="outline">订阅 {plugin.event_subscriptions?.length ?? 0}</MetaBadge>
+                      <MetaBadge tone="outline">触发入口 {plugin.event_subscriptions?.length ?? 0}</MetaBadge>
                       {events.slice(0, 4).map((label) => <MetaBadge key={label}>{label}</MetaBadge>)}
                       <MetaBadge tone="outline">能力 {capabilities.length}</MetaBadge>
                       {capabilities.slice(0, 3).map((label) => <MetaBadge key={label} tone="warn">{label}</MetaBadge>)}
@@ -1253,6 +1301,7 @@ function InstalledPluginsSection() {
 
   const thirdPartyQ = useQuery({ queryKey: PLUGINS_QK, queryFn: listInstalledPackages });
   const remoteQ = useQuery({ queryKey: REMOTE_QK, queryFn: fetchRemotePlugins });
+  const reposQ = useQuery({ queryKey: PLUGIN_REPOS_QK, queryFn: fetchPluginRepos });
 
   const enableTPMut = useMutation({
     mutationFn: (key: string) => enableInstall(key),
@@ -1329,6 +1378,7 @@ function InstalledPluginsSection() {
   const builtin = builtinQ.data ?? [];
   const thirdParty = thirdPartyQ.data ?? [];
   const remote = remoteQ.data ?? [];
+  const repos = reposQ.data ?? [];
   const matrixQ = useQuery({ queryKey: ["matrix"], queryFn: getFeatureMatrix });
   const accounts = matrixQ.data?.accounts ?? [];
   const accountCount = accounts.length;
@@ -1371,6 +1421,7 @@ function InstalledPluginsSection() {
               <TableRow>
                 <TableHead>插件</TableHead>
                 <TableHead>类型</TableHead>
+                <TableHead>来自库</TableHead>
                 <TableHead>版本</TableHead>
                 <TableHead>版本状态</TableHead>
                 <TableHead className="text-right">操作</TableHead>
@@ -1385,6 +1436,9 @@ function InstalledPluginsSection() {
                     <div className="font-mono text-xs text-muted-foreground">{f.key}</div>
                   </TableCell>
                   <TableCell><MetaBadge>核心内置</MetaBadge></TableCell>
+                  <TableCell>
+                    <div className="max-w-[180px] truncate text-sm" title="系统核心">系统核心</div>
+                  </TableCell>
                   <TableCell>{formatPluginVersion(f.version)}</TableCell>
                   <TableCell><MetaBadge tone="success">随系统更新</MetaBadge></TableCell>
                   <TableCell className="text-right">
@@ -1404,6 +1458,14 @@ function InstalledPluginsSection() {
                     <MetaBadge tone={row.source === "official" ? "success" : "neutral"}>
                       {row.source === "official" ? "推荐源" : "第三方"}
                     </MetaBadge>
+                  </TableCell>
+                  <TableCell>
+                    <div
+                      className="max-w-[200px] truncate text-sm"
+                      title={row.source_url || row.source_label || row.source}
+                    >
+                      {installSourceLibraryLabel(row.source, row.source_url, row.source_label, repos)}
+                    </div>
                   </TableCell>
                   <TableCell>{formatPluginVersion(row.version)}</TableCell>
                   <TableCell>
@@ -1500,6 +1562,19 @@ function InstalledPluginsSection() {
                     ) : (
                       <MetaBadge><GitFork className="h-3 w-3" />远程</MetaBadge>
                     )}
+                  </TableCell>
+                  <TableCell>
+                    <div
+                      className="max-w-[200px] truncate text-sm"
+                      title={p.source_url}
+                    >
+                      {installSourceLibraryLabel(
+                        p.source_url?.startsWith("local://") ? "local" : "repo",
+                        p.source_url,
+                        null,
+                        repos,
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell>{formatPluginVersion(p.version)}</TableCell>
                   <TableCell>
