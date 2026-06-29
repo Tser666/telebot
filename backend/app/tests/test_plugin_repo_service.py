@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from base64 import b64decode
 from types import SimpleNamespace
 
@@ -7,6 +8,25 @@ import pytest
 
 from app.services import plugin_repo_service as svc
 from app.services.remote_plugin_service import GitOperationFailed
+
+
+def _write_repo_plugin(repo, name: str, *, version: str = "1.0.0", tags: list[str] | None = None) -> None:
+    plugin_dir = repo / name
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+    (plugin_dir / "plugin.json").write_text(
+        json.dumps(
+            {
+                "name": name,
+                "display_name": name.replace("_", " ").title(),
+                "description": f"{name} plugin",
+                "author": "TelePilot Official",
+                "version": version,
+                "entry": "plugin.py",
+                "tags": tags or [],
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 @pytest.mark.asyncio
@@ -148,6 +168,55 @@ async def test_ensure_repo_cached_refreshes_github_tree_branch_cache(tmp_path, m
         ("rev-parse", "--verify", "refs/remotes/origin/codex-image-test"),
         ("reset", "--hard", "refs/remotes/origin/codex-image-test"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_remote_official_sources_only_include_official_tag(tmp_path, monkeypatch) -> None:
+    repo = tmp_path / "official-repo"
+    _write_repo_plugin(repo, "codex_image", version="1.1.0", tags=["official", "image"])
+    _write_repo_plugin(repo, "community_game", version="1.0.0", tags=["game"])
+
+    async def _remote_root(*, force_refresh: bool = False):
+        return repo
+
+    monkeypatch.setattr(svc, "_official_remote_plugin_root", _remote_root)
+    monkeypatch.setattr(svc, "_official_plugin_repo_url", lambda: "https://github.com/example/official.git")
+
+    sources = await svc._iter_remote_official_sources()
+
+    assert [item.meta.name for item in sources] == ["codex_image"]
+    assert sources[0].source_url == "https://github.com/example/official.git"
+    assert sources[0].remote is True
+
+
+@pytest.mark.asyncio
+async def test_list_official_plugins_reads_remote_repo_and_marks_updates(tmp_path, monkeypatch) -> None:
+    repo = tmp_path / "official-repo"
+    _write_repo_plugin(repo, "game24", version="1.2.0", tags=["official", "game"])
+    _write_repo_plugin(repo, "community_game", version="9.9.9", tags=["game"])
+
+    class _InstalledRows:
+        def all(self):
+            return [("game24", "1.1.0")]
+
+    class _DB:
+        async def execute(self, _stmt):
+            return _InstalledRows()
+
+    async def _remote_root(*, force_refresh: bool = False):
+        return repo
+
+    monkeypatch.setattr(svc, "_iter_local_official_sources", lambda: [])
+    monkeypatch.setattr(svc, "_official_remote_plugin_root", _remote_root)
+
+    plugins = await svc.list_official_plugins(_DB())
+
+    assert [item.name for item in plugins] == ["game24"]
+    assert plugins[0].installed is True
+    assert plugins[0].installed_version == "1.1.0"
+    assert plugins[0].version == "1.2.0"
+    assert plugins[0].update_available is True
+    assert plugins[0].tags == ["official", "game"]
 
 
 @pytest.mark.asyncio

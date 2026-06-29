@@ -1737,7 +1737,7 @@ config_schema={
 
 专属页面字段应与运行时实际读取的配置保持一致；`manifest.config_schema` 也要同步，避免通用配置页、接口校验和文档出现三套口径。
 
-`codex_image` 现在是官方可选图片插件，源码随包放在 `backend/app/worker/plugins/official/codex_image/`，用户需在“安装插件”页安装后才会复制到 `plugins/installed/codex_image/` 并加载。旧数据库中已经启用或保存配置的 `codex_image` 会在 seed 阶段自动登记为 official installed 插件，保留账号配置和规则引用；未使用过的旧 builtin feature 行会被清理，避免误展示。
+`codex_image` 现在是官方可选图片插件，源码由官方远程插件仓库分发，用户需在“安装插件”页安装后才会复制到 `plugins/installed/codex_image/` 并加载。旧数据库中已经启用或保存配置的 `codex_image` 会在 seed 阶段尝试从官方插件仓库登记为 official installed 插件，保留账号配置和规则引用；未使用过的旧 builtin feature 行会被清理，避免误展示。
 
 ---
 

@@ -126,6 +126,7 @@ _PLAYER_IDENTITY_CONFIDENCE_REPLY = "reply_context"
 _PLAYER_IDENTITY_CONFIDENCE_CALLBACK = "callback_confirmed"
 _PLAYER_IDENTITY_CONFIDENCE_NAME_ONLY = "name_only"
 _PLAYER_IDENTITY_CONFIDENCE_UNKNOWN = "unknown"
+_MODULE_PAYMENT_AMOUNT_KEYS = ("amount", "bet", "entry_amount", "entry_fee", "stake")
 
 
 async def _load_command_prefix(db) -> str:
@@ -1351,12 +1352,28 @@ def _rule_matches_incoming_trigger(rule: dict[str, Any], incoming: Incoming) -> 
 
 
 def _rule_amount_matches(rule: dict[str, Any], amount: int) -> bool:
-    expected = rule.get("amount")
+    expected = _rule_expected_payment_amount(rule)
     if expected is None:
         return True
     if str(rule.get("amount_match_mode") or "eq") == "gte":
         return int(amount) >= int(expected)
     return int(expected) == int(amount)
+
+
+def _rule_expected_payment_amount(rule: dict[str, Any]) -> int | None:
+    expected = _int_or_none(rule.get("amount"))
+    if expected is not None:
+        return expected if expected > 0 else None
+    if str(rule.get("action") or "") != "module":
+        return None
+    module_config = rule.get("module_config")
+    if not isinstance(module_config, dict):
+        return None
+    for key in _MODULE_PAYMENT_AMOUNT_KEYS:
+        parsed = _int_or_none(module_config.get(key))
+        if parsed is not None and parsed > 0:
+            return parsed
+    return None
 
 
 def _rule_has_paid_threshold(rule: dict[str, Any]) -> bool:
@@ -1729,6 +1746,9 @@ def _interaction_payment_payer_name(incoming: Incoming, data: dict[str, Any] | N
 
 
 def _interaction_participant_policy(rule: dict[str, Any]) -> str:
+    declared = _declared_interaction_participant_policy(rule)
+    if declared:
+        return declared
     raw = str(rule.get("participant_policy") or "").strip()
     if raw in account_bot_service.VALID_INTERACTION_PARTICIPANT_POLICIES:
         return raw
@@ -1736,6 +1756,22 @@ def _interaction_participant_policy(rule: dict[str, Any]) -> str:
     if scope == "user":
         return "solo_owner"
     return "open_race"
+
+
+def _declared_interaction_participant_policy(rule: dict[str, Any]) -> str | None:
+    if str(rule.get("action") or "") != "module":
+        return None
+    module_key = str(rule.get("module_key") or "").strip() or None
+    entry_key = str(rule.get("module_action") or "").strip() or None
+    if not module_key or not entry_key:
+        return None
+    entry = account_bot_service.declared_module_entry_manifest(module_key, entry_key)
+    if not isinstance(entry, dict):
+        return None
+    policy = str(entry.get("participant_policy") or "").strip()
+    if policy in account_bot_service.VALID_INTERACTION_PARTICIPANT_POLICIES:
+        return policy
+    return None
 
 
 def _interaction_requires_verified_player(rule: dict[str, Any]) -> bool:
@@ -1937,6 +1973,24 @@ async def _save_interaction_session(
         incoming,
         {**(data or {}), "event_type": event_type},
     )
+    session_key = _interaction_session_key(incoming.account_id, rule, incoming.chat_id, session_user_id)
+    existing: dict[str, Any] = {}
+    redis = None
+    try:
+        redis = get_redis()
+        raw = await redis.get(session_key)
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", errors="ignore")
+        if raw:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                existing = parsed
+    except Exception:  # noqa: BLE001
+        existing = {}
+    policy = _interaction_participant_policy(rule)
+    started_by_user_id = _int_or_none(existing.get("started_by_user_id"))
+    if started_by_user_id is None:
+        started_by_user_id = session_user_id
     payload = {
         "account_id": incoming.account_id,
         "chat_id": incoming.chat_id,
@@ -1944,16 +1998,25 @@ async def _save_interaction_session(
         "rule_name": str(rule.get("name") or ""),
         "module_key": module_key,
         "entry_key": entry_key,
-        "started_by_user_id": session_user_id,
+        "started_by_user_id": started_by_user_id,
         "source_user_id": incoming.user_id,
         "started_by_message_id": incoming.message_id,
         "event_type": event_type,
-        "created_at": time.time(),
+        "created_at": existing.get("created_at") or time.time(),
+        "updated_at": time.time(),
     }
+    if policy == "paid_pool":
+        paid_ids = _interaction_session_list_participant_ids(existing)
+        if event_type == "payment_confirmed" and session_user_id is not None:
+            paid_ids.add(int(session_user_id))
+            payload["payer_user_id"] = int(session_user_id)
+        payload["paid_user_ids"] = sorted(paid_ids)
+        payload["participant_user_ids"] = sorted(paid_ids)
     try:
-        redis = get_redis()
+        if redis is None:
+            redis = get_redis()
         await redis.set(
-            _interaction_session_key(incoming.account_id, rule, incoming.chat_id, session_user_id),
+            session_key,
             json.dumps(payload, ensure_ascii=False),
             ex=_interaction_session_ttl(rule),
         )
@@ -1984,14 +2047,10 @@ async def _load_interaction_session(incoming: Incoming, rule: dict[str, Any]) ->
     return None
 
 
-def _interaction_session_participant_ids(session: dict[str, Any] | None) -> set[int]:
+def _interaction_session_list_participant_ids(session: dict[str, Any] | None) -> set[int]:
     if not isinstance(session, dict):
         return set()
     ids: set[int] = set()
-    for key in ("started_by_user_id", "player_user_id", "payer_user_id"):
-        user_id = _int_or_none(session.get(key))
-        if user_id is not None:
-            ids.add(user_id)
     for key in ("participant_user_ids", "paid_user_ids", "player_user_ids"):
         raw = session.get(key)
         if not isinstance(raw, list):
@@ -2000,6 +2059,23 @@ def _interaction_session_participant_ids(session: dict[str, Any] | None) -> set[
             user_id = _int_or_none(item)
             if user_id is not None:
                 ids.add(user_id)
+    return ids
+
+
+def _interaction_session_participant_ids(session: dict[str, Any] | None, *, policy: str | None = None) -> set[int]:
+    if not isinstance(session, dict):
+        return set()
+    if policy == "paid_pool":
+        ids = _interaction_session_list_participant_ids(session)
+        has_explicit_list = any(isinstance(session.get(key), list) for key in ("participant_user_ids", "paid_user_ids", "player_user_ids"))
+        if ids or has_explicit_list:
+            return ids
+    ids = set()
+    for key in ("started_by_user_id", "player_user_id", "payer_user_id"):
+        user_id = _int_or_none(session.get(key))
+        if user_id is not None:
+            ids.add(user_id)
+    ids.update(_interaction_session_list_participant_ids(session))
     return ids
 
 
@@ -2013,7 +2089,7 @@ def _interaction_participant_block_message(
         return None
     if incoming.user_id is None:
         return "请用真实 Telegram 用户身份操作该玩法。"
-    participant_ids = _interaction_session_participant_ids(session)
+    participant_ids = _interaction_session_participant_ids(session, policy=policy)
     if not participant_ids:
         return None
     if int(incoming.user_id) in participant_ids:
@@ -4034,7 +4110,12 @@ async def _run_local_interaction_entry_fallback(
         return False, None, []
     try:
         from app.worker.plugins.base import PluginContext
-        from app.worker.plugins.builtin.math10.plugin import Math10Plugin
+        from app.worker.plugins.loader import _load_installed_plugin
+
+        loaded = _load_installed_plugin(plugin_key)
+        plugin_cls = loaded.get(plugin_key)
+        if plugin_cls is None:
+            return False, "math10 官方可选插件未安装，请先在插件安装页安装随机算数题。", []
 
         async def _log(level: str, message: str, **detail: Any) -> None:
             source = str(detail.pop("source", "plugin"))
@@ -4048,7 +4129,7 @@ async def _run_local_interaction_entry_fallback(
                 **detail,
             )
 
-        plugin = Math10Plugin()
+        plugin = plugin_cls()
         ctx = PluginContext(
             account_id=incoming.account_id,
             feature_key=plugin_key,

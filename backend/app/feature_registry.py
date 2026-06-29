@@ -10,6 +10,8 @@ log = logging.getLogger(__name__)
 
 # builtin 插件目录：backend/app/worker/plugins/builtin/
 _BUILTIN_PLUGIN_DIR: Path = Path(__file__).parent / "worker" / "plugins" / "builtin"
+# 非核心可选插件不会从 builtin registry seed；即使旧镜像/增量部署残留了目录，
+# 也必须继续走官方/远程 installed 插件安装链路。
 _NON_CORE_BUILTIN_COMPAT_KEYS: frozenset[str] = frozenset(
     {
         "auto_reply",

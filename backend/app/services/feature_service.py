@@ -228,7 +228,6 @@ async def _migrate_optional_builtin_features(
         log.warning("加载官方插件迁移工具失败，跳过本轮收敛", exc_info=True)
         return 0, False
 
-    official_root = plugin_repo_service._official_plugin_root()
     account_feature_rows = (
         await db.execute(
             select(AccountFeature).where(AccountFeature.feature_key.in_(keys))
@@ -273,24 +272,28 @@ async def _migrate_optional_builtin_features(
     changed = False
     for key in keys:
         feature = existing[key]
-        plugin_dir = official_root / key
-        plugin_json = plugin_dir / "plugin.json"
         if key not in used_keys:
             if bool(feature.is_builtin):
                 await db.delete(feature)
                 existing.pop(key, None)
                 changed = True
             continue
-        if not plugin_json.exists():
-            log.warning("历史 builtin 插件 %s 已被使用，但官方插件库缺少 %s", key, plugin_json)
+        try:
+            official_source = await plugin_repo_service._find_official_plugin_source(key)
+        except Exception:  # noqa: BLE001
+            log.warning("历史 builtin 插件 %s 已被使用，但读取官方插件仓库失败", key, exc_info=True)
+            continue
+        if official_source is None:
+            log.warning(
+                "历史 builtin 插件 %s 已被使用，但 Core 已不再随包携带源码；请在安装插件页从官方插件仓库安装该插件",
+                key,
+            )
             continue
 
         try:
-            meta = plugin_repo_service._read_plugin_metadata(plugin_dir, fallback_name=key)
-            from ..feature_registry import _load_manifest_file
-
-            manifest_obj = _load_manifest_file(plugin_dir / "manifest.py")
-            manifest_json = plugin_repo_service._manifest_json_from_manifest_object(manifest_obj, meta)
+            plugin_dir = official_source.plugin_dir
+            meta = official_source.meta
+            manifest_json = plugin_repo_service._manifest_json_for_official_source(official_source)
             feature_manifest = plugin_repo_service._feature_manifest_from_manifest_json(manifest_json)
             lint_warnings = plugin_repo_service.lint_plugin_metadata_files(plugin_dir)
         except Exception:  # noqa: BLE001
@@ -337,7 +340,7 @@ async def _migrate_optional_builtin_features(
             db,
             key=key,
             source=PLUGIN_SOURCE_OFFICIAL,
-            source_url=f"official://{key}",
+            source_url=official_source.source_url,
             installed_path=str(plugin_repo_service._plugin_dir(key)),
             version=version,
             manifest_json=manifest_json,

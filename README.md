@@ -142,7 +142,7 @@ flowchart LR
 | 官方推荐插件 | 自动回复 | 首次部署按需安装，支持关键词 / 正则 / 作用域 / 冷却 / 白名单，安装后可手动卸载 |
 | 插件 | 消息转发 | 原生转发、复制、引用、仅链接等模式 |
 | 官方推荐插件 | 自动复读 | 首次部署按需安装，支持群聊重复消息检测和自动复读，安装后可手动卸载 |
-| 官方可选插件 | ChatGPT2API / Codex 图片生成 / 24 点 / 随机算数题 | 随包提供在官方插件库，需在“安装插件”页按需安装，不再作为内置插件自动启用 |
+| 官方可选插件 | ChatGPT2API / Codex 图片生成 / 24 点 / 随机算数题 | 由官方远程插件仓库分发，需在“安装插件”页按需安装，不再作为内置插件自动启用 |
 | 平台 | 定时任务 | cron / once / interval，作为 worker 平台调度能力运行 |
 | AI | 自定义指令模板 | reply_text / forward_to / run_plugin / ai 多类型模板，provider 缺失会在前端显式提示 |
 | AI | LLM Provider | OpenAI 兼容、Anthropic、Ollama、自定义 endpoint、proxy、tag 路由 |

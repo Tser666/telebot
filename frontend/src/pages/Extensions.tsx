@@ -534,7 +534,7 @@ function OfficialPluginsCard() {
   const installOfficialMut = useMutation({
     mutationFn: (name: string) => installOfficialPlugin(name),
     onSuccess: (row) => {
-      toast.success(`已安装官方插件 ${row.display_name || row.name} v${row.version}`);
+      toast.success(`已安装/更新官方插件 ${row.display_name || row.name} v${row.version}`);
       toastPluginLintWarnings(row);
       qc.invalidateQueries({ queryKey: OFFICIAL_PLUGINS_QK });
       qc.invalidateQueries({ queryKey: PLUGINS_QK });
@@ -552,7 +552,7 @@ function OfficialPluginsCard() {
         <SectionHeader
           icon={Sparkles}
           title="官方推荐插件"
-          description="这些插件随 TelePilot 发布，但不再默认内置。首次部署建议按需安装，安装后可随时禁用或卸载。"
+          description="这些插件由 TelePilot 官方远程插件仓库分发，不再默认内置。首次部署建议按需安装，安装后可随时禁用、更新或卸载。"
           meta={<SignalPill tone="neutral" label="官方库" value={items.length} className="h-8" />}
         />
       </CardHeader>
@@ -581,6 +581,7 @@ function OfficialPluginsCard() {
                         <MetaBadge tone="outline">官方库</MetaBadge>
                       )}
                       {plugin.installed ? <MetaBadge>已安装</MetaBadge> : null}
+                      {plugin.update_available ? <MetaBadge tone="warn">有更新</MetaBadge> : null}
                     </div>
                     <div className="mt-1 font-mono text-xs text-muted-foreground">{plugin.name}</div>
                     {plugin.description ? (
@@ -591,15 +592,15 @@ function OfficialPluginsCard() {
                     size="sm"
                     className="shrink-0"
                     variant={plugin.installed ? "outline" : "default"}
-                    disabled={plugin.installed || installOfficialMut.isPending}
+                    disabled={(plugin.installed && !plugin.update_available) || installOfficialMut.isPending}
                     onClick={() => installOfficialMut.mutate(plugin.name)}
                   >
                     {installOfficialMut.isPending ? (
                       <Spinner className="mr-2 h-4 w-4" />
-                    ) : plugin.installed ? null : (
+                    ) : plugin.installed && !plugin.update_available ? null : (
                       <Download className="mr-2 h-4 w-4" />
                     )}
-                    {plugin.installed ? "已安装" : "安装"}
+                    {plugin.installed ? (plugin.update_available ? "更新" : "已安装") : "安装"}
                   </Button>
                 </div>
               );

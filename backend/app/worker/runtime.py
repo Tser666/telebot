@@ -39,7 +39,9 @@ from ..services.event_trace import (
     finish_trace,
     record_action,
     record_span,
+    refresh_trace_settings,
     start_trace,
+    stop_trace_writer,
     trace_log_context,
 )
 from ..settings import settings as app_settings
@@ -629,6 +631,7 @@ async def run_worker(account_id: int) -> None:
 
     # 初始化命令派发上下文（含模板 + LLM provider 字典；由 IPC reload_commands 热更新）
     await _refresh_command_context(account_id)
+    await refresh_trace_settings()
 
     # ⚠ 顺序：必须先 connect，再加载插件。
     #
@@ -764,6 +767,10 @@ async def run_worker(account_id: int) -> None:
                 await client.disconnect()
         except Exception:
             pass
+        try:
+            await stop_trace_writer()
+        except Exception:  # noqa: BLE001
+            log.exception("worker shutdown 时停止 Trace 后台写入器失败 account_id=%s", account_id)
         await _publish(redis, account_id, EVT_STATUS, status="stopped")
 
 
@@ -1099,6 +1106,7 @@ async def _listen_global(redis, account_id: int, paused: asyncio.Event) -> None:
                         # 风控相关 reload 由 ratelimit 模块自己监听，不在这里处理
                         try:
                             await _refresh_command_context(account_id)
+                            await refresh_trace_settings()
                         except Exception as e:  # noqa: BLE001
                             await _log(
                                 redis, account_id, "warn",

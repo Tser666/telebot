@@ -20,6 +20,32 @@
 
 ## [Unreleased]
 
+## [0.43.0] — 2026-06-30 · minor（次版本） · Trace 批量写入与官方插件外置
+
+### Changed
+- Trace 写库从消息热路径中的逐条同步 commit 改为内存队列 + 后台批量写入：`start_trace`、`record_span`、`record_action`、`finish_trace` 现在只做轻量入队，后台最多按 200 条或 0.2 秒窗口统一落库，避免一条消息产生多次数据库往返等待。
+- native_raw Trace 保留策略改为启动期和系统设置更新时刷新缓存，消息进入 Trace 时不再为了读取保留配置额外访问数据库。
+- worker 子进程启动和全局设置 reload 时同步刷新 Trace 设置缓存，退出时 flush 并停止后台写入器，保证多进程下的配置与队列行为一致。
+- 官方可选插件入口改为读取 `OFFICIAL_PLUGIN_REPO_URL` 指向的远程官方插件仓库，`game24`、`math10`、`chatgpt_image`、`codex_image` 不再从 Core 随包目录安装。
+- 历史 builtin 可选插件迁移逻辑改为从官方插件仓库查找源码；Core 中缺少源码时会给出安装官方插件仓库的提示，而不是继续依赖旧目录。
+
+### Fixed
+- Trace 后台写入器增加 graceful shutdown flush、跨事件循环隔离、队列满降级告警和单条失败拆分兜底，避免 Trace 存储异常反向打断 Telegram / 插件主流程。
+- 保留外部指定 `trace_id` 的去重语义，批量写入时同一批重复 `trace_id` 不会因唯一键冲突拖垮后续 span/action。
+- 交互付款规则在规则自身未填写金额时，会读取插件参数中的 `amount` / `bet` / `entry_amount` / `entry_fee` / `stake` 作为期望金额，避免十点半等玩法被无关小额转账误触发。
+- 交互会话参与者策略优先采用插件当前声明，避免旧规则中遗留的 `solo_owner` 覆盖插件已更新的 `paid_pool`。
+- `paid_pool` 会话会累计已付款玩家列表，不再由后一个付款人覆盖前一个付款人，并修复无付款人的关键词开局边界。
+- `math10` 本地交互 fallback 和 `codex_image` dry-run 不再硬编码 import Core 内置插件目录；已安装插件存在时动态加载，未安装时返回可读提示。
+
+### Removed
+- 从 Core 删除 `game24`、`math10`、`chatgpt_image`、`codex_image` 在 `builtin/` 与 `official/` 下的历史源码副本，插件源码迁移到官方远程插件仓库维护。
+
+### Tests
+- 补充 Trace 缓冲写入、flush、重复 `trace_id` 去重和交互付款/付费池会话回归测试。
+- 执行后端全量测试：`1019 passed, 2 skipped`。
+- 执行插件示例校验和已安装交互插件契约校验；示例通过，存量插件仅保留 usage / 旧 `interaction_entries` 规范警告。
+- 补充远程官方插件仓库入口测试，覆盖 official 标签过滤和远程官方插件安装记录。
+
 ## [0.42.0] — 2026-06-29 · minor（次版本） · Web 面板自更新执行器
 
 ### Added

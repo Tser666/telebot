@@ -793,6 +793,9 @@ class _FakeResult:
     def scalars(self):
         return _FakeScalars(self._items)
 
+    def all(self):
+        return self._items
+
 
 class _FakeRemotePluginDB:
     def __init__(self, *, account_features=None):
@@ -1343,6 +1346,91 @@ class TestPluginRepoInstallFlow:
         assert feature.is_builtin is False
         assert (tmp_path / "installed" / "official_demo").is_dir()
         assert not (tmp_path / "installed" / "official_demo.installing").exists()
+
+    @pytest.mark.asyncio
+    async def test_remote_official_repo_lists_only_official_tagged_plugins(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(repo_svc, "_official_plugin_root", lambda: tmp_path / "empty-official")
+        remote_root = tmp_path / "remote-official"
+        _write_runtime_plugin(remote_root / "official_remote", key="official_remote", version="4.1.0")
+        _write_runtime_plugin(remote_root / "community_remote", key="community_remote", version="1.0.0")
+        (remote_root / "official_remote" / "plugin.json").write_text(
+            '{"name":"official_remote","display_name":"Official Remote","version":"4.1.0","tags":["official"]}',
+            encoding="utf-8",
+        )
+
+        async def _remote_root(*, force_refresh: bool = False):  # noqa: ARG001
+            return remote_root
+
+        monkeypatch.setattr(repo_svc, "_official_remote_plugin_root", _remote_root)
+
+        rows = await repo_svc.list_official_plugins(_FakePluginRepoDB())
+
+        assert [row.name for row in rows] == ["official_remote"]
+
+    @pytest.mark.asyncio
+    async def test_install_remote_official_plugin_writes_official_record(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(repo_svc.settings, "plugins_installed_dir", str(tmp_path / "installed"))
+        monkeypatch.setattr(repo_svc.settings, "official_plugin_repo_url", "https://github.com/Anoyou/telebot-plugins")
+        monkeypatch.setattr(repo_svc, "_official_plugin_root", lambda: tmp_path / "empty-official")
+        remote_root = tmp_path / "remote-official"
+        _write_runtime_plugin(remote_root / "official_remote", key="official_remote", version="4.1.0")
+        (remote_root / "official_remote" / "plugin.json").write_text(
+            '{"name":"official_remote","display_name":"Official Remote","version":"4.1.0","tags":["official"]}',
+            encoding="utf-8",
+        )
+
+        async def _remote_root(*, force_refresh: bool = False):  # noqa: ARG001
+            return remote_root
+
+        monkeypatch.setattr(repo_svc, "_official_remote_plugin_root", _remote_root)
+        db = _FakePluginRepoDB()
+
+        row = await repo_svc.install_official_plugin(db, "official_remote", default_enabled=False)
+
+        installed = db.installed_rows["official_remote"]
+        assert row.name == "official_remote"
+        assert installed.source == "official"
+        assert installed.source_url == "https://github.com/Anoyou/telebot-plugins"
+        assert installed.version == "4.1.0"
+        assert installed.trust_tier == "official"
+        assert installed.source_label == "Official"
+        assert (tmp_path / "installed" / "official_remote").is_dir()
+
+    @pytest.mark.asyncio
+    async def test_install_remote_official_plugin_updates_existing_version(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(repo_svc.settings, "plugins_installed_dir", str(tmp_path / "installed"))
+        monkeypatch.setattr(repo_svc.settings, "official_plugin_repo_url", "https://github.com/Anoyou/telebot-plugins")
+        monkeypatch.setattr(repo_svc, "_official_plugin_root", lambda: tmp_path / "empty-official")
+        remote_root = tmp_path / "remote-official"
+        _write_runtime_plugin(remote_root / "official_remote", key="official_remote", version="4.1.0")
+        (remote_root / "official_remote" / "plugin.json").write_text(
+            '{"name":"official_remote","display_name":"Official Remote","version":"4.1.0","tags":["official"]}',
+            encoding="utf-8",
+        )
+
+        async def _remote_root(*, force_refresh: bool = False):  # noqa: ARG001
+            return remote_root
+
+        monkeypatch.setattr(repo_svc, "_official_remote_plugin_root", _remote_root)
+        install_dir = tmp_path / "installed" / "official_remote"
+        _write_runtime_plugin(install_dir, key="official_remote", version="4.0.0")
+        db = _FakePluginRepoDB()
+        db.installed_rows["official_remote"] = InstalledPlugin(
+            key="official_remote",
+            source="official",
+            source_url="https://github.com/Anoyou/telebot-plugins",
+            installed_path=str(install_dir),
+            version="4.0.0",
+            enabled=True,
+        )
+
+        row = await repo_svc.install_official_plugin(db, "official_remote", default_enabled=False)
+
+        installed = db.installed_rows["official_remote"]
+        assert row.version == "4.1.0"
+        assert installed.version == "4.1.0"
+        assert installed.enabled is True
+        assert (install_dir / "plugin.json").read_text(encoding="utf-8").count("4.1.0") == 1
 
 
 class TestPluginMetadataSchema:

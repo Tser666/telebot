@@ -6,6 +6,7 @@ public helper catches storage failures and returns a best-effort context.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -32,6 +33,10 @@ TEXT_PREVIEW_LIMIT = 240
 SNAPSHOT_TEXT_LIMIT = 1200
 SNAPSHOT_LIST_LIMIT = 80
 SNAPSHOT_DICT_LIMIT = 120
+TRACE_WRITE_QUEUE_MAX_SIZE = 5000
+TRACE_WRITE_BATCH_SIZE = 200
+TRACE_WRITE_BATCH_INTERVAL_SECONDS = 0.2
+TRACE_WRITE_DRAIN_TIMEOUT_SECONDS = 5.0
 
 TRACE_STATUS_RUNNING = "running"
 TRACE_STATUS_OK = "ok"
@@ -51,11 +56,26 @@ class TraceContext:
     started_at: float = 0.0
 
 
+@dataclass(slots=True)
+class _TraceWrite:
+    kind: str
+    payload: Any
+    dedupe: bool = False
+
+
+_TRACE_WRITE_QUEUE: asyncio.Queue[_TraceWrite] | None = None
+_TRACE_WRITE_TASK: asyncio.Task[None] | None = None
+_TRACE_WRITE_DROPPED = 0
+_NATIVE_RAW_TRACE_POLICY_DEFAULTS = {"persist_enabled": False, "retention_days": 1}
+_NATIVE_RAW_TRACE_POLICY_CACHE: dict[str, Any] = dict(_NATIVE_RAW_TRACE_POLICY_DEFAULTS)
+
+
 async def start_trace(event: dict[str, Any] | Any) -> TraceContext:
     """Create an event trace and return the context used by downstream spans."""
 
     payload = event if isinstance(event, dict) else _object_payload(event)
-    trace_id = _trace_id(payload.get("trace_id"))
+    raw_trace_id = str(payload.get("trace_id") or "").strip()
+    trace_id = _trace_id(raw_trace_id)
     source = _dict(payload.get("source"))
     message = _dict(payload.get("message"))
     chat = _dict(payload.get("chat"))
@@ -70,49 +90,38 @@ async def start_trace(event: dict[str, Any] | Any) -> TraceContext:
         source_channel=str(source.get("channel") or source.get("bot_role") or "") or None,
         started_at=time.time(),
     )
-    try:
-        async with AsyncSessionLocal() as db:
-            native_raw_policy = await _native_raw_trace_policy(db)
-            native_raw_in_trace = bool(
-                native_raw_policy["persist_enabled"]
-                and payload.get("native_raw") is not None
-            )
-            native_raw_meta_row = redact_payload_snapshot(native_raw_meta) if native_raw_meta else None
-            if isinstance(native_raw_meta_row, dict):
-                native_raw_meta_row["stored_in_trace"] = native_raw_in_trace
-                native_raw_meta_row["retention_days"] = native_raw_policy["retention_days"]
-            row = EventTrace(
-                trace_id=trace_id,
-                account_id=ctx.account_id,
-                source_channel=ctx.source_channel,
-                event_type=ctx.event_type,
-                chat_id=_int_or_none(message.get("chat_id") or chat.get("id") or source.get("chat_id") or payload.get("chat_id")),
-                message_id=_int_or_none(message.get("message_id") or source.get("message_id") or payload.get("message_id")),
-                update_id=_int_or_none(source.get("update_id") or payload.get("source_update_id")),
-                callback_query_id=str(source.get("callback_query_id") or payload.get("callback_query_id") or "") or None,
-                sender_user_id=_int_or_none(sender.get("user_id") or payload.get("sender_user_id")),
-                sender_name=str(sender.get("display_name") or payload.get("sender_name") or "")[:256] or None,
-                text_preview=redact_text(str(message.get("text") or payload.get("message_text") or "")[:TEXT_PREVIEW_LIMIT]) or None,
-                status=TRACE_STATUS_RUNNING,
-                started_at=now,
-                raw_summary=redact_payload_snapshot(raw) if raw else None,
-                payload_snapshot=redact_payload_snapshot(payload, include_native_raw=native_raw_in_trace),
-                native_raw_meta=native_raw_meta_row,
-            )
-            existing = (
-                await db.execute(select(EventTrace).where(EventTrace.trace_id == trace_id))
-            ).scalar_one_or_none()
-            if existing is None:
-                db.add(row)
-            await db.commit()
-    except Exception:  # noqa: BLE001
-        log.debug("event trace start failed trace_id=%s", trace_id, exc_info=True)
-        await _write_trace_runtime_error(
-            "event trace start failed",
-            trace_id=trace_id,
-            account_id=ctx.account_id,
-            phase="start",
-        )
+    native_raw_policy = _cached_native_raw_trace_policy()
+    native_raw_in_trace = bool(native_raw_policy["persist_enabled"] and payload.get("native_raw") is not None)
+    native_raw_meta_row = redact_payload_snapshot(native_raw_meta) if native_raw_meta else None
+    if isinstance(native_raw_meta_row, dict):
+        native_raw_meta_row["stored_in_trace"] = native_raw_in_trace
+        native_raw_meta_row["retention_days"] = native_raw_policy["retention_days"]
+    row = EventTrace(
+        trace_id=trace_id,
+        account_id=ctx.account_id,
+        source_channel=ctx.source_channel,
+        event_type=ctx.event_type,
+        chat_id=_int_or_none(message.get("chat_id") or chat.get("id") or source.get("chat_id") or payload.get("chat_id")),
+        message_id=_int_or_none(message.get("message_id") or source.get("message_id") or payload.get("message_id")),
+        update_id=_int_or_none(source.get("update_id") or payload.get("source_update_id")),
+        callback_query_id=str(source.get("callback_query_id") or payload.get("callback_query_id") or "") or None,
+        sender_user_id=_int_or_none(sender.get("user_id") or payload.get("sender_user_id")),
+        sender_name=str(sender.get("display_name") or payload.get("sender_name") or "")[:256] or None,
+        text_preview=redact_text(str(message.get("text") or payload.get("message_text") or "")[:TEXT_PREVIEW_LIMIT]) or None,
+        status=TRACE_STATUS_RUNNING,
+        started_at=now,
+        raw_summary=redact_payload_snapshot(raw) if raw else None,
+        payload_snapshot=redact_payload_snapshot(payload, include_native_raw=native_raw_in_trace),
+        native_raw_meta=native_raw_meta_row,
+    )
+    await _enqueue_trace_write(
+        "trace",
+        row,
+        trace_id=trace_id,
+        account_id=ctx.account_id,
+        phase="start",
+        dedupe=bool(raw_trace_id),
+    )
     return ctx
 
 
@@ -144,20 +153,8 @@ async def record_span(
         ended_at=datetime.now(UTC),
         duration_ms=duration_ms,
     )
-    try:
-        async with AsyncSessionLocal() as db:
-            db.add(span)
-            await db.commit()
-        return span
-    except Exception:  # noqa: BLE001
-        log.debug("event trace span failed trace_id=%s phase=%s", trace_id, phase, exc_info=True)
-        await _write_trace_runtime_error(
-            "event trace span failed",
-            trace_id=trace_id,
-            account_id=None,
-            phase=str(phase or "unknown"),
-        )
-        return None
+    await _enqueue_trace_write("span", span, trace_id=trace_id, account_id=None, phase=str(phase or "unknown"))
+    return span
 
 
 async def record_action(
@@ -190,21 +187,15 @@ async def record_action(
         error_message=_str_or_none(detail.pop("error_message", None) or detail.pop("error", None)),
         detail=redact_payload_snapshot({"action": action, **detail}),
     )
-    try:
-        async with AsyncSessionLocal() as db:
-            db.add(row)
-            await db.commit()
-        return row
-    except Exception:  # noqa: BLE001
-        log.debug("event trace action failed trace_id=%s action=%s", trace_id, action_type, exc_info=True)
-        await _write_trace_runtime_error(
-            "event trace action failed",
-            trace_id=trace_id,
-            account_id=None,
-            phase="action",
-            action_type=action_type,
-        )
-        return None
+    await _enqueue_trace_write(
+        "action",
+        row,
+        trace_id=trace_id,
+        account_id=None,
+        phase="action",
+        action_type=action_type,
+    )
+    return row
 
 
 async def finish_trace(
@@ -221,36 +212,77 @@ async def finish_trace(
     duration_ms = _int_or_none(summary.pop("duration_ms", None))
     if duration_ms is None and isinstance(trace, TraceContext) and trace.started_at:
         duration_ms = max(0, int((time.time() - trace.started_at) * 1000))
+    values: dict[str, Any] = {
+        "status": str(status or TRACE_STATUS_OK),
+        "ended_at": ended_at,
+        "duration_ms": duration_ms,
+    }
+    await _enqueue_trace_write(
+        "finish",
+        {"trace_id": trace_id, "values": values, "summary": dict(summary or {})},
+        trace_id=trace_id,
+        account_id=None,
+        phase="finish",
+    )
+
+
+async def refresh_trace_settings() -> dict[str, Any]:
+    """Refresh cached trace settings outside the message critical path."""
+
+    global _NATIVE_RAW_TRACE_POLICY_CACHE
     try:
         async with AsyncSessionLocal() as db:
-            values: dict[str, Any] = {
-                "status": str(status or TRACE_STATUS_OK),
-                "ended_at": ended_at,
-                "duration_ms": duration_ms,
-            }
-            if summary:
-                current = (
-                    await db.execute(select(EventTrace).where(EventTrace.trace_id == trace_id))
-                ).scalar_one_or_none()
-                if current is not None:
-                    snap = dict(current.payload_snapshot or {})
-                    snap["trace_summary"] = redact_payload_snapshot(summary)
-                    current.payload_snapshot = snap
-                    current.status = values["status"]
-                    current.ended_at = values["ended_at"]
-                    current.duration_ms = values["duration_ms"]
-                    await db.commit()
-                    return
-            await db.execute(update(EventTrace).where(EventTrace.trace_id == trace_id).values(**values))
-            await db.commit()
+            _NATIVE_RAW_TRACE_POLICY_CACHE = await _native_raw_trace_policy(db)
     except Exception:  # noqa: BLE001
-        log.debug("event trace finish failed trace_id=%s", trace_id, exc_info=True)
-        await _write_trace_runtime_error(
-            "event trace finish failed",
-            trace_id=trace_id,
-            account_id=None,
-            phase="finish",
-        )
+        log.debug("refresh trace settings failed, using cached/default policy", exc_info=True)
+    return dict(_NATIVE_RAW_TRACE_POLICY_CACHE)
+
+
+async def flush_trace_writes(timeout: float = TRACE_WRITE_DRAIN_TIMEOUT_SECONDS) -> None:
+    """Wait until queued trace writes have been persisted.
+
+    This is intentionally not used by the hot path. It exists for tests and
+    graceful shutdown so normal message handling can remain latency-free.
+    """
+
+    queue = _TRACE_WRITE_QUEUE
+    if queue is None:
+        return
+    if not _queue_uses_current_loop(queue):
+        return
+    await asyncio.wait_for(queue.join(), timeout=max(0.1, float(timeout or TRACE_WRITE_DRAIN_TIMEOUT_SECONDS)))
+
+
+async def stop_trace_writer(timeout: float = TRACE_WRITE_DRAIN_TIMEOUT_SECONDS) -> None:
+    """Flush queued trace writes and stop the background writer task."""
+
+    global _TRACE_WRITE_QUEUE, _TRACE_WRITE_TASK
+    await flush_trace_writes(timeout=timeout)
+    task = _TRACE_WRITE_TASK
+    if task is None:
+        _TRACE_WRITE_QUEUE = None
+        return
+    if not _task_uses_current_loop(task):
+        task.cancel()
+        _TRACE_WRITE_TASK = None
+        _TRACE_WRITE_QUEUE = None
+        return
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    finally:
+        _TRACE_WRITE_TASK = None
+        _TRACE_WRITE_QUEUE = None
+
+
+def trace_writer_stats() -> dict[str, int]:
+    queue = _TRACE_WRITE_QUEUE
+    return {
+        "queued": queue.qsize() if queue is not None else 0,
+        "dropped": _TRACE_WRITE_DROPPED,
+    }
 
 
 def trace_log_context(
@@ -442,6 +474,222 @@ async def _native_raw_trace_policy(db: Any) -> dict[str, Any]:
         return defaults
 
 
+def _cached_native_raw_trace_policy() -> dict[str, Any]:
+    return dict(_NATIVE_RAW_TRACE_POLICY_CACHE or _NATIVE_RAW_TRACE_POLICY_DEFAULTS)
+
+
+async def _enqueue_trace_write(
+    kind: str,
+    payload: Any,
+    *,
+    trace_id: str | None,
+    account_id: int | None,
+    phase: str,
+    action_type: str | None = None,
+    dedupe: bool = False,
+) -> bool:
+    global _TRACE_WRITE_DROPPED
+    try:
+        queue = _ensure_trace_writer()
+        queue.put_nowait(_TraceWrite(kind=kind, payload=payload, dedupe=dedupe))
+        return True
+    except asyncio.QueueFull:
+        _TRACE_WRITE_DROPPED += 1
+        if _TRACE_WRITE_DROPPED <= 3 or _TRACE_WRITE_DROPPED % 100 == 0:
+            log.warning(
+                "event trace queue full; dropping trace write kind=%s trace_id=%s dropped=%s",
+                kind,
+                trace_id,
+                _TRACE_WRITE_DROPPED,
+            )
+        return False
+    except RuntimeError:
+        await _write_trace_item_direct(kind, payload, trace_id=trace_id, account_id=account_id, phase=phase, action_type=action_type)
+        return True
+    except Exception:  # noqa: BLE001
+        log.debug("event trace enqueue failed kind=%s trace_id=%s", kind, trace_id, exc_info=True)
+        return False
+
+
+def _ensure_trace_writer() -> asyncio.Queue[_TraceWrite]:
+    global _TRACE_WRITE_QUEUE, _TRACE_WRITE_TASK
+    task = _TRACE_WRITE_TASK
+    if (
+        (_TRACE_WRITE_QUEUE is not None and not _queue_uses_current_loop(_TRACE_WRITE_QUEUE))
+        or (task is not None and not _task_uses_current_loop(task))
+    ):
+        _TRACE_WRITE_QUEUE = None
+        _TRACE_WRITE_TASK = None
+    if _TRACE_WRITE_QUEUE is None:
+        _TRACE_WRITE_QUEUE = asyncio.Queue(maxsize=TRACE_WRITE_QUEUE_MAX_SIZE)
+    if _TRACE_WRITE_TASK is None or _TRACE_WRITE_TASK.done():
+        _TRACE_WRITE_TASK = asyncio.create_task(_trace_writer_loop(), name="telepilot-event-trace-writer")
+    return _TRACE_WRITE_QUEUE
+
+
+def _queue_uses_current_loop(queue: asyncio.Queue[_TraceWrite]) -> bool:
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    bound_loop = getattr(queue, "_loop", None)
+    return bound_loop is None or bound_loop is loop
+
+
+def _task_uses_current_loop(task: asyncio.Task[Any]) -> bool:
+    try:
+        loop = asyncio.get_running_loop()
+        return task.get_loop() is loop
+    except RuntimeError:
+        return False
+
+
+async def _trace_writer_loop() -> None:
+    while True:
+        queue = _TRACE_WRITE_QUEUE
+        if queue is None:
+            await asyncio.sleep(TRACE_WRITE_BATCH_INTERVAL_SECONDS)
+            continue
+        first = await queue.get()
+        batch = [first]
+        try:
+            deadline = time.monotonic() + TRACE_WRITE_BATCH_INTERVAL_SECONDS
+            while len(batch) < TRACE_WRITE_BATCH_SIZE:
+                timeout = max(0.0, deadline - time.monotonic())
+                if timeout <= 0:
+                    break
+                try:
+                    batch.append(await asyncio.wait_for(queue.get(), timeout=timeout))
+                except TimeoutError:
+                    break
+            await _flush_trace_batch(batch)
+        finally:
+            for _item in batch:
+                queue.task_done()
+
+
+async def _flush_trace_batch(batch: list[_TraceWrite], *, split_on_error: bool = True) -> None:
+    if not batch:
+        return
+    try:
+        async with AsyncSessionLocal() as db:
+            existing_trace_ids = await _existing_trace_ids(db, batch)
+            new_trace_ids: set[str] = set()
+            for item in batch:
+                if item.kind == "trace":
+                    trace_id = _trace_write_trace_id(item)
+                    if not trace_id or trace_id in existing_trace_ids or trace_id in new_trace_ids:
+                        continue
+                    db.add(item.payload)
+                    new_trace_ids.add(trace_id)
+                    continue
+                if item.kind in {"span", "action", "runtime_error"}:
+                    db.add(item.payload)
+                    continue
+                if item.kind == "finish":
+                    await _apply_finish_trace_write(db, item.payload)
+            await db.commit()
+    except Exception:  # noqa: BLE001
+        log.debug("event trace batch write failed size=%s", len(batch), exc_info=True)
+        if split_on_error and len(batch) > 1:
+            for item in batch:
+                await _flush_trace_batch([item], split_on_error=False)
+            return
+        item = batch[0]
+        trace_id = _trace_write_trace_id(item)
+        await _write_trace_runtime_error(
+            "event trace write failed",
+            trace_id=trace_id,
+            account_id=_trace_write_account_id(item),
+            phase=item.kind,
+            action_type=_trace_write_action_type(item),
+        )
+
+
+async def _write_trace_item_direct(
+    kind: str,
+    payload: Any,
+    *,
+    trace_id: str | None,
+    account_id: int | None,
+    phase: str,
+    action_type: str | None = None,
+) -> None:
+    try:
+        await _flush_trace_batch([_TraceWrite(kind=kind, payload=payload)], split_on_error=False)
+    except Exception:  # noqa: BLE001
+        log.debug("event trace direct write failed kind=%s trace_id=%s", kind, trace_id, exc_info=True)
+        await _write_trace_runtime_error(
+            "event trace direct write failed",
+            trace_id=trace_id,
+            account_id=account_id,
+            phase=phase,
+            action_type=action_type,
+        )
+
+
+async def _existing_trace_ids(db: Any, batch: list[_TraceWrite]) -> set[str]:
+    trace_ids = {
+        trace_id
+        for item in batch
+        if item.kind == "trace" and item.dedupe and (trace_id := _trace_write_trace_id(item))
+    }
+    if not trace_ids:
+        return set()
+    result = await db.execute(select(EventTrace.trace_id).where(EventTrace.trace_id.in_(trace_ids)))
+    try:
+        rows = result.scalars().all()
+    except AttributeError:
+        row = result.scalar_one_or_none()
+        rows = [row] if row is not None else []
+    return {str(row) for row in rows if row}
+
+
+async def _apply_finish_trace_write(db: Any, payload: Any) -> None:
+    data = payload if isinstance(payload, dict) else {}
+    trace_id = str(data.get("trace_id") or "").strip()
+    if not trace_id:
+        return
+    values = data.get("values") if isinstance(data.get("values"), dict) else {}
+    summary = data.get("summary") if isinstance(data.get("summary"), dict) else {}
+    if summary:
+        current = (
+            await db.execute(select(EventTrace).where(EventTrace.trace_id == trace_id))
+        ).scalar_one_or_none()
+        if current is not None:
+            snap = dict(current.payload_snapshot or {})
+            snap["trace_summary"] = redact_payload_snapshot(summary)
+            current.payload_snapshot = snap
+            current.status = str(values.get("status") or TRACE_STATUS_OK)
+            current.ended_at = values.get("ended_at")
+            current.duration_ms = values.get("duration_ms")
+            return
+    await db.execute(update(EventTrace).where(EventTrace.trace_id == trace_id).values(**values))
+
+
+def _trace_write_trace_id(item: _TraceWrite) -> str | None:
+    payload = item.payload
+    if hasattr(payload, "trace_id"):
+        return str(payload.trace_id or "") or None
+    if isinstance(payload, dict):
+        return str(payload.get("trace_id") or "") or None
+    return None
+
+
+def _trace_write_account_id(item: _TraceWrite) -> int | None:
+    payload = item.payload
+    if hasattr(payload, "account_id"):
+        return _int_or_none(payload.account_id)
+    return None
+
+
+def _trace_write_action_type(item: _TraceWrite) -> str | None:
+    payload = item.payload
+    if hasattr(payload, "action_type"):
+        return _str_or_none(payload.action_type)
+    return None
+
+
 def _clear_native_raw_snapshot(row: EventTrace) -> bool:
     snapshot = row.payload_snapshot if isinstance(row.payload_snapshot, dict) else {}
     value = snapshot.get("native_raw")
@@ -570,11 +818,15 @@ __all__ = [
     "TRACE_WRITE_FAILED_REASON_CODE",
     "TraceContext",
     "finish_trace",
+    "flush_trace_writes",
     "record_action",
     "record_span",
     "redact_payload_snapshot",
+    "refresh_trace_settings",
     "cleanup_event_traces",
     "start_trace",
+    "stop_trace_writer",
     "trace_log_context",
+    "trace_writer_stats",
     "update_plugin_runtime_status",
 ]

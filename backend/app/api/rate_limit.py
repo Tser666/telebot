@@ -52,6 +52,7 @@ from ..schemas.rate_limit import (
     UsageResponse,
 )
 from ..services import audit as audit_svc
+from ..services import event_trace
 from ..services import rate_limit_service as svc
 from ..worker.ipc import GCMD_KILL_SWITCH, GCMD_RELOAD_GLOBAL, GLOBAL_CHANNEL, make_cmd
 from ..worker.ratelimit.buckets import TokenBuckets
@@ -874,6 +875,7 @@ async def patch_system_settings(
             next_retention[key] = ivalue
         await _set_setting(db, "log_retention", next_retention)
         await _audit(db, user.id, "set_log_retention", target="system", detail=next_retention)
+        await event_trace.refresh_trace_settings()
         try:
             from ..worker.supervisor import invalidate_log_retention_cache
 

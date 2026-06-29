@@ -1034,6 +1034,8 @@ def _manifest_json_from_remote_meta(meta: PluginMetadata) -> dict[str, Any]:
         data["min_telepilot_version"] = meta.min_telepilot_version
     if meta.min_telebot_version:
         data["min_telebot_version"] = meta.min_telebot_version
+    if meta.tags:
+        data["tags"] = list(meta.tags)
     return data
 
 
