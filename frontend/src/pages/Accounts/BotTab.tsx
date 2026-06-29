@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -668,9 +669,9 @@ function controlledEntryFieldKeys(entry?: FeatureInteractionEntry): Set<string> 
   return keys;
 }
 
-function ruleControlledModuleConfigHint(entry?: FeatureInteractionEntry): string[] {
-  const keys = Array.from(controlledEntryFieldKeys(entry));
-  return keys.filter((key) => key in interactionSchemaProperties(entry));
+function extraEntryConfigFields(entry?: FeatureInteractionEntry): Array<[string, ConfigField]> {
+  const controlledKeys = controlledEntryFieldKeys(entry);
+  return Object.entries(interactionSchemaProperties(entry)).filter(([key]) => !controlledKeys.has(key));
 }
 
 function interactionSchemaDefaults(entry?: FeatureInteractionEntry): Record<string, unknown> {
@@ -1086,7 +1087,7 @@ function InteractionRuleEditor({
   const visibleUngroupedEntries = visibleEntries.filter((item) => !item.entry.interaction_profile);
   const shouldUseEntryProfileTabs = availableProfileGroups.length > 0 && availableProfileGroups.length <= 4;
   const pluginParamCount = selectedInteractionEntry
-    ? Object.keys(interactionSchemaProperties(selectedInteractionEntry)).length
+    ? extraEntryConfigFields(selectedInteractionEntry).length
     : 0;
   const hasUserLimits = Boolean(rule.userCooldownSeconds.trim() || rule.dailyLimitPerUser.trim());
 
@@ -1655,7 +1656,7 @@ function InteractionRuleEditor({
       {rule.action === "module" && selectedInteractionEntry ? (
         <details className="group rounded-lg border bg-muted/20 px-3 py-2">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
-            <span>插件参数与技术详情</span>
+            <span>插件额外参数与技术详情</span>
             <span className="flex shrink-0 items-center gap-2 text-xs font-normal text-muted-foreground">
               {pluginParamCount > 0 ? `${pluginParamCount} 个插件参数` : "无额外参数"}
               <ChevronRight className="h-4 w-4 transition-transform group-open:rotate-90" />
@@ -1667,7 +1668,7 @@ function InteractionRuleEditor({
                 <ConfigScopeSection
                   title="插件参数"
                   description="这里只显示该玩法入口额外声明的参数。"
-                  fields={Object.entries(interactionSchemaProperties(selectedInteractionEntry))}
+                  fields={extraEntryConfigFields(selectedInteractionEntry)}
                   values={buildEntryConfigValues(selectedInteractionEntry, rule.moduleConfig)}
                   commandPrefix="."
                   onChange={(key, value) => {
@@ -1677,13 +1678,6 @@ function InteractionRuleEditor({
                     onPatch({ moduleConfig: mergeEntryConfigValues(selectedInteractionEntry, next) });
                   }}
                 />
-                {ruleControlledModuleConfigHint(selectedInteractionEntry).length > 0 ? (
-                  <div className="text-xs text-muted-foreground">
-                    已移入平台统一配置：{ruleControlledModuleConfigHint(selectedInteractionEntry).map((key) => (
-                      <code key={key} className="mr-1">{key}</code>
-                    ))}
-                  </div>
-                ) : null}
               </div>
             ) : (
               <div className="rounded-md border bg-background px-3 py-2 text-xs text-muted-foreground">
@@ -1698,12 +1692,6 @@ function InteractionRuleEditor({
               <div className="min-w-0 rounded-md border bg-background px-3 py-2 text-xs">
                 <div className="mb-1 font-medium">module_action</div>
                 <code className="block truncate text-muted-foreground">{moduleActionValue || "保存时尝试推断"}</code>
-              </div>
-              <div className="min-w-0 rounded-md border bg-background px-3 py-2 text-xs sm:col-span-2">
-                <div className="mb-1 font-medium">参与者策略</div>
-                <div className="text-muted-foreground">
-                  当前为 {getParticipantPolicyLabel(rule.participantPolicy)}，默认跟随插件入口声明。
-                </div>
               </div>
               <div className="min-w-0 rounded-md border bg-background px-3 py-2 text-xs sm:col-span-2">
                 <div className="mb-1 font-medium">插件会话范围</div>
@@ -2484,8 +2472,33 @@ export function BotTab({
     </Card>
   ) : null;
 
+  const floatingInteractionSaveButton = isInteractionCenter && typeof document !== "undefined"
+    ? createPortal(
+        <div className="pointer-events-none fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] right-4 z-[55] flex justify-end sm:bottom-6 sm:right-8">
+          <Button
+            type="button"
+            size="sm"
+            className="pointer-events-auto h-10 rounded-full px-4 shadow-lg shadow-black/15"
+            onClick={() => saveTransferMut.mutate()}
+            disabled={isInteractionConfigSaveDisabled}
+            title="保存规则"
+            aria-label="保存规则"
+          >
+            {saveTransferMut.isPending ? (
+              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="mr-1 h-4 w-4" />
+            )}
+            保存规则
+          </Button>
+        </div>,
+        document.body,
+      )
+    : null;
+
   const interactionContent = (
     <div className={cn(isInteractionCenter ? "space-y-4" : "space-y-6")}>
+      {floatingInteractionSaveButton}
       {isInteractionCenter ? null : interactionStatus}
       {interactionDebugContent}
       <Card className={cn(isInteractionCenter && "border-0 bg-transparent shadow-none")}>
@@ -3100,28 +3113,6 @@ export function BotTab({
                 )}
               </div>
             </div>
-            <div
-              className={cn(
-                "pointer-events-none fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] right-4 z-30 flex justify-end sm:bottom-6 sm:right-8",
-              )}
-            >
-              <Button
-                type="button"
-                size="sm"
-                className="pointer-events-auto h-10 rounded-full px-4 shadow-lg shadow-black/15"
-                onClick={() => saveTransferMut.mutate()}
-                disabled={isInteractionConfigSaveDisabled}
-                title="保存规则"
-                aria-label="保存规则"
-              >
-                {saveTransferMut.isPending ? (
-                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                ) : (
-                  <Save className="mr-1 h-4 w-4" />
-                )}
-                保存规则
-              </Button>
-            </div>
           </section>
 
           <section className={cn("space-y-3 rounded-lg border p-3 sm:p-4", isInteractionCenter && "order-3")}>
@@ -3176,6 +3167,7 @@ export function BotTab({
             群里回复任意消息发送 <code>+123</code> 后，若已填写转账结果通知 Bot Token，会生成带 <code>language-转账成功</code> 标识的 HTML 代码块。
             没有测试用的转账通知结果 Bot 的 Token 时，交互 Bot 只监听群里真实出现的转账结果通知。
           </div>
+          {isInteractionCenter ? null : (
             <div className="flex justify-end">
               <Button
                 variant="outline"
@@ -3191,6 +3183,7 @@ export function BotTab({
                 保存整块交互配置
               </Button>
             </div>
+          )}
           </section>
         </CardContent>
       </Card>
