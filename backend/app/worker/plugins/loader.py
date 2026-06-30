@@ -509,34 +509,17 @@ async def _dispatch_userbot_event_bus_matches(
     *,
     event_label: str,
     redis: Any,
-) -> tuple[int, int]:
+) -> tuple[int, int, frozenset[str]]:
     if not dispatch.event_bus_enabled or not dispatch.matched_decisions:
-        return 0, 0
+        return 0, 0, frozenset()
     invoked_count = 0
     failed_count = 0
+    consumed_plugin_keys: set[str] = set()
     trace = dispatch.trace
     for decision in dispatch.matched_decisions:
         plugin_key = str(getattr(decision, "plugin_key", "") or "").strip()
         entry_key = str(getattr(decision, "entry_key", "") or "").strip()
         if not plugin_key:
-            continue
-        if not entry_key:
-            failed_count += 1
-            await record_span(
-                trace,
-                "plugin_invoke",
-                TRACE_STATUS_FAILED,
-                component="userbot_event_bus_dispatcher",
-                plugin_key=plugin_key,
-                reason_code="entry_key_missing",
-                message="Event Bus 订阅缺少 entry_key，无法投递插件入口。",
-            )
-            await update_plugin_runtime_status(
-                account_id=state.account_id,
-                plugin_key=plugin_key,
-                last_invocation_status=TRACE_STATUS_FAILED,
-                last_trace_id=getattr(trace, "trace_id", None),
-            )
             continue
         inst = state.instances.get(plugin_key)
         ctx = state.contexts.get(plugin_key)
@@ -559,6 +542,32 @@ async def _dispatch_userbot_event_bus_matches(
                 last_trace_id=getattr(trace, "trace_id", None),
             )
             continue
+        has_event_handler = _plugin_overrides(inst, "on_event")
+        has_interaction_handler = _plugin_overrides(inst, "on_interaction")
+        if not entry_key and not has_event_handler:
+            await record_span(
+                trace,
+                "plugin_invoke",
+                TRACE_STATUS_SKIPPED,
+                component="userbot_event_bus_dispatcher",
+                plugin_key=plugin_key,
+                reason_code="entry_key_missing",
+                message="Event Bus 订阅缺少 entry_key，且插件未实现 on_event；legacy on_message 将继续尝试处理。",
+            )
+            continue
+        if not has_event_handler and not has_interaction_handler:
+            await record_span(
+                trace,
+                "plugin_invoke",
+                TRACE_STATUS_SKIPPED,
+                component="userbot_event_bus_dispatcher",
+                plugin_key=plugin_key,
+                entry_key=entry_key,
+                reason_code="handler_error",
+                message="插件未实现 on_event 或 on_interaction 入口；legacy on_message 将继续尝试处理。",
+            )
+            continue
+        consumed_plugin_keys.add(plugin_key)
         payload = _userbot_event_payload_for_plugin(dispatch.event_payload, inst, plugin_key)
         payload.setdefault("trigger", {})
         if isinstance(payload["trigger"], dict):
@@ -652,7 +661,13 @@ async def _dispatch_userbot_event_bus_matches(
                 traceback=traceback.format_exc(limit=8),
                 **trace_log_context(trace),
             )
-    return invoked_count, failed_count
+    return invoked_count, failed_count, frozenset(consumed_plugin_keys)
+
+
+def _plugin_overrides(inst: Plugin, method_name: str) -> bool:
+    handler = getattr(inst, method_name, None)
+    base_handler = getattr(Plugin, method_name, None)
+    return callable(handler) and getattr(type(inst), method_name, None) is not base_handler
 
 
 async def _invoke_userbot_event_bus_entry(
@@ -682,17 +697,15 @@ async def _invoke_userbot_event_bus_entry(
         async def _trace_log(level: str, message: str, **detail: Any) -> None:
             detail.setdefault("trace_id", trace_id)
             detail.setdefault("plugin_key", plugin_key)
-            detail.setdefault("entry_key", entry_key)
+            if entry_key:
+                detail.setdefault("entry_key", entry_key)
             await previous_log(level, message, **detail)
 
         ctx.log = _trace_log
     try:
-        event_handler = getattr(inst, "on_event", None)
-        base_event_handler = getattr(Plugin, "on_event", None)
-        has_event_handler = callable(event_handler) and getattr(type(inst), "on_event", None) is not base_event_handler
-        if has_event_handler:
-            actions = await event_handler(ctx, dict(payload))
-        elif getattr(type(inst), "on_interaction", None) is not getattr(Plugin, "on_interaction", None):
+        if _plugin_overrides(inst, "on_event"):
+            actions = await inst.on_event(ctx, dict(payload))
+        elif _plugin_overrides(inst, "on_interaction"):
             actions = await inst.on_interaction(ctx, entry_key, dict(payload))
         else:
             raise RuntimeError("插件未实现 on_event 或 on_interaction 入口")
@@ -2062,20 +2075,15 @@ async def load_plugins_for_account(
                     event.trace_id = trace.trace_id
                 except Exception:  # noqa: BLE001
                     pass
-            invoked_count, failed_count = await _dispatch_userbot_event_bus_matches(
+            invoked_count, failed_count, event_bus_consumed_plugin_keys = await _dispatch_userbot_event_bus_matches(
                 state,
                 dispatch_state,
                 event,
                 event_label=event_label,
                 redis=redis,
             )
-            matched_event_bus_plugin_keys = frozenset(
-                str(getattr(decision, "plugin_key", "") or "").strip()
-                for decision in dispatch_state.matched_decisions
-                if str(getattr(decision, "plugin_key", "") or "").strip()
-            )
             for fkey, inst in list(state.instances.items()):
-                if dispatch_state.event_bus_enabled and fkey in matched_event_bus_plugin_keys:
+                if dispatch_state.event_bus_enabled and fkey in event_bus_consumed_plugin_keys:
                     continue
                 if direction not in inst.message_channels:
                     continue

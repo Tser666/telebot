@@ -1074,6 +1074,212 @@ async def test_userbot_event_bus_dispatch_invokes_on_event_and_records_action(mo
 
 
 @pytest.mark.asyncio
+async def test_userbot_event_bus_subscription_without_entry_key_invokes_on_event(monkeypatch) -> None:
+    from app.worker.plugins.base import _REGISTRY, register
+
+    event_calls: list[str] = []
+
+    @register
+    class _TraceNoEntryPlugin(Plugin):
+        key = "_test_trace_no_entry_dispatch"
+        display_name = "无入口事件分发测试"
+        message_channels = {"incoming"}
+        owner_only = False
+
+        async def on_event(self, ctx: PluginContext, payload: dict[str, Any]) -> list[dict[str, Any]]:
+            event_calls.append(str((payload.get("message") or {}).get("text") or ""))
+            await ctx.messages.send(channel="userbot_reply", text="event ok")
+            return []
+
+    _TraceNoEntryPlugin._manifest = Manifest(
+        key="_test_trace_no_entry_dispatch",
+        display_name="无入口事件分发测试",
+        event_subscriptions=[
+            {
+                "source": ["userbot"],
+                "events": ["message"],
+                "scope": "all_allowed_chats",
+            }
+        ],
+    )
+
+    class _Event:
+        raw_text = "hello no entry"
+        text = "hello no entry"
+        chat_id = -1001
+        sender_id = 42
+        id = 90
+        is_private = False
+        is_group = True
+        is_channel = False
+
+        async def get_chat(self):
+            return None
+
+    fake_db = _FakeDB(
+        accounts={11: _FakeAcc(id=11)},
+        humanize={11: None},
+        afs=[_FakeAF(account_id=11, feature_key="_test_trace_no_entry_dispatch", enabled=True, config={})],
+        rules=[],
+    )
+    trace = SimpleNamespace(trace_id="evt_loader_no_entry_trace")
+    monkeypatch.setattr(loader_mod, "AsyncSessionLocal", lambda: _fake_session_factory(fake_db))
+    monkeypatch.setattr(loader_mod, "_load_log_incoming_messages_setting", AsyncMock(return_value=False))
+    monkeypatch.setattr(loader_mod, "_load_event_framework_flags", AsyncMock(return_value={
+        "trace_enabled": True,
+        "event_bus_delivery_enabled": True,
+    }))
+    monkeypatch.setattr(loader_mod, "start_trace", AsyncMock(return_value=trace))
+    record_span = AsyncMock()
+    monkeypatch.setattr(loader_mod, "record_span", record_span)
+    record_action = AsyncMock()
+    monkeypatch.setattr(loader_mod, "record_action", record_action)
+    monkeypatch.setattr(loader_mod, "finish_trace", AsyncMock())
+    runtime_status = AsyncMock()
+    monkeypatch.setattr(loader_mod, "update_plugin_runtime_status", runtime_status)
+
+    captured: list[Any] = []
+
+    def _on(_filter):
+        def _wrap(fn):
+            captured.append(fn)
+            return fn
+
+        return _wrap
+
+    client = MagicMock()
+    client.on = _on
+    client.send_message = AsyncMock(return_value=SimpleNamespace(id=903))
+    paused = asyncio.Event()
+    paused.set()
+
+    try:
+        await load_plugins_for_account(client, account_id=11, paused=paused, redis=_FakeRedis())
+        incoming_dispatch = captured[-1]
+        await incoming_dispatch(_Event())
+
+        assert event_calls == ["hello no entry"]
+        assert not any(
+            call.args[1] == "plugin_invoke"
+            and call.args[2] == loader_mod.TRACE_STATUS_FAILED
+            and call.kwargs.get("reason_code") == "entry_key_missing"
+            for call in record_span.await_args_list
+        )
+        record_action.assert_awaited()
+        assert any(
+            call.kwargs.get("plugin_key") == "_test_trace_no_entry_dispatch"
+            and call.kwargs.get("last_invocation_status") == loader_mod.TRACE_STATUS_OK
+            for call in runtime_status.await_args_list
+        )
+    finally:
+        loader_mod._STATES.pop(11, None)
+        _REGISTRY.pop("_test_trace_no_entry_dispatch", None)
+
+
+@pytest.mark.asyncio
+async def test_userbot_event_bus_missing_entry_key_keeps_legacy_on_message(monkeypatch) -> None:
+    from app.worker.plugins.base import _REGISTRY, register
+
+    legacy_calls: list[str] = []
+
+    @register
+    class _LegacyNoEntryPlugin(Plugin):
+        key = "_test_legacy_no_entry_dispatch"
+        display_name = "无入口 legacy 分发测试"
+        message_channels = {"incoming"}
+        owner_only = False
+
+        async def on_message(self, ctx: PluginContext, event: Any) -> None:
+            legacy_calls.append(str(getattr(event, "raw_text", "")))
+
+    _LegacyNoEntryPlugin._manifest = Manifest(
+        key="_test_legacy_no_entry_dispatch",
+        display_name="无入口 legacy 分发测试",
+        event_subscriptions=[
+            {
+                "source": ["userbot"],
+                "events": ["message"],
+                "scope": "all_allowed_chats",
+            }
+        ],
+    )
+
+    class _Event:
+        raw_text = "hello legacy no entry"
+        text = "hello legacy no entry"
+        chat_id = -1001
+        sender_id = 42
+        id = 91
+        is_private = False
+        is_group = True
+        is_channel = False
+
+        async def get_chat(self):
+            return None
+
+    fake_db = _FakeDB(
+        accounts={12: _FakeAcc(id=12)},
+        humanize={12: None},
+        afs=[_FakeAF(account_id=12, feature_key="_test_legacy_no_entry_dispatch", enabled=True, config={})],
+        rules=[],
+    )
+    trace = SimpleNamespace(trace_id="evt_loader_legacy_no_entry_trace")
+    monkeypatch.setattr(loader_mod, "AsyncSessionLocal", lambda: _fake_session_factory(fake_db))
+    monkeypatch.setattr(loader_mod, "_load_log_incoming_messages_setting", AsyncMock(return_value=False))
+    monkeypatch.setattr(loader_mod, "_load_event_framework_flags", AsyncMock(return_value={
+        "trace_enabled": True,
+        "event_bus_delivery_enabled": True,
+    }))
+    monkeypatch.setattr(loader_mod, "start_trace", AsyncMock(return_value=trace))
+    record_span = AsyncMock()
+    monkeypatch.setattr(loader_mod, "record_span", record_span)
+    monkeypatch.setattr(loader_mod, "record_action", AsyncMock())
+    monkeypatch.setattr(loader_mod, "finish_trace", AsyncMock())
+    runtime_status = AsyncMock()
+    monkeypatch.setattr(loader_mod, "update_plugin_runtime_status", runtime_status)
+
+    captured: list[Any] = []
+
+    def _on(_filter):
+        def _wrap(fn):
+            captured.append(fn)
+            return fn
+
+        return _wrap
+
+    client = MagicMock()
+    client.on = _on
+    paused = asyncio.Event()
+    paused.set()
+
+    try:
+        await load_plugins_for_account(client, account_id=12, paused=paused, redis=_FakeRedis())
+        incoming_dispatch = captured[-1]
+        await incoming_dispatch(_Event())
+
+        assert legacy_calls == ["hello legacy no entry"]
+        assert any(
+            call.args[1] == "plugin_invoke"
+            and call.args[2] == loader_mod.TRACE_STATUS_SKIPPED
+            and call.kwargs.get("reason_code") == "entry_key_missing"
+            for call in record_span.await_args_list
+        )
+        assert not any(
+            call.kwargs.get("plugin_key") == "_test_legacy_no_entry_dispatch"
+            and call.kwargs.get("last_invocation_status") == loader_mod.TRACE_STATUS_FAILED
+            for call in runtime_status.await_args_list
+        )
+        assert any(
+            call.kwargs.get("plugin_key") == "_test_legacy_no_entry_dispatch"
+            and call.kwargs.get("last_invocation_status") == loader_mod.TRACE_STATUS_OK
+            for call in runtime_status.await_args_list
+        )
+    finally:
+        loader_mod._STATES.pop(12, None)
+        _REGISTRY.pop("_test_legacy_no_entry_dispatch", None)
+
+
+@pytest.mark.asyncio
 async def test_userbot_event_bus_ctx_client_send_message_records_action(monkeypatch) -> None:
     from app.worker.plugins.base import _REGISTRY, register
 

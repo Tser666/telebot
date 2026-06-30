@@ -20,6 +20,15 @@
 
 ## [Unreleased]
 
+## [0.44.6] — 2026-06-30 · patch（补丁版本） · UserBot Event Bus 入口兼容补丁
+
+### Fixed
+- 修复 UserBot Event Bus 订阅缺少 `entry_key` 时被错误记录为 `entry_key_missing` failed 的问题；插件如果实现了 `on_event`，现在会直接投递到事件主入口。
+- 修复仅声明 Event Bus 订阅、但仍依赖 legacy `on_message` 的 userbot 插件被新分发链路吞掉消息的问题；无法投递新入口时只记录 skipped，并继续让 legacy 入口处理。
+
+### Tests
+- 补充插件 loader 回归测试，覆盖“无 `entry_key` + `on_event` 正常投递”和“无 `entry_key` + legacy `on_message` 继续处理”两条链路。
+
 ## [0.44.5] — 2026-06-30 · patch（补丁版本） · 交互按钮 ACK 容错补丁
 
 ### Fixed
