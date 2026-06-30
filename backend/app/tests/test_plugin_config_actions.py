@@ -59,6 +59,28 @@ def test_declared_config_actions_reads_schema_metadata() -> None:
     assert actions == [{"key": "make_item", "title": "生成"}]
 
 
+def test_declared_config_actions_reads_installed_manifest_metadata() -> None:
+    feature = SimpleNamespace(
+        manifest={
+            "config_schema": {"type": "object"},
+        }
+    )
+    installed = SimpleNamespace(
+        manifest_json={
+            "config_actions": [
+                {"key": "generate_knowledge_base", "title": "获取并整理为题库"},
+                {"title": "缺少 key"},
+            ]
+        }
+    )
+
+    actions = declared_config_actions(feature, installed_plugin=installed)
+
+    assert actions == [
+        {"key": "generate_knowledge_base", "title": "获取并整理为题库"}
+    ]
+
+
 def test_feature_info_reads_installed_manifest_config_actions() -> None:
     feature = SimpleNamespace(
         key="quick_qa",
@@ -105,6 +127,7 @@ async def test_run_plugin_config_action_merges_form_config_and_returns_patch(mon
         },
     )
     account = SimpleNamespace(id=7, proxy_id=None)
+    installed = SimpleNamespace(manifest_json={})
     monkeypatch.setattr(plugin_config_actions, "get_plugin", lambda key: DemoConfigActionPlugin)
 
     result = await run_plugin_config_action(
@@ -115,9 +138,44 @@ async def test_run_plugin_config_action_merges_form_config_and_returns_patch(mon
         effective_config={"count": 1, "api_token": "real-token"},
         current_config={"count": 3, "api_token": "••••••••••••••••"},
         action_input={"name": "第一组"},
+        installed_plugin=installed,
     )
 
     assert result["message"] == "已生成"
     assert result["config_patch"]["items"] == [
         {"enabled": True, "name": "第一组", "count": 3}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_run_plugin_config_action_accepts_installed_manifest_action(monkeypatch) -> None:
+    feature = SimpleNamespace(
+        key="demo_action",
+        manifest={
+            "permissions": [],
+            "config_schema": {"type": "object"},
+        },
+    )
+    installed = SimpleNamespace(
+        manifest_json={
+            "config_actions": [{"key": "make_item", "title": "生成"}],
+        }
+    )
+    account = SimpleNamespace(id=7, proxy_id=None)
+    monkeypatch.setattr(plugin_config_actions, "get_plugin", lambda key: DemoConfigActionPlugin)
+
+    result = await run_plugin_config_action(
+        FakeDB(),
+        account=account,
+        feature=feature,
+        action_key="make_item",
+        effective_config={"count": 1, "api_token": "real-token"},
+        current_config={"count": 3},
+        action_input={"name": "第二组"},
+        installed_plugin=installed,
+    )
+
+    assert result["message"] == "已生成"
+    assert result["config_patch"]["items"] == [
+        {"enabled": True, "name": "第二组", "count": 3}
     ]

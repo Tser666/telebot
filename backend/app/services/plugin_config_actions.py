@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..crypto import decrypt_str
 from ..db.models.account import Account, Proxy
 from ..db.models.feature import Feature
+from ..db.models.plugin import InstalledPlugin
 from ..settings import settings as app_settings
 from ..util.proxy import parse_proxy_url
 from ..worker.plugins.base import Plugin, PluginContext, get_plugin
@@ -29,14 +30,23 @@ class PluginConfigActionUnavailable(PluginConfigActionError):
     """Raised when plugin code or handler is not available."""
 
 
-def declared_config_actions(feature: Feature | Mapping[str, Any] | None) -> list[dict[str, Any]]:
-    """Return config action declarations from manifest or config_schema metadata."""
+def declared_config_actions(
+    feature: Feature | Mapping[str, Any] | None,
+    installed_plugin: InstalledPlugin | Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Return config action declarations from feature or installed plugin metadata."""
 
     manifest = _manifest_dict(feature)
+    installed_manifest = _installed_manifest_dict(installed_plugin)
     raw = manifest.get("config_actions")
+    if raw is None:
+        raw = installed_manifest.get("config_actions")
     schema = manifest.get("config_schema")
     if raw is None and isinstance(schema, Mapping):
         raw = schema.get("x-config-actions")
+    installed_schema = installed_manifest.get("config_schema")
+    if raw is None and isinstance(installed_schema, Mapping):
+        raw = installed_schema.get("x-config-actions")
     if not isinstance(raw, list):
         return []
     return [dict(item) for item in raw if isinstance(item, Mapping) and str(item.get("key") or "").strip()]
@@ -51,10 +61,11 @@ async def run_plugin_config_action(
     effective_config: Mapping[str, Any],
     current_config: Mapping[str, Any] | None = None,
     action_input: Mapping[str, Any] | None = None,
+    installed_plugin: InstalledPlugin | Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run a declared plugin config action and normalize its result."""
 
-    action = _find_action(feature, action_key)
+    action = _find_action(feature, action_key, installed_plugin=installed_plugin)
     plugin_cls = await _load_plugin_class(db, feature.key, account.id)
     if not _plugin_overrides_config_action(plugin_cls):
         raise PluginConfigActionUnavailable(f"插件 {feature.key} 未实现配置动作处理器")
@@ -94,9 +105,24 @@ def _manifest_dict(feature: Feature | Mapping[str, Any] | None) -> dict[str, Any
     return dict(manifest or {}) if isinstance(manifest, Mapping) else {}
 
 
-def _find_action(feature: Feature, action_key: str) -> dict[str, Any]:
+def _installed_manifest_dict(installed_plugin: InstalledPlugin | Mapping[str, Any] | None) -> dict[str, Any]:
+    if installed_plugin is None:
+        return {}
+    if isinstance(installed_plugin, Mapping):
+        manifest = installed_plugin.get("manifest_json") or installed_plugin.get("manifest") or installed_plugin
+    else:
+        manifest = getattr(installed_plugin, "manifest_json", None)
+    return dict(manifest or {}) if isinstance(manifest, Mapping) else {}
+
+
+def _find_action(
+    feature: Feature,
+    action_key: str,
+    *,
+    installed_plugin: InstalledPlugin | Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     key = str(action_key or "").strip()
-    for action in declared_config_actions(feature):
+    for action in declared_config_actions(feature, installed_plugin=installed_plugin):
         if str(action.get("key") or "").strip() == key:
             return action
     raise PluginConfigActionNotFound(f"插件 {feature.key} 未声明配置动作 {key}")

@@ -20,6 +20,12 @@
 
 ## [Unreleased]
 
+## [0.45.2] — 2026-06-30 · patch（补丁版本） · 配置动作执行兜底补丁
+
+### Fixed
+- 修复配置页已渲染出插件动作按钮，但后端执行时只检查 `feature.manifest`，导致远程插件从 `installed_plugin.manifest_json` 透传的 `generate_knowledge_base` 被误报“未声明配置动作”的问题。
+- 配置动作执行入口现在和功能矩阵输出使用同一套声明来源，支持 `feature.manifest`、`installed_plugin.manifest_json` 与 schema `x-config-actions` 兜底。
+
 ## [0.45.1] — 2026-06-30 · patch（补丁版本） · 插件配置动作透传补丁
 
 ### Fixed

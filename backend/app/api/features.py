@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException
 
 from ..db.models.account import Account
 from ..db.models.feature import AccountFeature, Feature
+from ..db.models.plugin import InstalledPlugin
 from ..deps import CurrentUser, DBSession
 from ..schemas.feature import (
     AccountFeatureConfigUpdate,
@@ -363,6 +364,7 @@ async def run_account_feature_config_action(
     feature = await db.get(Feature, key)
     if feature is None:
         raise _bad("FEATURE_NOT_FOUND", f"未注册的 feature: {key}", 404)
+    installed_plugin = await db.get(InstalledPlugin, key)
 
     effective_config = await feature_service.get_effective_plugin_config(db, aid, key)
     try:
@@ -374,6 +376,7 @@ async def run_account_feature_config_action(
             effective_config=effective_config,
             current_config=payload.config,
             action_input=payload.input,
+            installed_plugin=installed_plugin,
         )
     except PluginConfigActionNotFound as exc:
         raise _bad("CONFIG_ACTION_NOT_FOUND", str(exc), 404) from exc
