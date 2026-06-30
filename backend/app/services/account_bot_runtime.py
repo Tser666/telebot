@@ -2968,8 +2968,6 @@ async def _try_handle_event_bus_subscriptions(
         entry_key = str(decision.entry_key or "").strip()
         if not entry_key:
             all_ok = False
-            if event_type != "message":
-                terminal_handled = True
             await record_span(
                 trace_log_context(incoming.trace_id),
                 "plugin_invoke",
@@ -3000,7 +2998,7 @@ async def _try_handle_event_bus_subscriptions(
             guarded,
             context=_interaction_trace_context(payload),
         )
-        if event_type != "message" or actions or guarded:
+        if actions or guarded or event_type not in {"message", "callback_query"}:
             terminal_handled = True
     return terminal_handled, all_ok
 
