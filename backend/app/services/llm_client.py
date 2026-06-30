@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
@@ -238,18 +239,88 @@ def _response_text(resp: Any) -> str:
     return str(getattr(resp, "text", "") or "")
 
 
-def _is_unsupported_parameter(resp: Any, parameter: str) -> bool:
+_RESPONSES_REMOVABLE_PARAMETERS = {
+    "max_output_tokens": "max_output_tokens",
+    "temperature": "temperature",
+    "reasoning": "reasoning",
+    "reasoning.effort": "reasoning",
+    "stream": "stream",
+}
+
+
+def _unsupported_parameter_name(resp: Any) -> str | None:
     if int(getattr(resp, "status_code", 0) or 0) < 400:
-        return False
+        return None
     lowered = _response_text(resp).lower()
-    parameter = parameter.lower()
-    return (
-        parameter in lowered
-        and (
-            "unsupported parameter" in lowered
-            or "unknown parameter" in lowered
-            or "unrecognized parameter" in lowered
-            or "invalid parameter" in lowered
+    if not (
+        "unsupported parameter" in lowered
+        or "unknown parameter" in lowered
+        or "unrecognized parameter" in lowered
+        or "invalid parameter" in lowered
+    ):
+        return None
+    match = re.search(
+        r"(?:unsupported|unknown|unrecognized|invalid)\s+parameter(?:s)?\s*[:=]?\s*[`'\"]?([a-z0-9_.-]+)",
+        lowered,
+    )
+    if match:
+        return match.group(1).strip("`'\" ")
+    for parameter in _RESPONSES_REMOVABLE_PARAMETERS:
+        if parameter in lowered:
+            return parameter
+    return None
+
+
+def _is_unsupported_parameter(resp: Any, parameter: str) -> bool:
+    return _unsupported_parameter_name(resp) == parameter.lower()
+
+
+def _remove_unsupported_parameter(body: dict[str, Any], parameter: str) -> str | None:
+    parameter = parameter.strip().lower()
+    key = _RESPONSES_REMOVABLE_PARAMETERS.get(parameter)
+    if key is None and "." in parameter:
+        key = _RESPONSES_REMOVABLE_PARAMETERS.get(parameter.split(".", 1)[0])
+    if key is None or key not in body:
+        return None
+    body.pop(key, None)
+    return key
+
+
+async def _post_responses_compatible(
+    cli: httpx.AsyncClient,
+    url: str,
+    *,
+    headers: dict[str, str],
+    body: dict[str, Any],
+) -> httpx.Response:
+    current_body = dict(body)
+    removed: set[str] = set()
+    while True:
+        resp = await cli.post(url, headers=headers, json=dict(current_body))
+        parameter = _unsupported_parameter_name(resp)
+        if not parameter:
+            return resp
+        removed_key = _remove_unsupported_parameter(current_body, parameter)
+        if not removed_key or removed_key in removed:
+            return resp
+        removed.add(removed_key)
+
+
+def _non_json_error(prefix: str, resp: Any, exc: json.JSONDecodeError, api_key: str | None) -> LLMError:
+    headers = getattr(resp, "headers", {}) or {}
+    content_type = ""
+    try:
+        content_type = str(headers.get("content-type") or headers.get("Content-Type") or "")
+    except Exception:  # noqa: BLE001
+        content_type = ""
+    status_code = int(getattr(resp, "status_code", 0) or 0)
+    body = _response_text(resp).replace("\n", "\\n")[:200]
+    if not body:
+        body = "<empty>"
+    return LLMError(
+        _safe_error_message(
+            f"{prefix} 返回非 JSON: status={status_code} content-type={content_type or 'unknown'} body={body} parse_error={exc}",
+            api_key,
         )
     )
 
@@ -793,7 +864,7 @@ class ResponsesClient(LLMClient):
         timeout_seconds: int | None = None,
     ) -> LLMResult:
         url = f"{self._base_url}/responses"
-        headers = {"Content-Type": "application/json"}
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
         # 视觉路径：Responses API 的 content 是 [{"type":"input_text"}, {"type":"input_image"}]
@@ -817,6 +888,7 @@ class ResponsesClient(LLMClient):
             ],
             # Responses API 用 max_output_tokens（不是 max_tokens）
             "max_output_tokens": max_tokens,
+            "stream": False,
         }
         normalized_temperature = _normalize_temperature(temperature)
         if normalized_temperature is not None:
@@ -838,11 +910,7 @@ class ResponsesClient(LLMClient):
             client_kwargs["trust_env"] = False
         try:
             async with httpx.AsyncClient(**client_kwargs) as cli:
-                resp = await cli.post(url, headers=headers, json=body)
-                if _is_unsupported_parameter(resp, "max_output_tokens"):
-                    compat_body = dict(body)
-                    compat_body.pop("max_output_tokens", None)
-                    resp = await cli.post(url, headers=headers, json=compat_body)
+                resp = await _post_responses_compatible(cli, url, headers=headers, body=body)
         except httpx.HTTPError as exc:
             raise LLMError(
                 _safe_error_message(
@@ -862,7 +930,7 @@ class ResponsesClient(LLMClient):
         try:
             data = resp.json()
         except json.JSONDecodeError as exc:
-            raise LLMError(f"Responses 返回非 JSON: {exc}") from None
+            raise _non_json_error("Responses", resp, exc, self._api_key) from None
 
         # 解析 output：兼容多种形态
         # 形态 1：data["output_text"] = "..."（部分实现的便利字段）
@@ -924,7 +992,7 @@ class ResponsesClient(LLMClient):
         if web_search:
             raise LLMError("图片生成不支持联网搜索，请关闭 web_search")
         url = f"{self._base_url}/responses"
-        headers = {"Content-Type": "application/json"}
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
 
@@ -954,6 +1022,7 @@ class ResponsesClient(LLMClient):
             "tools": [image_tool],
             "tool_choice": {"type": "image_generation"},
             "max_output_tokens": max_tokens,
+            "stream": False,
         }
         normalized_temperature = _normalize_temperature(temperature)
         if normalized_temperature is not None:
@@ -969,11 +1038,7 @@ class ResponsesClient(LLMClient):
             client_kwargs["trust_env"] = False
         try:
             async with httpx.AsyncClient(**client_kwargs) as cli:
-                resp = await cli.post(url, headers=headers, json=body)
-                if _is_unsupported_parameter(resp, "max_output_tokens"):
-                    compat_body = dict(body)
-                    compat_body.pop("max_output_tokens", None)
-                    resp = await cli.post(url, headers=headers, json=compat_body)
+                resp = await _post_responses_compatible(cli, url, headers=headers, body=body)
         except httpx.HTTPError as exc:
             raise LLMError(
                 _safe_error_message(
@@ -992,7 +1057,7 @@ class ResponsesClient(LLMClient):
         try:
             data = resp.json()
         except json.JSONDecodeError as exc:
-            raise LLMError(f"Responses 生图返回非 JSON: {exc}") from None
+            raise _non_json_error("Responses 生图", resp, exc, self._api_key) from None
 
         image_data, image_urls, output_text = _extract_response_image_outputs(data)
         if not image_data and not image_urls:

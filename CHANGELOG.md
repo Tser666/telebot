@@ -20,6 +20,16 @@
 
 ## [Unreleased]
 
+## [0.44.10] — 2026-06-30 · patch（补丁版本） · Codex 反代 Responses 兼容补丁
+
+### Fixed
+- 修复 cockpit-tools / CLIProxyAPI 这类 Codex 反代不支持 `temperature`、`reasoning`、`stream` 等 OpenAI Responses 参数时，AI 调用直接失败的问题；运行时会识别 `Unsupported parameter` 并逐个剥离可选参数重试。
+- Responses 文本和 Responses 生图入口共用同一套兼容发送逻辑，避免只修文本、不修生图的参数兼容缺口。
+- Responses 返回非 JSON 时，现在会在错误中带上状态码、content-type 和脱敏后的响应摘要，便于判断是空响应、HTML 网关页还是反代异常。
+
+### Tests
+- 补充 Codex 反代式连续参数拒绝、Responses 非 JSON 响应诊断两类回归测试。
+
 ## [0.44.9] — 2026-06-30 · patch（补丁版本） · 命令前缀示例补丁
 
 ### Fixed

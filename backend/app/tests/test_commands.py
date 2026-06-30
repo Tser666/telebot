@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import base64
+import json
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
@@ -807,6 +808,52 @@ async def test_responses_client_retries_without_max_output_tokens_when_unsupport
 
 
 @pytest.mark.asyncio
+async def test_responses_client_strips_multiple_unsupported_parameters() -> None:
+    """Codex 类反代可能连续拒绝 max_output_tokens / temperature 等 OpenAI 参数。"""
+    from app.services.llm_client import ResponsesClient
+
+    cli = ResponsesClient(api_key="sk", base_url="https://codex.example.com/v1", model="gpt-5.5")
+
+    class _BadMaxResp:
+        status_code = 400
+        text = '{"detail":"Unsupported parameter: max_output_tokens"}'
+
+    class _BadTemperatureResp:
+        status_code = 400
+        text = '{"detail":"Unsupported parameter: temperature"}'
+
+    class _OkResp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {
+                "model": "gpt-5.5",
+                "output_text": "ok",
+                "usage": {"input_tokens": 3, "output_tokens": 1},
+            }
+
+    fake = AsyncMock()
+    fake.__aenter__.return_value = fake
+    fake.post = AsyncMock(side_effect=[_BadMaxResp(), _BadTemperatureResp(), _OkResp()])
+    with patch("app.services.llm_client.httpx.AsyncClient", return_value=fake):
+        result = await cli.complete("sys", "user", max_tokens=9, temperature=0.7)
+
+    assert result.text == "ok"
+    first_body = fake.post.await_args_list[0].kwargs["json"]
+    second_body = fake.post.await_args_list[1].kwargs["json"]
+    third_body = fake.post.await_args_list[2].kwargs["json"]
+    assert first_body["max_output_tokens"] == 9
+    assert first_body["temperature"] == 0.7
+    assert first_body["stream"] is False
+    assert "max_output_tokens" not in second_body
+    assert second_body["temperature"] == 0.7
+    assert "max_output_tokens" not in third_body
+    assert "temperature" not in third_body
+    assert third_body["stream"] is False
+
+
+@pytest.mark.asyncio
 async def test_responses_client_parses_output_array_form() -> None:
     """``output=[{type:message, content:[{type:output_text, text:"..."}]}]`` 形态。"""
     from app.services.llm_client import ResponsesClient
@@ -1077,6 +1124,35 @@ async def test_responses_client_520_includes_cf_hint() -> None:
     assert "520" in msg
     # 有人话提示
     assert "反代" in msg or "上游" in msg or "Cloudflare" in msg
+
+
+@pytest.mark.asyncio
+async def test_responses_client_non_json_error_includes_response_summary() -> None:
+    """非 JSON 响应要带状态码、content-type 和脱敏 body 摘要，便于排查反代返回。"""
+    from app.services.llm_client import LLMError, ResponsesClient
+
+    cli = ResponsesClient(api_key="sk-secret-Z", base_url=None, model="x")
+
+    class _Resp:
+        status_code = 200
+        text = "<html>bad gateway sk-secret-Z</html>"
+        headers = {"content-type": "text/html; charset=utf-8"}
+
+        @staticmethod
+        def json():
+            raise json.JSONDecodeError("Expecting value", "", 0)
+
+    fake = AsyncMock()
+    fake.__aenter__.return_value = fake
+    fake.post = AsyncMock(return_value=_Resp())
+    with patch("app.services.llm_client.httpx.AsyncClient", return_value=fake):
+        with pytest.raises(LLMError) as exc:
+            await cli.complete("s", "u")
+    msg = str(exc.value)
+    assert "status=200" in msg
+    assert "text/html" in msg
+    assert "body=<html>bad gateway" in msg
+    assert "sk-secret-Z" not in msg
 
 
 @pytest.mark.asyncio
