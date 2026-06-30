@@ -20,6 +20,19 @@
 
 ## [Unreleased]
 
+## [0.44.8] — 2026-06-30 · patch（补丁版本） · Responses 兼容接口补丁
+
+### Fixed
+- 修复部分 OpenAI Responses 兼容接口返回 `Unsupported parameter: max_output_tokens` 时，LLM 调用直接失败的问题；运行时会在明确识别该错误后自动省略 `max_output_tokens` 重试一次。
+- Responses 生图工具同样支持该兼容重试，避免兼容站点在图片生成/编辑入口因参数差异失败。
+- Provider 协议探测会识别 Responses 兼容模式，并在检测结果中提示运行时将自动省略不支持的参数。
+
+### Changed
+- 后端 Telethon 依赖下限提升到 `>=1.44,<2.0.0`，部署重建依赖后跟进近期上游版本。
+
+### Tests
+- 补充 Responses 文本和生图参数兼容回归测试。
+
 ## [0.44.7] — 2026-06-30 · patch（补丁版本） · 交互按钮空动作路由补丁
 
 ### Fixed

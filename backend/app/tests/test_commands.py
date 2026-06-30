@@ -772,6 +772,41 @@ async def test_responses_client_parses_output_text_top_level() -> None:
 
 
 @pytest.mark.asyncio
+async def test_responses_client_retries_without_max_output_tokens_when_unsupported() -> None:
+    """部分兼容站的 /responses 不支持 max_output_tokens，应自动用轻量 body 重试。"""
+    from app.services.llm_client import ResponsesClient
+
+    cli = ResponsesClient(api_key="sk", base_url="https://api.example.com/v1", model="gpt-5.4")
+
+    class _BadResp:
+        status_code = 400
+        text = '{"detail":"Unsupported parameter: max_output_tokens"}'
+
+    class _OkResp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {
+                "model": "gpt-5.4",
+                "output_text": "ok",
+                "usage": {"input_tokens": 3, "output_tokens": 1},
+            }
+
+    fake = AsyncMock()
+    fake.__aenter__.return_value = fake
+    fake.post = AsyncMock(side_effect=[_BadResp(), _OkResp()])
+    with patch("app.services.llm_client.httpx.AsyncClient", return_value=fake):
+        result = await cli.complete("sys", "user", max_tokens=9)
+
+    assert result.text == "ok"
+    first_body = fake.post.await_args_list[0].kwargs["json"]
+    second_body = fake.post.await_args_list[1].kwargs["json"]
+    assert first_body["max_output_tokens"] == 9
+    assert "max_output_tokens" not in second_body
+
+
+@pytest.mark.asyncio
 async def test_responses_client_parses_output_array_form() -> None:
     """``output=[{type:message, content:[{type:output_text, text:"..."}]}]`` 形态。"""
     from app.services.llm_client import ResponsesClient
@@ -846,6 +881,42 @@ async def test_responses_client_generate_image_uses_image_generation_tool() -> N
     assert result.text == "done"
     assert result.input_tokens == 8
     assert result.output_tokens == 2
+
+
+@pytest.mark.asyncio
+async def test_responses_client_generate_image_retries_without_max_output_tokens() -> None:
+    """Responses 生图工具也复用半兼容接口兜底。"""
+    from app.services.llm_client import ResponsesClient
+
+    img_b64 = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"0" * 128).decode("ascii")
+    cli = ResponsesClient(api_key="sk", base_url=None, model="gpt-5.4")
+
+    class _BadResp:
+        status_code = 400
+        text = '{"error":"Unsupported parameter: max_output_tokens"}'
+
+    class _OkResp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {
+                "model": "gpt-5.4",
+                "output": [{"type": "image_generation_call", "result": img_b64}],
+                "usage": {"input_tokens": 6, "output_tokens": 1},
+            }
+
+    fake = AsyncMock()
+    fake.__aenter__.return_value = fake
+    fake.post = AsyncMock(side_effect=[_BadResp(), _OkResp()])
+    with patch("app.services.llm_client.httpx.AsyncClient", return_value=fake):
+        result = await cli.generate_image("sys", "画猫", max_tokens=12)
+
+    assert result.image_data == [f"data:image/png;base64,{img_b64}"]
+    first_body = fake.post.await_args_list[0].kwargs["json"]
+    second_body = fake.post.await_args_list[1].kwargs["json"]
+    assert first_body["max_output_tokens"] == 12
+    assert "max_output_tokens" not in second_body
 
 
 @pytest.mark.asyncio

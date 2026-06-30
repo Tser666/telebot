@@ -234,6 +234,26 @@ def _extract_response_sources(data: Any) -> list[dict[str, str]]:
     return out[:12]
 
 
+def _response_text(resp: Any) -> str:
+    return str(getattr(resp, "text", "") or "")
+
+
+def _is_unsupported_parameter(resp: Any, parameter: str) -> bool:
+    if int(getattr(resp, "status_code", 0) or 0) < 400:
+        return False
+    lowered = _response_text(resp).lower()
+    parameter = parameter.lower()
+    return (
+        parameter in lowered
+        and (
+            "unsupported parameter" in lowered
+            or "unknown parameter" in lowered
+            or "unrecognized parameter" in lowered
+            or "invalid parameter" in lowered
+        )
+    )
+
+
 class LLMClient(ABC):
     """provider-agnostic 调用接口。"""
 
@@ -819,6 +839,10 @@ class ResponsesClient(LLMClient):
         try:
             async with httpx.AsyncClient(**client_kwargs) as cli:
                 resp = await cli.post(url, headers=headers, json=body)
+                if _is_unsupported_parameter(resp, "max_output_tokens"):
+                    compat_body = dict(body)
+                    compat_body.pop("max_output_tokens", None)
+                    resp = await cli.post(url, headers=headers, json=compat_body)
         except httpx.HTTPError as exc:
             raise LLMError(
                 _safe_error_message(
@@ -830,7 +854,7 @@ class ResponsesClient(LLMClient):
         if resp.status_code >= 400:
             raise LLMError(
                 _safe_error_message(
-                    f"Responses 接口返回 {resp.status_code}: {resp.text[:200]}{_hint_for_status(resp.status_code)}",
+                    f"Responses 接口返回 {resp.status_code}: {_response_text(resp)[:200]}{_hint_for_status(resp.status_code)}",
                     self._api_key,
                 )
             )
@@ -946,6 +970,10 @@ class ResponsesClient(LLMClient):
         try:
             async with httpx.AsyncClient(**client_kwargs) as cli:
                 resp = await cli.post(url, headers=headers, json=body)
+                if _is_unsupported_parameter(resp, "max_output_tokens"):
+                    compat_body = dict(body)
+                    compat_body.pop("max_output_tokens", None)
+                    resp = await cli.post(url, headers=headers, json=compat_body)
         except httpx.HTTPError as exc:
             raise LLMError(
                 _safe_error_message(
@@ -957,7 +985,7 @@ class ResponsesClient(LLMClient):
         if resp.status_code >= 400:
             raise LLMError(
                 _safe_error_message(
-                    f"Responses 生图接口返回 {resp.status_code}: {resp.text[:200]}{_hint_for_status(resp.status_code)}",
+                    f"Responses 生图接口返回 {resp.status_code}: {_response_text(resp)[:200]}{_hint_for_status(resp.status_code)}",
                     self._api_key,
                 )
             )

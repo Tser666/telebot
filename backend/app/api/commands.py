@@ -595,6 +595,16 @@ async def detect_provider_protocols(
         try:
             resp = await cli.post(f"{base_url}/responses", headers=headers, json=body)
             latency_ms = int((_time.monotonic() - started) * 1000)
+            if _probe_unsupported_parameter(resp, "max_output_tokens"):
+                compat_body = dict(body)
+                compat_body.pop("max_output_tokens", None)
+                compat_started = _time.monotonic()
+                compat_resp = await cli.post(f"{base_url}/responses", headers=headers, json=compat_body)
+                compat_latency_ms = int((_time.monotonic() - compat_started) * 1000)
+                compat_result = _probe_result(compat_resp, compat_latency_ms, api_key=api_key)
+                if compat_result.ok:
+                    compat_result.error = "Responses 兼容模式可用：该接口不支持 max_output_tokens，运行时会自动省略。"
+                return compat_result
             return _probe_result(resp, latency_ms, api_key=api_key)
         except httpx.HTTPError as exc:
             return _probe_error(exc, started)
@@ -640,10 +650,19 @@ async def detect_provider_protocols(
         elif responses.ok:
             recommended_api_format = "responses"
             recommended_web_search_api_format = "responses"
+        response_compat_note = responses.error if responses.ok and responses.error else ""
         if chat.ok and responses.ok:
-            note = "该 API 同时支持 chat/completions 与 responses；建议日常 chat，联网搜索自动切 responses。"
+            note = (
+                "该 API 同时支持 chat/completions 与 responses；建议日常 chat，联网搜索自动切 responses。"
+                if not response_compat_note
+                else f"该 API 同时支持 chat/completions 与 responses 兼容模式；建议日常 chat，联网搜索自动切 responses。{response_compat_note}"
+            )
         elif responses.ok:
-            note = "该 API 支持 responses；可直接作为默认协议，也可用于联网搜索。"
+            note = (
+                "该 API 支持 responses；可直接作为默认协议，也可用于联网搜索。"
+                if not response_compat_note
+                else f"该 API 支持 responses 兼容模式；可直接作为默认协议，也可用于联网搜索。{response_compat_note}"
+            )
         elif chat.ok:
             note = "该 API 支持 chat/completions，但未探测到 responses；联网搜索可能不可用。"
         else:
@@ -686,6 +705,22 @@ def _probe_result(resp: httpx.Response, latency_ms: int, *, api_key: str) -> Pro
         status_code=resp.status_code,
         latency_ms=latency_ms,
         error=f"HTTP {resp.status_code}: {body}",
+    )
+
+
+def _probe_unsupported_parameter(resp: httpx.Response, parameter: str) -> bool:
+    if resp.status_code < 400:
+        return False
+    lowered = (resp.text or "").lower()
+    parameter = parameter.lower()
+    return (
+        parameter in lowered
+        and (
+            "unsupported parameter" in lowered
+            or "unknown parameter" in lowered
+            or "unrecognized parameter" in lowered
+            or "invalid parameter" in lowered
+        )
     )
 
 
