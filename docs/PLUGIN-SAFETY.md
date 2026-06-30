@@ -31,6 +31,20 @@ Manifest 中的 `permissions` 字段声明插件需要的能力：
 
 TelePilot 按个人可信插件模式运行：管理员安装并启用插件后，远程插件的业务风险由管理员自行承担；平台不做公共插件市场式强沙箱，但仍保留频控、审计、急停、Trace 和 token/session 隔离。新 Telegram 插件必须走 Event Bus + MessageOps：在 `plugin.json` 声明 `usage`、`event_subscriptions`、`capabilities`，运行时只读取标准事件信封，所有发送、编辑、删除、置顶、按钮 ACK、Inline answer 和结算都返回标准 action 或通过 `ctx.messages` 生成。`ctx.client` 保留给管理员命令和高级兼容场景，不作为普通 Bot 按钮回调的主入口。群里已有的转账结果通知 Bot 只作为外部付款证据来源，不是插件主动发送通道。
 
+### 配置页动作边界
+
+通用配置页支持 `config_actions` / `x-config-actions`，但它不是任意 HTML、CSS 或 JavaScript 注入能力。插件只能声明按钮、输入 schema 和放置位置；点击按钮后，平台在后端调用插件的 `on_config_action(ctx, action_key, payload)`。
+
+配置动作的安全边界：
+
+- `ctx` 不注入 Telegram live client，不允许借配置页按钮直接发消息、转账或改群。
+- `ctx.http` 仍要求 `external_http` + `allowed_hosts`，并继续阻断 localhost、内网和链路本地地址。
+- `ctx.ai` 仍要求 `ai_text`，复用 TelePilot Provider、预算和用量记录，不暴露明文 API Key。
+- 前端只合并插件返回的 `config_patch` 到当前表单；管理员仍需点击“保存配置”才会写入数据库并触发 worker 热加载。
+- 动作输入、URL、AI 输出都必须由插件二次校验，不要把 AI 输出当成可信配置直接执行。
+
+安全顾虑主要来自内部插件代码被授予能力后的扩权面，而不是来自外部 URL 字符串本身。外部内容必须通过受控 HTTP/AI facade 进入插件；平台不允许插件用配置页承载自定义脚本来绕过这些边界。
+
 ### 禁止行为
 
 - 不允许 `os.system` / `subprocess` 执行系统命令（除非显式声明）

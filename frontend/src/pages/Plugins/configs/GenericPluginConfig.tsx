@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowLeft, Loader2, Save } from "lucide-react";
@@ -9,6 +9,7 @@ import { listLLMProviders } from "@/api/commands";
 import {
   getFeatureMatrix,
   getPluginGlobalConfig,
+  runPluginConfigAction,
   setPluginGlobalConfig,
   updateAccountFeatureConfig,
 } from "@/api/features";
@@ -18,6 +19,7 @@ import {
   ConfigPreviewSection,
   ConfigScopeSection,
   schemaHasLLMSelect,
+  type ConfigAction,
   type ConfigField,
   type ConfigSchema,
   withoutReadOnlyValues,
@@ -56,6 +58,43 @@ function isConfigSchema(schema: unknown): schema is ConfigSchema {
 
 function sameConfig(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function normalizeConfigActions(rawActions: unknown[]): ConfigAction[] {
+  const seen = new Set<string>();
+  const actions: ConfigAction[] = [];
+  for (const raw of rawActions) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const action = raw as ConfigAction;
+    const key = String(action.key || "").trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    actions.push({ ...action, key });
+  }
+  return actions;
+}
+
+function mergeConfigPatchIntoForm(
+  patch: Record<string, unknown>,
+  properties: Record<string, ConfigField>,
+  setGlobalVals: Dispatch<SetStateAction<Record<string, unknown>>>,
+  setAccountVals: Dispatch<SetStateAction<Record<string, unknown>>>,
+) {
+  const globalPatch: Record<string, unknown> = {};
+  const accountPatch: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(patch)) {
+    if (properties[key]?.level === "global") {
+      globalPatch[key] = value;
+    } else {
+      accountPatch[key] = value;
+    }
+  }
+  if (Object.keys(globalPatch).length > 0) {
+    setGlobalVals((prev) => ({ ...prev, ...globalPatch }));
+  }
+  if (Object.keys(accountPatch).length > 0) {
+    setAccountVals((prev) => ({ ...prev, ...accountPatch }));
+  }
 }
 
 export function GenericPluginConfigPage() {
@@ -101,6 +140,13 @@ export function GenericPluginConfigPage() {
     queryFn: listLLMProviders,
     enabled: Boolean(schema && schemaHasLLMSelect(schema)),
   });
+  const configActions = useMemo(
+    () => normalizeConfigActions([
+      ...(Array.isArray(feature?.config_actions) ? feature.config_actions : []),
+      ...(Array.isArray(schema?.["x-config-actions"]) ? schema["x-config-actions"] : []),
+    ]),
+    [feature?.config_actions, schema],
+  );
 
   const [globalVals, setGlobalVals] = useState<Record<string, unknown>>({});
   const [accountVals, setAccountVals] = useState<Record<string, unknown>>({});
@@ -138,7 +184,7 @@ export function GenericPluginConfigPage() {
       accountFields: entries.filter(
         ([key, field]) => !isGuideField(key) && field.level !== "global",
       ),
-      previewFields: entries.filter(([key]) => !isUsageOnlyField(key)),
+      previewFields: entries.filter(([key, field]) => !isUsageOnlyField(key) && !field["x-ui-hidden"]),
     };
   }, [schema]);
   const usageGuide = useMemo(
@@ -233,6 +279,30 @@ export function GenericPluginConfigPage() {
     setGlobalVals(next.globalVals);
     setAccountVals(next.accountVals);
     setDirty(false);
+  }
+
+  async function handleConfigAction(action: ConfigAction, input: Record<string, unknown>) {
+    if (!schema) return;
+    const response = await runPluginConfigAction(aid, featureKey, action.key, {
+      input,
+      config: { ...globalVals, ...accountVals },
+    });
+    const patch = response.config_patch ?? {};
+    if (Object.keys(patch).length > 0) {
+      mergeConfigPatchIntoForm(
+        patch,
+        schema.properties,
+        setGlobalVals,
+        setAccountVals,
+      );
+      setDirty(true);
+    }
+    const message = response.toast || response.message || "配置动作已完成";
+    if (response.success === false) {
+      toast.error(message);
+    } else {
+      toast.success(message);
+    }
   }
 
   return (
@@ -381,6 +451,8 @@ export function GenericPluginConfigPage() {
                 llmProviders={llmProvidersQ.data}
                 llmProvidersLoading={llmProvidersQ.isLoading || llmProvidersQ.isFetching}
                 showPreviews={false}
+                configActions={configActions}
+                onConfigAction={handleConfigAction}
                 onChange={(key, value) => {
                   setGlobalVals((prev) => ({ ...prev, [key]: value }));
                   setDirty(true);
@@ -397,6 +469,8 @@ export function GenericPluginConfigPage() {
                 llmProviders={llmProvidersQ.data}
                 llmProvidersLoading={llmProvidersQ.isLoading || llmProvidersQ.isFetching}
                 showPreviews={false}
+                configActions={configActions}
+                onConfigAction={handleConfigAction}
                 onChange={(key, value) => {
                   setAccountVals((prev) => ({ ...prev, [key]: value }));
                   setDirty(true);

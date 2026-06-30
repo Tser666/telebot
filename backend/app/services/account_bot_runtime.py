@@ -2095,7 +2095,11 @@ def _interaction_participant_block_message(
     if int(incoming.user_id) in participant_ids:
         return None
     if policy == "paid_pool":
-        return "你不在本轮付费玩家列表中。"
+        started_by_user_id = _int_or_none(session.get("started_by_user_id")) if isinstance(session, dict) else None
+        if started_by_user_id is not None and int(incoming.user_id) == started_by_user_id:
+            return None
+    if policy == "paid_pool":
+        return "点点点！啥你都点！"
     return "这不是你的玩法，请由付款或开局本人操作。"
 
 

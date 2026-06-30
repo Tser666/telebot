@@ -40,6 +40,7 @@ import traceback
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from sqlalchemy import select, update
@@ -81,6 +82,7 @@ from ...services.interaction.contracts import (
     apply_action_send_via_options,
     deprecated_send_via_values,
 )
+from ...services.interaction.delivery import action_save_message_id_key, delivery_message_id
 from ...services.rate_limit_service import get_effective
 from ...settings import settings as app_settings
 from ...util.sudo_permissions import sudo_chat_allowed
@@ -804,6 +806,15 @@ async def _apply_userbot_event_bus_actions(
                 error=f"session control action: {action_type}",
             )
             continue
+        if action_type == "start_session":
+            failed = not await _apply_userbot_start_session_action(
+                state,
+                action,
+                plugin_key=plugin_key,
+                entry_key=entry_key,
+                redis=redis,
+            ) or failed
+            continue
         if action_type == "settlement":
             await record_action(action.get("context"), action, TRACE_STATUS_OK, actual_send_via="settlement")
             continue
@@ -865,6 +876,143 @@ async def _apply_userbot_event_bus_actions(
     return failed
 
 
+async def _apply_userbot_start_session_action(
+    state: _AccountState,
+    action: dict[str, Any],
+    *,
+    plugin_key: str,
+    entry_key: str,
+    redis: Any,
+) -> bool:
+    target_chat_id = _int_or_none(action.get("chat_id"))
+    if target_chat_id is None:
+        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code="scope_not_matched", error="target chat_id missing")
+        return False
+    target_entry_key = str(action.get("entry_key") or entry_key or "").strip()
+    if not target_entry_key:
+        await record_action(action.get("context"), action, TRACE_STATUS_FAILED, error_code="entry_key_missing", error="interaction session entry_key missing")
+        return False
+    rule = await _find_interaction_rule_for_plugin_session(
+        state.account_id,
+        plugin_key=plugin_key,
+        entry_key=target_entry_key,
+        chat_id=target_chat_id,
+    )
+    if rule is None:
+        await record_action(
+            action.get("context"),
+            action,
+            TRACE_STATUS_FAILED,
+            error_code="interaction_rule_missing",
+            error=f"no interaction rule for {plugin_key}.{target_entry_key}",
+        )
+        return False
+    try:
+        from ...services import account_bot_runtime as account_bot_runtime_service
+
+        started_by_user_id = _int_or_none(action.get("started_by_user_id"))
+        session_key = account_bot_runtime_service._interaction_session_key(  # noqa: SLF001
+            state.account_id,
+            rule,
+            target_chat_id,
+            started_by_user_id,
+        )
+        existing: dict[str, Any] = {}
+        raw = await redis.get(session_key)
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", errors="ignore")
+        if raw:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                existing = parsed
+        paid_ids = _int_list(existing.get("paid_user_ids") or existing.get("participant_user_ids"))
+        paid_ids.update(_int_list(action.get("paid_user_ids") or action.get("participant_user_ids")))
+        if started_by_user_id is None:
+            started_by_user_id = _int_or_none(existing.get("started_by_user_id"))
+        payload = {
+            "account_id": state.account_id,
+            "chat_id": target_chat_id,
+            "rule_id": str(rule.get("id") or "legacy"),
+            "rule_name": str(rule.get("name") or ""),
+            "module_key": plugin_key,
+            "entry_key": target_entry_key,
+            "started_by_user_id": started_by_user_id,
+            "started_by_message_id": _int_or_none(action.get("started_by_message_id")),
+            "source_user_id": started_by_user_id,
+            "event_type": str(action.get("event_type") or "command"),
+            "created_at": existing.get("created_at") or time.time(),
+            "updated_at": time.time(),
+        }
+        policy = account_bot_runtime_service._interaction_participant_policy(rule)  # noqa: SLF001
+        if policy == "paid_pool":
+            payload["paid_user_ids"] = sorted(paid_ids)
+            payload["participant_user_ids"] = sorted(paid_ids)
+        ttl = _int_or_none(action.get("ttl_seconds")) or account_bot_runtime_service._interaction_session_ttl(rule)  # noqa: SLF001
+        await redis.set(session_key, json.dumps(payload, ensure_ascii=False), ex=ttl)
+        await record_action(
+            action.get("context"),
+            action,
+            TRACE_STATUS_OK,
+            actual_send_via="interaction_session",
+            result={"session_key": session_key, "ttl_seconds": ttl},
+        )
+        return True
+    except Exception as exc:  # noqa: BLE001
+        await record_action(
+            action.get("context"),
+            action,
+            TRACE_STATUS_FAILED,
+            error_code="interaction_session_error",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        return False
+
+
+def _int_list(raw: Any) -> set[int]:
+    out: set[int] = set()
+    if not isinstance(raw, (list, tuple, set)):
+        return out
+    for item in raw:
+        value = _int_or_none(item)
+        if value is not None:
+            out.add(value)
+    return out
+
+
+async def _find_interaction_rule_for_plugin_session(
+    account_id: int,
+    *,
+    plugin_key: str,
+    entry_key: str,
+    chat_id: int,
+) -> dict[str, Any] | None:
+    try:
+        async with AsyncSessionLocal() as db:
+            cfg = await account_bot_service.get_transfer_notice_config(db, account_id)
+    except Exception:  # noqa: BLE001
+        log.debug("load interaction rules for plugin session failed account=%s plugin=%s", account_id, plugin_key, exc_info=True)
+        return None
+    rules = cfg.get("rules") if isinstance(cfg, dict) else None
+    if not isinstance(rules, list):
+        return None
+    for item in rules:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("action") or "") != "module":
+            continue
+        if str(item.get("module_key") or "").strip() != plugin_key:
+            continue
+        if str(item.get("module_action") or "").strip() != entry_key:
+            continue
+        chat_ids = item.get("chat_ids")
+        if isinstance(chat_ids, list) and chat_ids:
+            allowed = {_int_or_none(raw) for raw in chat_ids}
+            if chat_id not in allowed:
+                continue
+        return dict(item)
+    return None
+
+
 async def _apply_userbot_send_message_action(state: _AccountState, event: Any, action: dict[str, Any]) -> bool:
     text = str(action.get("text") or "").strip()
     if not text:
@@ -893,6 +1041,7 @@ async def _apply_userbot_send_message_action(state: _AccountState, event: Any, a
                     reply_to_message_id=reply_to,
                     reply_markup=reply_markup,
                 )
+                await _save_action_message_id(state, action, result)
                 await record_action(action.get("context"), action, TRACE_STATUS_OK, actual_send_via="interaction_bot", result=result)
                 return True
             except Exception as exc:  # noqa: BLE001
@@ -906,12 +1055,14 @@ async def _apply_userbot_send_message_action(state: _AccountState, event: Any, a
                 continue
             try:
                 sent = await state.client.send_message(target_chat_id, text, reply_to=reply_to, parse_mode="html")
+                result = {"message_id": getattr(sent, "id", None), "chat_id": target_chat_id}
+                await _save_action_message_id(state, action, result)
                 await record_action(
                     action.get("context"),
                     action,
                     TRACE_STATUS_OK,
                     actual_send_via="userbot_reply",
-                    result={"message_id": getattr(sent, "id", None), "chat_id": target_chat_id},
+                    result=result,
                 )
                 return True
             except Exception as exc:  # noqa: BLE001
@@ -1216,6 +1367,20 @@ def _int_or_none(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+async def _save_action_message_id(state: _AccountState, action: dict[str, Any], result: Any) -> None:
+    save_key = action_save_message_id_key(action.get("save_message_id_key"))
+    if not save_key:
+        return
+    msg_id = delivery_message_id(result)
+    if msg_id is None:
+        return
+    try:
+        redis = state.redis or get_redis()
+        await redis.set(save_key, str(msg_id), ex=7200)
+    except Exception:  # noqa: BLE001
+        log.debug("save plugin action message id failed account=%s key=%s", state.account_id, save_key, exc_info=True)
 
 
 # worker 内存里维护的最近活跃 peer 数量上限（超过则按 LRU 丢弃最旧）
@@ -1863,6 +2028,85 @@ class _AccountState:
 _STATES: dict[int, _AccountState] = {}
 
 
+class _LiveMessageOps:
+    """实时执行标准消息动作的插件 facade。
+
+    交互入口内 ``ctx.messages`` 会被临时替换为 ``BufferedMessageOps``；
+    常驻上下文使用本 facade，供插件命令和后台任务继续走平台受控通道。
+    """
+
+    def __init__(self, state: _AccountState, *, plugin_key: str, entry_key: str = "") -> None:
+        self._state = state
+        self._plugin_key = plugin_key
+        self._entry_key = entry_key
+        self.actions: list[dict[str, Any]] = []
+
+    async def apply(self, actions: list[dict[str, Any]], *, entry_key: str | None = None) -> None:
+        normalized = _normalize_interaction_actions(actions)
+        if not normalized:
+            return
+        self.actions.extend(normalized)
+        redis = self._state.redis or get_redis()
+        event = SimpleNamespace(chat_id=None)
+        await _apply_userbot_event_bus_actions(
+            self._state,
+            None,
+            event,
+            plugin_key=self._plugin_key,
+            entry_key=entry_key if entry_key is not None else self._entry_key,
+            actions=normalized,
+            redis=redis,
+        )
+
+    async def send(self, **kwargs: Any) -> dict[str, Any]:
+        from .message_ops import BufferedMessageOps
+
+        buffered = BufferedMessageOps()
+        action = await buffered.send(**kwargs)
+        await self.apply([action])
+        return action
+
+    async def edit(self, **kwargs: Any) -> dict[str, Any]:
+        from .message_ops import BufferedMessageOps
+
+        buffered = BufferedMessageOps()
+        action = await buffered.edit(**kwargs)
+        await self.apply([action])
+        return action
+
+    async def delete(self, **kwargs: Any) -> dict[str, Any]:
+        from .message_ops import BufferedMessageOps
+
+        buffered = BufferedMessageOps()
+        action = await buffered.delete(**kwargs)
+        await self.apply([action])
+        return action
+
+    async def pin(self, **kwargs: Any) -> dict[str, Any]:
+        from .message_ops import BufferedMessageOps
+
+        buffered = BufferedMessageOps()
+        action = await buffered.pin(**kwargs)
+        await self.apply([action])
+        return action
+
+    async def answer_callback(self, **kwargs: Any) -> dict[str, Any]:
+        from .message_ops import BufferedMessageOps
+
+        buffered = BufferedMessageOps()
+        action = await buffered.answer_callback(**kwargs)
+        await self.apply([action])
+        return action
+
+    async def answer_inline_query(self, **kwargs: Any) -> dict[str, Any]:
+        from .message_ops import BufferedMessageOps
+
+        buffered = BufferedMessageOps()
+        action = await buffered.answer_inline_query(**kwargs)
+        await self.apply([action])
+        return action
+
+
 async def _event_sender_id(event: Any) -> int | None:
     sender = getattr(event, "sender", None)
     sender_id = getattr(sender, "id", None)
@@ -2407,6 +2651,7 @@ async def _activate(db, state: _AccountState, af: AccountFeature, redis: Any) ->
         ),
         http=plugin_http,
         ai=plugin_ai,
+        messages=_LiveMessageOps(state, plugin_key=af.feature_key),
         generation=state.generation,
         account_proxy_url=state.account_proxy_url,
     )

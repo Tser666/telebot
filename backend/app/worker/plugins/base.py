@@ -18,8 +18,6 @@ from typing import Any
 
 from telethon import TelegramClient, events
 
-from .message_ops import BufferedMessageOps
-
 
 def _clean_text(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
@@ -88,6 +86,7 @@ class PluginContext:
       - ``scheduler``：平台调度器 facade，可在插件内注册 cron / interval / once 任务
       - ``http``：声明 ``external_http`` 和 ``allowed_hosts`` 后注入的安全 HTTP facade
       - ``ai``：声明 ``ai_text`` 后注入的安全文本 LLM facade
+      - ``messages``：标准消息动作 facade；交互入口内为缓冲动作，后台任务/命令中为实时受控投递
 
     为避免循环 import，``rules`` / ``engine`` / ``redis`` 都用 ``Any`` 标注。
     """
@@ -103,7 +102,7 @@ class PluginContext:
     scheduler: Any = None  # SchedulerFacade
     http: Any = None  # PluginHTTP
     ai: Any = None  # PluginAI
-    messages: BufferedMessageOps | None = None
+    messages: Any = None
     generation: int = 0
     account_proxy_url: str | None = None
 
@@ -231,6 +230,25 @@ class Plugin:
         ``payload`` 是 TelePilot 标准事件信封。插件可直接返回标准 action，
         或使用 ``ctx.messages`` 缓冲发送、编辑、删除、置顶、callback ACK、
         inline answer 等动作，由平台统一执行和记录 Trace。
+        """
+        return None
+
+    async def on_config_action(
+        self,
+        ctx: PluginContext,
+        action_key: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """配置页动作入口；默认未实现。
+
+        插件可在 manifest/config_schema 中声明配置动作，由 TelePilot 配置页渲染按钮。
+        用户点击后平台会构造一个不带 Telegram client 的受控 ``PluginContext``，
+        注入当前表单配置、``ctx.http`` 和 ``ctx.ai`` 等安全 facade，然后调用此 hook。
+
+        返回值应是普通 dict，常用字段：
+        - ``config_patch``：要合并回当前表单的字段值，例如 ``{"rules": [...]}``
+        - ``message`` / ``toast``：给管理员展示的短反馈
+        - ``result``：可选的结构化结果，供更高级前端组件消费
         """
         return None
 

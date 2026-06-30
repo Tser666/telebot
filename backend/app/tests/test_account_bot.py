@@ -3198,6 +3198,113 @@ async def test_paid_pool_chat_session_accumulates_paid_players(monkeypatch) -> N
     assert account_bot_runtime._interaction_session_participant_ids(session, policy="paid_pool") == {111, 222}
 
 
+def test_paid_pool_callback_allows_session_starter_as_controller(monkeypatch) -> None:
+    monkeypatch.setattr(
+        account_bot_service,
+        "declared_module_entry_manifest",
+        lambda module_key, entry_key: {"participant_policy": "paid_pool"}
+        if (module_key, entry_key) == ("ten_half", "start_ten_half")
+        else None,
+    )
+    rule = {
+        "id": "ten-half-paid",
+        "action": "module",
+        "module_key": "ten_half",
+        "module_action": "start_ten_half",
+        "module_session_scope": "chat",
+    }
+    session = {
+        "started_by_user_id": 999,
+        "paid_user_ids": [111, 222],
+        "participant_user_ids": [111, 222],
+    }
+
+    starter_callback = account_bot_runtime.Incoming(
+        account_id=1,
+        token="bbot-token",
+        update_id=1,
+        user_id=999,
+        chat_id=-100123,
+        message_id=90,
+        text="",
+        callback_id="cb-owner",
+        callback_data="th:stand:999",
+        display_name="Owner",
+    )
+    stranger_callback = account_bot_runtime.Incoming(
+        account_id=1,
+        token="bbot-token",
+        update_id=2,
+        user_id=333,
+        chat_id=-100123,
+        message_id=91,
+        text="",
+        callback_id="cb-stranger",
+        callback_data="th:stand:999",
+        display_name="Stranger",
+    )
+
+    assert account_bot_runtime._interaction_participant_block_message(starter_callback, rule, session) is None
+    assert account_bot_runtime._interaction_participant_block_message(stranger_callback, rule, session) == "点点点！啥你都点！"
+
+
+@pytest.mark.asyncio
+async def test_live_message_start_session_action_writes_interaction_session(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    rule = {
+        "id": "ten-half-paid",
+        "name": "十点半",
+        "action": "module",
+        "module_key": "ten_half",
+        "module_action": "start_ten_half",
+        "module_session_scope": "chat",
+        "participant_policy": "paid_pool",
+        "chat_ids": [-100123],
+        "valid_seconds": 600,
+    }
+    redis = _MemoryRedis()
+    state = plugin_loader._AccountState(1)
+    state.redis = redis
+    record_action = AsyncMock()
+    monkeypatch.setattr(plugin_loader, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(plugin_loader.account_bot_service, "get_transfer_notice_config", AsyncMock(return_value={"enabled": True, "rules": [rule]}))
+    monkeypatch.setattr(plugin_loader, "record_action", record_action)
+
+    failed = await plugin_loader._apply_userbot_event_bus_actions(
+        state,
+        None,
+        SimpleNamespace(chat_id=-100123),
+        plugin_key="ten_half",
+        entry_key="start_ten_half",
+        actions=[
+            {
+                "type": "start_session",
+                "chat_id": -100123,
+                "entry_key": "start_ten_half",
+                "started_by_user_id": 999,
+                "started_by_message_id": 60,
+            }
+        ],
+        redis=redis,
+    )
+
+    assert failed is False
+    session_key = account_bot_runtime._interaction_session_key(1, rule, -100123, None)
+    session = json.loads(redis.data[session_key])
+    assert session["started_by_user_id"] == 999
+    assert session["started_by_message_id"] == 60
+    assert session["paid_user_ids"] == []
+    assert session["participant_user_ids"] == []
+    assert record_action.await_args.args[2] == account_bot_runtime.TRACE_STATUS_OK
+    assert record_action.await_args.kwargs["actual_send_via"] == "interaction_session"
+
+
 @pytest.mark.asyncio
 async def test_payment_interaction_payload_uses_replied_user_as_payer(monkeypatch) -> None:
     incoming = account_bot_runtime.Incoming(

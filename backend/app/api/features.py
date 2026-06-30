@@ -25,11 +25,21 @@ from ..schemas.feature import (
     AccountFeatureToggle,
     ConfigValidationResponse,
     FeatureMatrixResponse,
+    PluginConfigActionRequest,
+    PluginConfigActionResponse,
     PluginGlobalConfigResponse,
     PluginGlobalConfigUpdate,
 )
 from ..services import audit, feature_service
+from ..services.plugin_config_actions import (
+    PluginConfigActionError,
+    PluginConfigActionNotFound,
+    PluginConfigActionUnavailable,
+    run_plugin_config_action,
+)
 from ..services.redactor import is_sensitive_key, redact_value
+from ..worker.plugins.ai_facade import AIQuotaError, AIUnavailableError
+from ..worker.plugins.http_facade import PluginHTTPError
 
 router = APIRouter(tags=["features"])
 
@@ -330,6 +340,66 @@ async def update_account_feature_config(
         last_error=af.last_error,
         config=_sanitize_config(dict(af.config or {}), key),
     )
+
+
+@router.post(
+    "/api/accounts/{aid}/features/{key}/config/actions/{action_key}",
+    response_model=PluginConfigActionResponse,
+)
+async def run_account_feature_config_action(
+    aid: int,
+    key: str,
+    action_key: str,
+    payload: PluginConfigActionRequest,
+    db: DBSession,
+    user: CurrentUser,
+) -> PluginConfigActionResponse:
+    """运行插件声明的配置页动作。"""
+
+    account = await db.get(Account, aid)
+    if account is None:
+        raise _bad("ACCOUNT_NOT_FOUND", "账号不存在", 404)
+    await feature_service.seed_builtin_features(db)
+    feature = await db.get(Feature, key)
+    if feature is None:
+        raise _bad("FEATURE_NOT_FOUND", f"未注册的 feature: {key}", 404)
+
+    effective_config = await feature_service.get_effective_plugin_config(db, aid, key)
+    try:
+        result = await run_plugin_config_action(
+            db,
+            account=account,
+            feature=feature,
+            action_key=action_key,
+            effective_config=effective_config,
+            current_config=payload.config,
+            action_input=payload.input,
+        )
+    except PluginConfigActionNotFound as exc:
+        raise _bad("CONFIG_ACTION_NOT_FOUND", str(exc), 404) from exc
+    except PluginConfigActionUnavailable as exc:
+        raise _bad("CONFIG_ACTION_UNAVAILABLE", str(exc), 400) from exc
+    except PluginHTTPError as exc:
+        raise _bad("CONFIG_ACTION_HTTP_REJECTED", str(exc), 400) from exc
+    except AIQuotaError as exc:
+        raise _bad("CONFIG_ACTION_AI_QUOTA", str(exc), 429) from exc
+    except AIUnavailableError as exc:
+        raise _bad("CONFIG_ACTION_AI_UNAVAILABLE", str(exc), 503) from exc
+    except PluginConfigActionError as exc:
+        raise _bad("CONFIG_ACTION_FAILED", str(exc), 400) from exc
+
+    await audit.write(
+        db,
+        user.id,
+        "feature.config.action",
+        target=f"account:{aid}/feature:{key}",
+        detail={
+            "action_key": action_key,
+            "config_patch_keys": sorted((result.get("config_patch") or {}).keys()),
+        },
+    )
+    await db.commit()
+    return PluginConfigActionResponse(**result)
 
 
 # ─────────────────────────────────────────────────────

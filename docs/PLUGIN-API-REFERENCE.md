@@ -267,6 +267,94 @@ MANIFEST = Manifest(
 - `level: account` 的字段 → 账号配置区（按账号隔离）
 - 无 level 的字段 → 默认按账号隔离
 
+#### 通用配置控件
+
+通用独立配置页支持声明式控件，插件不要为了某个字段新增 TelePilot 前端特例。常用扩展字段：
+
+| 声明 | 适用字段 | 效果 |
+|------|----------|------|
+| `x-ui-widget: "textarea"` | `string` | 多行文本 |
+| `x-ui-widget: "llm-provider-select"` | `string` | 选择当前 TelePilot AI Provider |
+| `x-ui-widget: "llm-model-select"` | `string` | 选择 Provider 下的模型；用 `x-ui-provider-field` 指向 Provider 字段 |
+| `x-ui-widget: "multi-select"` | `array` + `items.enum` | 多选列表 |
+| `x-ui-widget: "list-select"` | `string` + `enum` | 列表式单选 |
+| `x-ui-widget: "config-list"` | `array` + `items.type="object"` | 多组配置行，支持添加、编辑、复制、删除、启停、排序 |
+| `x-ui-hidden: true` | 任意字段 | 不在 UI 渲染，但仍保留在表单值和保存链路中 |
+
+`config-list` 适合“多组配置，每组一行”的常见体验。支持这些元数据：
+
+| 字段 | 说明 |
+|------|------|
+| `x-ui-summary` | 行摘要模板，支持 `{field}` 和 `{items.length}` 这类简单路径 |
+| `x-ui-title-field` | 行标题字段，例如 `remark` / `title` / `name` |
+| `x-ui-description-field` | 行描述字段，例如 `url` / `description` |
+| `x-ui-enabled-field` | 启停开关字段，通常为 `enabled` |
+| `x-ui-reorderable` | 是否允许拖拽和上下移动，默认允许 |
+| `x-ui-add-label` | 添加按钮文案 |
+
+示例：
+
+```python
+"knowledge_bases": {
+    "type": "array",
+    "title": "题库",
+    "x-ui-widget": "config-list",
+    "x-ui-summary": "{questions.length} 题 · {summary}",
+    "x-ui-title-field": "title",
+    "x-ui-description-field": "url",
+    "x-ui-enabled-field": "enabled",
+    "items": {
+        "type": "object",
+        "properties": {
+            "enabled": {"type": "boolean", "title": "启用", "default": True},
+            "title": {"type": "string", "title": "标题"},
+            "url": {"type": "string", "title": "URL"},
+            "summary": {"type": "string", "title": "摘要", "x-ui-widget": "textarea"},
+            "questions": {"type": "array", "title": "题目 JSON", "items": {"type": "object"}},
+        },
+    },
+}
+```
+
+#### 配置页动作
+
+插件可以在 `Manifest.config_actions` 或 `config_schema["x-config-actions"]` 声明配置页按钮。前端按 `placement` 放置按钮，当前推荐 `field:<字段名>`，例如 `field:knowledge_bases`。
+
+```python
+config_actions=[
+    {
+        "key": "generate_knowledge_base",
+        "title": "获取并整理为题库",
+        "placement": "field:knowledge_bases",
+        "submit_label": "生成题库",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "title": "来源 URL"},
+                "title": {"type": "string", "title": "标题提示（可选）"},
+            },
+            "required": ["url"],
+        },
+    }
+]
+```
+
+后端会调用插件的 `on_config_action(ctx, action_key, payload)`。`ctx` 不带 Telegram client，但会按 manifest 权限注入受控 `ctx.http` 与 `ctx.ai`；`payload["input"]` 是按钮弹窗输入，`payload["config"]` 是当前表单配置。插件返回：
+
+```python
+return {
+    "message": "已生成题库，请保存配置后生效。",
+    "config_patch": {"knowledge_bases": next_items},
+    "result": {},
+}
+```
+
+`config_patch` 会合并回当前表单，用户仍需点击“保存配置”才会写入数据库并触发 worker 热加载。通用 API 路径是：
+
+```text
+POST /api/accounts/{aid}/features/{key}/config/actions/{action_key}
+```
+
 **字段验证清单（核心能力与官方可选插件）：**
 
 | 插件 | config_schema | UI 模式 | 状态 |
@@ -1482,6 +1570,11 @@ config_schema={
 - `x-ui-section`：把字段放进同名分组。
 - `x-ui-order`：控制字段排序，数值越小越靠前。
 - `x-ui-columns`：控制分组列数，允许 1 到 3。
+- `x-ui-widget: "config-list"`：把 `array<object>` 渲染为多组配置列表，内置添加、编辑、复制、删除、启停和排序。
+- `x-ui-widget: "multi-select"`：把枚举数组渲染为多选列表。
+- `x-ui-widget: "list-select"`：把枚举字符串渲染为列表式单选。
+- `x-ui-hidden: true`：隐藏兼容字段或内部字段，但仍保留保存链路。
+- `config_actions` / `x-config-actions`：把插件后端动作渲染为字段旁按钮，动作只能调用插件的 `on_config_action`，不能执行任意前端脚本。
 
 #### 插件预览
 

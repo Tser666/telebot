@@ -20,6 +20,17 @@
 
 ## [Unreleased]
 
+## [0.45.0] — 2026-06-30 · minor（次版本） · 通用插件配置框架
+
+### Added
+- 通用插件配置页支持结构化配置组：数组对象字段可声明为行列表，支持简要信息展示、编辑、删除、复制、启停开关和拖拽/上下移动排序。
+- 通用 schema 表单新增 `config-list`、`multi-select`、`list-select`、字段隐藏和字段级动作按钮等声明式控件，插件无需再为常见配置形态编写 TelePilot 专用页面。
+- 新增通用插件配置动作 API：插件可在 manifest/schema 声明按钮，由后端注入受控 `ctx.http` / `ctx.ai` 后调用 `on_config_action`，并把返回的 `config_patch` 合并回当前配置表单。
+
+### Fixed
+- 修复插件通过 userbot 命令创建交互 Bot 牌局时，缺少交互会话登记导致后续按钮可能无法稳定路由到插件的问题；`ctx.messages` 常驻 facade 现在支持受控写入交互会话。
+- 修复 `paid_pool` 参与者校验会把牌局发起人/控制者挡在按钮回调外的问题；已付款玩家外，发起人 callback 会交给插件继续判定，路人仍会被拦截并弹窗提示。
+
 ## [0.44.13] — 2026-06-30 · patch（补丁版本） · Responses SSE 空文本补丁
 
 ### Fixed

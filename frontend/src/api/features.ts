@@ -70,6 +70,32 @@ export async function validatePluginConfig(
   return data;
 }
 
+export interface PluginConfigActionPayload {
+  input?: Record<string, unknown>;
+  config?: Record<string, unknown>;
+}
+
+export interface PluginConfigActionResponse {
+  success: boolean;
+  message?: string | null;
+  toast?: string | null;
+  config_patch?: Record<string, unknown>;
+  result?: Record<string, unknown>;
+}
+
+export async function runPluginConfigAction(
+  aid: number,
+  pluginKey: string,
+  actionKey: string,
+  payload: PluginConfigActionPayload,
+): Promise<PluginConfigActionResponse> {
+  const { data } = await api.post<PluginConfigActionResponse>(
+    `/api/accounts/${aid}/features/${pluginKey}/config/actions/${actionKey}`,
+    payload,
+  );
+  return data;
+}
+
 // ===================== 规则 API =====================
 
 export async function listRules(

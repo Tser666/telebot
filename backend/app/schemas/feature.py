@@ -22,6 +22,7 @@ class FeatureInfo(BaseModel):
     version: str | None = None
     usage: str | None = None
     config_schema: dict[str, Any] | None = None
+    config_actions: list[dict[str, Any]] = Field(default_factory=list)
     category: str = "utility"
     interaction_profile: str | None = None
     interaction_entries: list[dict[str, Any]] = Field(default_factory=list)
@@ -67,8 +68,12 @@ class FeatureInfo(BaseModel):
             else:
                 source_label = "local-orphan" if manifest.get("x-orphan") else "local"
         config_schema = manifest.get("config_schema")
+        raw_config_actions = manifest.get("config_actions")
         usage = str(manifest.get("usage") or "").strip() or None
         schema_meta = config_schema if isinstance(config_schema, dict) else {}
+        if raw_config_actions is None:
+            raw_config_actions = schema_meta.get("x-config-actions")
+        config_actions = raw_config_actions if isinstance(raw_config_actions, list) else []
         category = str(manifest.get("category") or schema_meta.get("x-category") or "utility")
         if category not in {"interactive", "automation", "utility"}:
             category = "utility"
@@ -111,6 +116,7 @@ class FeatureInfo(BaseModel):
             version=f.version,
             usage=usage,
             config_schema=config_schema,
+            config_actions=[item for item in config_actions if isinstance(item, dict)],
             category=category,
             interaction_profile=interaction_profile,
             interaction_entries=[item for item in entries if isinstance(item, dict)],
@@ -194,3 +200,20 @@ class ConfigValidationResponse(BaseModel):
     """JSON Schema 验证结果。"""
     valid: bool
     errors: list[ConfigValidationError] = []
+
+
+class PluginConfigActionRequest(BaseModel):
+    """插件配置页动作请求。"""
+
+    input: dict[str, Any] = Field(default_factory=dict)
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class PluginConfigActionResponse(BaseModel):
+    """插件配置页动作响应。"""
+
+    success: bool = True
+    message: str | None = None
+    toast: str | None = None
+    config_patch: dict[str, Any] = Field(default_factory=dict)
+    result: dict[str, Any] = Field(default_factory=dict)

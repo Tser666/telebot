@@ -485,6 +485,7 @@ export interface FeatureInfo {
   version?: string | null;
   usage?: string | null;
   config_schema?: Record<string, unknown> | null;
+  config_actions?: Record<string, unknown>[];
   category?: FeatureCategory | string | null;
   interaction_profile?: "session_game" | "challenge_game" | "reward_pool" | "utility_trigger" | string | null;
   interaction_entries?: FeatureInteractionEntry[];
