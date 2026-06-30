@@ -1388,6 +1388,18 @@ def _rule_matches_incoming_trigger(rule: dict[str, Any], incoming: Incoming) -> 
     return any(_rule_matches_trigger(rule, text) for text in _incoming_trigger_texts(incoming))
 
 
+def _rule_matches_payment_notice_trigger(
+    rule: dict[str, Any],
+    incoming: Incoming,
+    parsed: dict[str, Any] | None,
+) -> bool:
+    if _rule_matches_incoming_trigger(rule, incoming):
+        return True
+    # A trusted transfer bot notice can be parsed even when Telegram strips the
+    # human trigger marker from the rendered message body.
+    return parsed is not None
+
+
 def _rule_amount_matches(rule: dict[str, Any], amount: int) -> bool:
     expected = _rule_expected_payment_amount(rule)
     if expected is None:
@@ -2776,7 +2788,7 @@ async def _select_transfer_notice_rule(
             continue
         if not _rule_chat_matches(rule, incoming.chat_id or 0):
             continue
-        if not _rule_matches_incoming_trigger(rule, incoming):
+        if not _rule_matches_payment_notice_trigger(rule, incoming, parsed):
             continue
         has_active_session = bool(
             await _list_interaction_sessions_for_rule(incoming.account_id, rule, incoming.chat_id)
@@ -5086,7 +5098,7 @@ async def _try_handle_transfer_notice(
     if not any(
         _rule_trigger_mode_allows(rule, "payment")
         and _rule_chat_matches(rule, incoming.chat_id)
-        and _rule_matches_incoming_trigger(rule, incoming)
+        and _rule_matches_payment_notice_trigger(rule, incoming, parsed)
         for rule in _interaction_rules(cfg)
     ):
         if _incoming_matches_interaction_trigger(cfg, incoming):
