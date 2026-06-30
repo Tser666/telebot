@@ -5728,6 +5728,83 @@ async def test_interaction_keyword_cannot_bypass_paid_threshold(monkeypatch) -> 
 
 
 @pytest.mark.asyncio
+async def test_paid_pool_keyword_starts_module_before_payment_join(monkeypatch) -> None:
+    redis = _MemoryRedis()
+    run_entry = AsyncMock(return_value=(True, None, [{"type": "end_session"}]))
+    send = AsyncMock()
+    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: redis)
+    monkeypatch.setattr(account_bot_runtime, "_run_worker_interaction_entry", run_entry)
+    monkeypatch.setattr(account_bot_service, "send_message", send)
+    monkeypatch.setattr(
+        account_bot_service,
+        "declared_module_entry_manifest",
+        lambda module_key, entry_key: {"participant_policy": "paid_pool"}
+        if (module_key, entry_key) == ("ten_half", "start_ten_half")
+        else None,
+    )
+    monkeypatch.setattr(
+        account_bot_service,
+        "declared_module_entry_events",
+        lambda module_key, entry_key: ["payment_confirmed", "keyword", "message", "callback_query", "session_close"]
+        if (module_key, entry_key) == ("ten_half", "start_ten_half")
+        else [],
+    )
+    monkeypatch.setattr(
+        account_bot_service,
+        "plugin_declares_telegram_native_raw",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(
+        account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(
+            return_value={
+                "enabled": True,
+                "rules": [
+                    {
+                        "id": "ten-half-paid",
+                        "name": "十点半",
+                        "enabled": True,
+                        "chat_ids": [-100123],
+                        "trigger_mode": "both",
+                        "module_start_keywords": ["十点半测试"],
+                        "amount": 1000,
+                        "action": "module",
+                        "module_key": "ten_half",
+                        "module_action": "start_ten_half",
+                        "module_session_scope": "chat",
+                        "module_config": {"bet": 1000, "max_players": 5, "lobby_timeout": 60},
+                        "module_start_text": "",
+                    },
+                ],
+            }
+        ),
+    )
+
+    await account_bot_runtime._handle_interaction_update(
+        1,
+        "bbot-token",
+        {
+            "update_id": 9922,
+            "message": {
+                "message_id": 99220,
+                "text": "十点半测试",
+                "from": {"id": 111, "first_name": "AAA"},
+                "chat": {"id": -100123, "type": "supergroup"},
+            },
+        },
+    )
+
+    assert send.await_count == 0
+    run_entry.assert_awaited_once()
+    payload = run_entry.await_args.kwargs["payload"]
+    assert payload["event_type"] == "keyword"
+    assert payload["trigger"]["keyword"] == "十点半测试"
+    assert payload["trigger"]["start_keywords"] == ["十点半测试"]
+    assert payload["module_config"]["bet"] == 1000
+
+
+@pytest.mark.asyncio
 async def test_interaction_closed_rule_only_replies_to_keyword(monkeypatch) -> None:
     class _DB:
         async def __aenter__(self):

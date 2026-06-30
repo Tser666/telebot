@@ -3332,13 +3332,16 @@ async def _try_handle_interaction_rule_command_or_keyword(db: Any, incoming: Inc
             if message:
                 await _send(incoming, message)
             return True
-        if _rule_has_paid_threshold(rule):
+        if _rule_has_paid_threshold(rule) and _interaction_participant_policy(rule) != "paid_pool":
             await _send(
                 incoming,
                 await _interaction_paid_threshold_message(db, incoming, rule),
                 reply_to_message_id=incoming.message_id,
             )
             return True
+        keyword_payload = dict(keyword_payload or {})
+        keyword_payload.setdefault("keyword", incoming.text.strip())
+        keyword_payload.setdefault("text", incoming.text.strip())
         usage_block = await _interaction_user_usage_block_message(incoming, rule)
         if usage_block:
             await _send(incoming, usage_block, reply_to_message_id=incoming.message_id)
@@ -3359,7 +3362,7 @@ async def _try_handle_interaction_rule_command_or_keyword(db: Any, incoming: Inc
             executed = await _execute_interaction_rule(
                 incoming,
                 rule,
-                parsed=keyword_payload or None,
+                parsed=keyword_payload,
                 event_type="keyword",
             )
             if executed:
@@ -3838,14 +3841,22 @@ def _interaction_trigger_envelope(
     event_type: str,
     data: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload = dict(data or {})
+    start_keywords = _rule_keyword_list(rule, "module_start_keywords")
+    trigger = {
         "type": event_type,
         "rule_id": str(rule.get("id") or ""),
         "rule_name": str(rule.get("name") or ""),
         "module_key": str(rule.get("module_key") or ""),
         "entry_key": str(rule.get("module_action") or ""),
-        "payload": dict(data or {}),
+        "payload": payload,
     }
+    if start_keywords:
+        trigger["start_keywords"] = start_keywords
+    keyword = str(payload.get("keyword") or "").strip()
+    if keyword:
+        trigger["keyword"] = keyword
+    return trigger
 
 
 def _interaction_session_envelope(
