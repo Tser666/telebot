@@ -369,6 +369,41 @@ function normalizeDocHref(href?: string) {
   return id ? { id, anchor: anchorPart ? `#${anchorPart}` : "" } : null;
 }
 
+function PluginContractBadges({
+  pluginKey,
+  events,
+  capabilities,
+}: {
+  pluginKey: string;
+  events: string[];
+  capabilities: string[];
+}) {
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      <MetaBadge tone="outline" title="插件声明自己会被哪些事件唤起">
+        触发入口 {events.length}
+      </MetaBadge>
+      {events.map((label) => (
+        <MetaBadge
+          key={`${pluginKey}-event-${label}`}
+          tone="outline"
+          className="border-sky-200/80 bg-sky-500/10 text-sky-700 dark:border-sky-300/25 dark:text-sky-300"
+        >
+          {label}
+        </MetaBadge>
+      ))}
+      <MetaBadge tone="outline" title="插件声明或推断出的运行能力">
+        能力 {capabilities.length}
+      </MetaBadge>
+      {capabilities.map((label) => (
+        <MetaBadge key={`${pluginKey}-cap-${label}`} tone="warn">
+          {label}
+        </MetaBadge>
+      ))}
+    </div>
+  );
+}
+
 // ── 顶层组件 ──────────────────────────────────────────────────────
 export function Extensions() {
   const nav = useNavigate();
@@ -1153,18 +1188,11 @@ function RemoteInstallCard() {
                                 <p className="truncate text-xs text-muted-foreground">{p.description}</p>
                               )}
                               <p className="mt-1 text-xs text-muted-foreground">{compactUsageText(p.usage)}</p>
-                              <div className="mt-2 flex flex-wrap gap-1.5">
-                                <MetaBadge tone="outline">触发入口 {p.event_subscriptions?.length ?? 0}</MetaBadge>
-                                {events.slice(0, 4).map((label) => (
-                                  <MetaBadge key={`${p.name}-event-${label}`}>{label}</MetaBadge>
-                                ))}
-                                {events.length > 4 ? <MetaBadge tone="outline">+{events.length - 4}</MetaBadge> : null}
-                                <MetaBadge tone="outline">能力 {capabilities.length}</MetaBadge>
-                                {capabilities.slice(0, 3).map((label) => (
-                                  <MetaBadge key={`${p.name}-cap-${label}`} tone="warn">{label}</MetaBadge>
-                                ))}
-                                {capabilities.length > 3 ? <MetaBadge tone="outline">+{capabilities.length - 3}</MetaBadge> : null}
-                              </div>
+                              <PluginContractBadges
+                                pluginKey={p.name}
+                                events={events}
+                                capabilities={capabilities}
+                              />
                               {risks.length > 0 ? (
                                 <div className="mt-2 space-y-1 text-xs text-destructive">
                                   {risks.slice(0, 2).map((risk) => (
@@ -1244,12 +1272,11 @@ function RemoteInstallCard() {
                       {risks.length > 0 ? <MetaBadge tone="danger">高风险能力</MetaBadge> : null}
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">{compactUsageText(plugin.usage)}</p>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      <MetaBadge tone="outline">触发入口 {plugin.event_subscriptions?.length ?? 0}</MetaBadge>
-                      {events.slice(0, 4).map((label) => <MetaBadge key={label}>{label}</MetaBadge>)}
-                      <MetaBadge tone="outline">能力 {capabilities.length}</MetaBadge>
-                      {capabilities.slice(0, 3).map((label) => <MetaBadge key={label} tone="warn">{label}</MetaBadge>)}
-                    </div>
+                    <PluginContractBadges
+                      pluginKey={plugin.name}
+                      events={events}
+                      capabilities={capabilities}
+                    />
                     {risks.length > 0 ? (
                       <div className="mt-2 space-y-1 text-xs text-destructive">
                         {risks.map((risk) => (
