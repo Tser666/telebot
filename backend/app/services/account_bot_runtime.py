@@ -2741,7 +2741,10 @@ async def _select_transfer_notice_rule(
             continue
         if not _rule_matches_incoming_trigger(rule, incoming):
             continue
-        if not _rule_amount_matches(rule, parsed_amount):
+        has_active_session = bool(
+            await _list_interaction_sessions_for_rule(incoming.account_id, rule, incoming.chat_id)
+        )
+        if not has_active_session and not _rule_amount_matches(rule, parsed_amount):
             continue
         if not await _is_interaction_rule_open(incoming.account_id, rule, incoming.chat_id):
             continue
