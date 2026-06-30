@@ -471,6 +471,8 @@ class InteractionDeliveryExecutor:
         placeholder_chat_id = self.incoming.chat_id
         send_via_options = action_send_via_options(action)
         original_replace_message_id = replace_message_id
+        replace_saved_key = action_save_message_id_key(action.get("replace_saved_message_id_key"))
+        replace_saved_message_id = await self._read_saved_message_id(replace_saved_key)
         edit_message_id = _int_or_none(action.get("edit_message_id"))
         delete_message_id = None
         can_edit_placeholder = (
@@ -512,6 +514,18 @@ class InteractionDeliveryExecutor:
             msg_id = delivery_message_id(result)
             if msg_id is not None:
                 await self.get_redis_client().set(save_key, str(msg_id), ex=7200)
+        if (
+            ok
+            and replace_saved_message_id is not None
+            and replace_saved_message_id != edit_message_id
+            and replace_saved_message_id != delivery_message_id(result)
+        ):
+            await self.delete_message(
+                replace_saved_message_id,
+                chat_id=placeholder_chat_id,
+                context=action.get("context") if isinstance(action.get("context"), dict) else None,
+                record=True,
+            )
         await record_action(
             action.get("context"),
             action,
@@ -532,6 +546,17 @@ class InteractionDeliveryExecutor:
                 }
             )
         return replace_message_id
+
+    async def _read_saved_message_id(self, key: str | None) -> int | None:
+        if not key:
+            return None
+        try:
+            raw = await self.get_redis_client().get(key)
+        except Exception:  # noqa: BLE001
+            return None
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", errors="ignore")
+        return _int_or_none(raw)
 
     async def _apply_edit_message(
         self,

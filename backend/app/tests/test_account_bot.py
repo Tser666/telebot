@@ -187,6 +187,47 @@ async def test_interaction_delivery_executor_sends_bot_message(monkeypatch) -> N
 
 
 @pytest.mark.asyncio
+async def test_interaction_delivery_send_replaces_saved_message_after_new_send(monkeypatch) -> None:
+    redis = _MemoryRedis()
+    redis.data["ten_half:join_notice:1:-100"] = "44"
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="123:token",
+        update_id=10,
+        user_id=20,
+        chat_id=-100,
+        message_id=30,
+        text="",
+    )
+    send_message = AsyncMock(return_value={"message_id": 55})
+    delete_message = AsyncMock()
+    monkeypatch.setattr(account_bot_service, "send_message", send_message)
+    monkeypatch.setattr(account_bot_service, "delete_message", delete_message)
+    executor = InteractionDeliveryExecutor(
+        incoming=incoming,
+        write_log=AsyncMock(),
+        run_worker_action=AsyncMock(),
+        log_context=account_bot_runtime._interaction_log_context,
+        trace_context=account_bot_runtime._interaction_trace_context,
+        get_redis_client=lambda: redis,
+    )
+
+    await executor.apply([
+        {
+            "type": "send_message",
+            "send_via": "interaction_bot",
+            "text": "新的加入通知",
+            "save_message_id_key": "ten_half:join_notice:1:-100",
+            "replace_saved_message_id_key": "ten_half:join_notice:1:-100",
+        }
+    ])
+
+    send_message.assert_awaited_once()
+    delete_message.assert_awaited_once_with("123:token", -100, 44)
+    assert redis.data["ten_half:join_notice:1:-100"] == "55"
+
+
+@pytest.mark.asyncio
 async def test_interaction_delivery_executor_routes_userbot_reply() -> None:
     incoming = account_bot_runtime.Incoming(
         account_id=1,
@@ -577,7 +618,14 @@ async def test_interaction_delivery_executor_deletes_placeholder_from_trigger_ch
 async def test_message_ops_buffers_standard_actions() -> None:
     ops = BufferedMessageOps()
 
-    await ops.send(channel="interaction_bot", chat_id=-100, text="题面", reply_markup={"inline_keyboard": []})
+    await ops.send(
+        channel="interaction_bot",
+        chat_id=-100,
+        text="题面",
+        reply_markup={"inline_keyboard": []},
+        save_message_id_key="demo:notice:1",
+        replace_saved_message_id_key="demo:notice:1",
+    )
     await ops.edit(channel="interaction_bot", chat_id=-100, message_id=41, text="新题面")
     await ops.answer_callback(callback_query_id="cb-1", text="收到")
     await ops.delete(message_id=42)
@@ -585,6 +633,8 @@ async def test_message_ops_buffers_standard_actions() -> None:
     assert [item["type"] for item in ops.actions] == ["send_message", "edit_message", "answer_callback", "delete_message"]
     assert ops.actions[0]["send_via"] == "interaction_bot"
     assert ops.actions[0]["reply_markup"] == {"inline_keyboard": []}
+    assert ops.actions[0]["save_message_id_key"] == "demo:notice:1"
+    assert ops.actions[0]["replace_saved_message_id_key"] == "demo:notice:1"
     assert ops.actions[1]["message_id"] == 41
     assert ops.actions[2]["callback_query_id"] == "cb-1"
 
@@ -1395,7 +1445,7 @@ def test_interaction_rule_uses_declared_installed_entry_session_scope(monkeypatc
     assert rule["daily_limit_per_user"] == 2
 
 
-def test_account_bot_interaction_rule_strips_rule_owned_module_config() -> None:
+def test_account_bot_interaction_rule_preserves_plugin_timeout_config() -> None:
     cfg = account_bot_service.normalize_transfer_notice_config(
         {
             "enabled": True,
@@ -1417,8 +1467,8 @@ def test_account_bot_interaction_rule_strips_rule_owned_module_config() -> None:
         }
     )
 
-    assert cfg["module_config"] == {"theme": "classic"}
-    assert cfg["rules"][0]["module_config"] == {"theme": "classic"}
+    assert cfg["module_config"] == {"timeout": 500, "theme": "classic"}
+    assert cfg["rules"][0]["module_config"] == {"timeout": 500, "theme": "classic"}
 
 
 def test_account_bot_transfer_notice_parser() -> None:
@@ -2732,6 +2782,52 @@ def test_module_config_bet_is_used_as_payment_amount() -> None:
     assert account_bot_runtime._rule_amount_matches(rule, 100) is True
     assert account_bot_runtime._rule_amount_matches(rule, 120) is True
     assert account_bot_runtime._rule_amount_matches(rule, 99) is False
+
+
+def test_interaction_module_payload_preserves_plugin_timeout_config(monkeypatch) -> None:
+    monkeypatch.setattr(
+        account_bot_service,
+        "plugin_declares_telegram_native_raw",
+        lambda *_args, **_kwargs: False,
+    )
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="bbot-token",
+        update_id=10,
+        user_id=20,
+        chat_id=-100123,
+        message_id=30,
+        text="开局",
+        display_name="AAA",
+    )
+    rule = {
+        "id": "ten-half-paid",
+        "name": "十点半",
+        "action": "module",
+        "module_key": "ten_half",
+        "module_action": "start_ten_half",
+        "module_prize": 888,
+        "valid_seconds": 600,
+        "module_config": {
+            "bet": 100,
+            "timeout": 45,
+            "lobby_timeout": 90,
+            "max_players": 4,
+        },
+    }
+
+    payload = account_bot_runtime._interaction_module_payload(
+        incoming,
+        rule,
+        None,
+        event_type="keyword",
+    )
+
+    assert payload["timeout"] == 45
+    assert payload["module_config"]["timeout"] == 45
+    assert payload["module_config"]["lobby_timeout"] == 90
+    assert payload["valid_seconds"] == 600
+    assert payload["prize"] == 888
 
 
 def test_declared_participant_policy_overrides_stale_saved_rule(monkeypatch) -> None:

@@ -78,7 +78,7 @@ FALLBACK_NO_PRIZE_MODULE_ENTRIES = {
 FALLBACK_SOLO_OWNER_MODULE_ENTRIES = {
     ("blackjack", "start_blackjack"),
 }
-RULE_CONTROLLED_MODULE_CONFIG_KEYS = {"prize", "timeout", "valid_seconds"}
+RULE_CONTROLLED_MODULE_CONFIG_KEYS = {"prize", "valid_seconds"}
 DEFAULT_MATH10_START_KEYWORDS = ["发十以内算数", "十以内算数", "开算数题"]
 
 ROLE_RANK = {

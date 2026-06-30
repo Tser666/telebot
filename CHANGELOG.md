@@ -20,6 +20,18 @@
 
 ## [Unreleased]
 
+## [0.44.2] — 2026-06-30 · patch（补丁版本） · 交互消息替换补丁
+
+### Added
+- `send_message` 标准动作新增 `replace_saved_message_id_key`，平台会在发送新消息并保存新消息 ID 后，按旧保存键删除上一条消息，适合滚动加入通知、倒计时提示等只保留最新一条的交互场景。
+- `ctx.messages.send(...)` 支持传入 `replace_saved_message_id_key`，插件无需手写 action dict 也能使用同一能力。
+
+### Fixed
+- 修复远程/已安装交互插件无法稳定读取上一条已保存消息 ID 时，“发送新提示后删除旧提示”不生效的问题。
+
+### Tests
+- 执行交互发送替换回归测试：`backend/.venv/bin/python -m pytest -q backend/app/tests/test_account_bot.py -k "save_message_id_key or send_replaces_saved_message"`。
+
 ## [0.44.1] — 2026-06-30 · patch（补丁版本） · 插件页与日志展示补丁
 
 ### Changed

@@ -700,6 +700,8 @@ class GuessNumberPlugin(Plugin):
 | `send_message` | `chat_id` | 可选；不填时发送到触发会话，填写时由平台按通道能力发送到指定会话 |
 | `send_message` | `send_via` / `channel` / `channel_selector` / `send_via_options` | 可选；可以是单通道，也可以是候选通道和回退顺序 |
 | `send_message` | `reply_markup` | 可选，Bot API inline keyboard；只会透传给 `interaction_bot`，`userbot_reply` 不承接按钮 |
+| `send_message` | `save_message_id_key` | 可选；发送成功后把本次 Telegram `message_id` 按 key 保存 2 小时，供后续编辑、删除或替换使用 |
+| `send_message` | `replace_saved_message_id_key` | 可选；发送新消息并保存新 `message_id` 后，读取该 key 原来的消息 ID 并删除旧消息，适合“只保留最新一条”的滚动通知 |
 | `send_photo` / `send_file` | `photo_base64` / `file_base64` | 按动作通道发送图片/文件字节，适合题图 |
 | `send_photo` / `send_file` | `filename`、`caption`、`reply_to_message_id` | 可选，文件名、说明文字、回复目标 |
 | `delete_message` | `message_id` | 删除对应 Bot 通道可操作的消息 |

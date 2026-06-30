@@ -29,6 +29,7 @@ class BufferedMessageOps:
         reply_to_message_id: int | None = None,
         reply_markup: dict[str, Any] | None = None,
         save_message_id_key: str | None = None,
+        replace_saved_message_id_key: str | None = None,
         pin: bool = False,
     ) -> dict[str, Any]:
         action: dict[str, Any] = {
@@ -42,6 +43,8 @@ class BufferedMessageOps:
             action["reply_markup"] = dict(reply_markup)
         if save_message_id_key:
             action["save_message_id_key"] = save_message_id_key
+        if replace_saved_message_id_key:
+            action["replace_saved_message_id_key"] = replace_saved_message_id_key
         if pin:
             action["pin"] = True
         self.actions.append(action)

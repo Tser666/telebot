@@ -152,7 +152,7 @@ const DEFAULT_INTERACTION_QUERY_COMMANDS = "。玩法\n。联动玩法";
 const DEFAULT_INTERACTION_QUERY_RESPONSE_TEMPLATE = "<b>当前可用联动玩法</b>\n{items}";
 const DEFAULT_INTERACTION_QUERY_ITEM_TEMPLATE = "{index}. <b>{name}</b>\n触发方式：{trigger}";
 const DEFAULT_INTERACTION_QUERY_EMPTY_MESSAGE = "当前群暂无开启中的联动玩法。";
-const RULE_CONTROLLED_MODULE_CONFIG_KEYS = new Set(["prize", "timeout", "valid_seconds"]);
+const RULE_CONTROLLED_MODULE_CONFIG_KEYS = new Set(["prize", "valid_seconds"]);
 const DEFAULT_TRANSFER_NOTICE_TEMPLATE = [
   '<pre><code class="language-转账成功">付款人：{payer_name}',
   "{payer_user_id_line}",
