@@ -284,6 +284,20 @@ def _parse_responses_sse(text: str) -> dict[str, Any]:
     last_response: dict[str, Any] | None = None
     error_payload: Any = None
 
+    def text_from_stream() -> str:
+        return (done_text or "".join(delta_parts)).strip()
+
+    def with_stream_text(response: dict[str, Any]) -> dict[str, Any]:
+        stream_text = text_from_stream()
+        if not stream_text:
+            return response
+        image_data, image_urls, output_text = _extract_response_image_outputs(response)
+        if output_text or image_data or image_urls:
+            return response
+        response = dict(response)
+        response["output_text"] = stream_text
+        return response
+
     for event_name, raw_data in events:
         if not raw_data or raw_data == "[DONE]":
             continue
@@ -303,7 +317,7 @@ def _parse_responses_sse(text: str) -> dict[str, Any]:
         if isinstance(response, dict):
             last_response = response
             if payload_type == "response.completed" or response.get("status") == "completed":
-                return response
+                return with_stream_text(response)
 
         if payload_type == "response.output_text.delta" and isinstance(payload.get("delta"), str):
             delta_parts.append(payload["delta"])
@@ -315,7 +329,7 @@ def _parse_responses_sse(text: str) -> dict[str, Any]:
         if output_text or image_data or image_urls:
             return last_response
     if delta_parts or done_text:
-        return {"output_text": "".join(delta_parts) or done_text}
+        return {"output_text": text_from_stream()}
     if error_payload is not None:
         raise ValueError(f"error event: {str(error_payload)[:200]}")
     raise ValueError("缺少 response.completed 或 output_text 增量事件")

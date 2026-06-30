@@ -847,6 +847,45 @@ async def test_responses_client_parses_sse_text_delta_without_completed_body() -
 
 
 @pytest.mark.asyncio
+async def test_responses_client_keeps_sse_delta_when_completed_body_has_no_text() -> None:
+    """Codex 反代可能把正文只放在 delta，completed body 只带状态和 usage。"""
+    from app.services.llm_client import ResponsesClient
+
+    cli = ResponsesClient(api_key="sk", base_url="https://codex.example.com/v1", model="gpt-5.5")
+
+    class _Resp:
+        status_code = 200
+        headers = {"content-type": "text/event-stream"}
+        text = (
+            "event: response.output_text.delta\n"
+            'data: {"type":"response.output_text.delta","delta":"hello"}\n'
+            "\n"
+            "event: response.output_text.delta\n"
+            'data: {"type":"response.output_text.delta","delta":" world"}\n'
+            "\n"
+            "event: response.completed\n"
+            'data: {"type":"response.completed","response":{"model":"gpt-5.5-codex",'
+            '"status":"completed","usage":{"input_tokens":7,"output_tokens":2}}}\n'
+            "\n"
+        )
+
+        @staticmethod
+        def json():
+            raise json.JSONDecodeError("Expecting value", "", 0)
+
+    fake = AsyncMock()
+    fake.__aenter__.return_value = fake
+    fake.post = AsyncMock(return_value=_Resp())
+    with patch("app.services.llm_client.httpx.AsyncClient", return_value=fake):
+        result = await cli.complete("sys", "user")
+
+    assert result.text == "hello world"
+    assert result.model == "gpt-5.5-codex"
+    assert result.input_tokens == 7
+    assert result.output_tokens == 2
+
+
+@pytest.mark.asyncio
 async def test_responses_client_retries_without_max_output_tokens_when_unsupported() -> None:
     """部分兼容站的 /responses 不支持 max_output_tokens，应自动用轻量 body 重试。"""
     from app.services.llm_client import ResponsesClient

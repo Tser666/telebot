@@ -20,6 +20,15 @@
 
 ## [Unreleased]
 
+## [0.44.13] — 2026-06-30 · patch（补丁版本） · Responses SSE 空文本补丁
+
+### Fixed
+- 修复 Codex/cockpit-tools 反代返回 Responses SSE 时，正文在 `response.output_text.delta` 中、而 `response.completed` 事件只携带状态和 token 用量时，`.ai` 命令能联通但最终回复为空的问题。
+- Responses SSE 解析现在会在 completed body 没有正文时保留前序文本增量，避免 Provider 测试、命令 AI 和插件 AI facade 拿到空结果。
+
+### Tests
+- 补充 Responses SSE “delta 有正文、completed 无正文”的回归测试，防止后续兼容改动再次丢失流式文本。
+
 ## [0.44.12] — 2026-06-30 · patch（补丁版本） · LLM Provider 测试超时补丁
 
 ### Fixed
