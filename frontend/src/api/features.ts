@@ -83,6 +83,32 @@ export interface PluginConfigActionResponse {
   result?: Record<string, unknown>;
 }
 
+export interface PluginConfigActionJobLogItem {
+  id: number;
+  ts: string;
+  level: string;
+  message: string;
+  detail?: Record<string, unknown> | null;
+}
+
+export interface PluginConfigActionJobStatus {
+  job_id: string;
+  account_id: number;
+  plugin_key: string;
+  action_key: string;
+  status: "queued" | "running" | "succeeded" | "failed" | string;
+  message?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+  result?: Record<string, unknown>;
+  config_patch?: Record<string, unknown>;
+  created_at?: string | null;
+  started_at?: string | null;
+  ended_at?: string | null;
+  updated_at?: string | null;
+  logs: PluginConfigActionJobLogItem[];
+}
+
 export async function runPluginConfigAction(
   aid: number,
   pluginKey: string,
@@ -92,6 +118,28 @@ export async function runPluginConfigAction(
   const { data } = await api.post<PluginConfigActionResponse>(
     `/api/accounts/${aid}/features/${pluginKey}/config/actions/${actionKey}`,
     payload,
+  );
+  return data;
+}
+
+export async function startPluginConfigActionJob(
+  aid: number,
+  pluginKey: string,
+  actionKey: string,
+  payload: PluginConfigActionPayload,
+): Promise<PluginConfigActionJobStatus> {
+  const { data } = await api.post<PluginConfigActionJobStatus>(
+    `/api/accounts/${aid}/features/${pluginKey}/config/actions/${actionKey}/jobs`,
+    payload,
+  );
+  return data;
+}
+
+export async function getPluginConfigActionJob(
+  jobId: string,
+): Promise<PluginConfigActionJobStatus> {
+  const { data } = await api.get<PluginConfigActionJobStatus>(
+    `/api/plugin-config-action-jobs/${jobId}`,
   );
   return data;
 }

@@ -1,17 +1,31 @@
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { createPortal } from "react-dom";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowLeft, Loader2, Save } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Bot,
+  CheckCircle2,
+  Clock3,
+  Loader2,
+  Minus,
+  Save,
+  X,
+  XCircle,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { getAccount, listAccountFeatures, toggleAccountFeature } from "@/api/accounts";
 import { listLLMProviders } from "@/api/commands";
 import {
+  getPluginConfigActionJob,
   getFeatureMatrix,
   getPluginGlobalConfig,
-  runPluginConfigAction,
   setPluginGlobalConfig,
+  startPluginConfigActionJob,
   updateAccountFeatureConfig,
+  type PluginConfigActionJobStatus,
 } from "@/api/features";
 import { getSystemSettings } from "@/api/system";
 import {
@@ -59,6 +73,8 @@ function isConfigSchema(schema: unknown): schema is ConfigSchema {
 function sameConfig(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
+
+const CONFIG_ACTION_TERMINAL_STATUSES = new Set(["succeeded", "failed"]);
 
 function normalizeConfigActions(rawActions: unknown[]): ConfigAction[] {
   const seen = new Set<string>();
@@ -151,6 +167,13 @@ export function GenericPluginConfigPage() {
   const [globalVals, setGlobalVals] = useState<Record<string, unknown>>({});
   const [accountVals, setAccountVals] = useState<Record<string, unknown>>({});
   const [dirty, setDirty] = useState(false);
+  const [activeActionJob, setActiveActionJob] = useState<{
+    jobId: string;
+    actionTitle: string;
+    minimized: boolean;
+    hidden: boolean;
+  } | null>(null);
+  const [finalizedActionJobs, setFinalizedActionJobs] = useState<Record<string, true>>({});
 
   useEffect(() => {
     if (!schema) return;
@@ -257,6 +280,38 @@ export function GenericPluginConfigPage() {
     onError: (err) => toast.error(getErrMsg(err)),
   });
 
+  const actionJobQ = useQuery({
+    queryKey: ["plugin-config-action-job", activeActionJob?.jobId],
+    queryFn: () => getPluginConfigActionJob(activeActionJob?.jobId ?? ""),
+    enabled: Boolean(activeActionJob?.jobId && !activeActionJob.hidden),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status && CONFIG_ACTION_TERMINAL_STATUSES.has(status) ? false : 2000;
+    },
+  });
+
+  useEffect(() => {
+    const job = actionJobQ.data;
+    if (!job || finalizedActionJobs[job.job_id]) return;
+    if (job.status === "succeeded") {
+      const patch = job.config_patch ?? {};
+      if (schema && Object.keys(patch).length > 0) {
+        mergeConfigPatchIntoForm(
+          patch,
+          schema.properties,
+          setGlobalVals,
+          setAccountVals,
+        );
+        setDirty(true);
+      }
+      setFinalizedActionJobs((prev) => ({ ...prev, [job.job_id]: true }));
+      toast.success(job.message || "配置动作已完成");
+    } else if (job.status === "failed") {
+      setFinalizedActionJobs((prev) => ({ ...prev, [job.job_id]: true }));
+      toast.error(job.error_message || job.message || "配置动作失败");
+    }
+  }, [actionJobQ.data, finalizedActionJobs, schema]);
+
   if (!aid) return <p>账号 ID 不合法</p>;
   if (!featureKey) return <p>功能 key 不合法</p>;
   if (matrixQ.isLoading || featuresQ.isLoading || accountQ.isLoading || globalConfigQ.isLoading) {
@@ -283,26 +338,17 @@ export function GenericPluginConfigPage() {
 
   async function handleConfigAction(action: ConfigAction, input: Record<string, unknown>) {
     if (!schema) return;
-    const response = await runPluginConfigAction(aid, featureKey, action.key, {
+    const response = await startPluginConfigActionJob(aid, featureKey, action.key, {
       input,
       config: { ...globalVals, ...accountVals },
     });
-    const patch = response.config_patch ?? {};
-    if (Object.keys(patch).length > 0) {
-      mergeConfigPatchIntoForm(
-        patch,
-        schema.properties,
-        setGlobalVals,
-        setAccountVals,
-      );
-      setDirty(true);
-    }
-    const message = response.toast || response.message || "配置动作已完成";
-    if (response.success === false) {
-      toast.error(message);
-    } else {
-      toast.success(message);
-    }
+    setActiveActionJob({
+      jobId: response.job_id,
+      actionTitle: action.title || action.key,
+      minimized: false,
+      hidden: false,
+    });
+    toast.success("配置动作已在后台开始执行");
   }
 
   return (
@@ -532,6 +578,19 @@ export function GenericPluginConfigPage() {
           </CardContent>
         </Card>
       ) : null}
+
+      {activeActionJob && !activeActionJob.hidden ? (
+        <ConfigActionJobWindow
+          title={activeActionJob.actionTitle}
+          job={actionJobQ.data}
+          loading={actionJobQ.isLoading || actionJobQ.isFetching}
+          minimized={activeActionJob.minimized}
+          onOpenLogs={() => nav(`/logs?source=plugin&account_id=${aid}&plugin_key=${encodeURIComponent(featureKey)}`)}
+          onMinimize={() => setActiveActionJob((prev) => prev ? { ...prev, minimized: true } : prev)}
+          onRestore={() => setActiveActionJob((prev) => prev ? { ...prev, minimized: false } : prev)}
+          onClose={() => setActiveActionJob((prev) => prev ? { ...prev, hidden: true } : prev)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -564,6 +623,192 @@ function ContractSummaryBlock({
       )}
     </div>
   );
+}
+
+function ConfigActionJobWindow({
+  title,
+  job,
+  loading,
+  minimized,
+  onOpenLogs,
+  onMinimize,
+  onRestore,
+  onClose,
+}: {
+  title: string;
+  job?: PluginConfigActionJobStatus;
+  loading: boolean;
+  minimized: boolean;
+  onOpenLogs: () => void;
+  onMinimize: () => void;
+  onRestore: () => void;
+  onClose: () => void;
+}) {
+  const status = job?.status ?? "queued";
+  const statusText = configActionJobStatusText(status);
+  const terminal = CONFIG_ACTION_TERMINAL_STATUSES.has(status);
+  const logs = job?.logs ?? [];
+  if (typeof document === "undefined") return null;
+  if (minimized) {
+    return createPortal(
+      <div className="fixed bottom-4 right-4 z-50 w-[min(92vw,360px)] rounded-md border bg-background shadow-lg">
+        <button
+          type="button"
+          className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left"
+          onClick={onRestore}
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            {terminal ? jobStatusIcon(status) : <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />}
+            <span className="min-w-0 truncate text-sm font-medium">{title}</span>
+          </span>
+          <span className="shrink-0 text-xs text-muted-foreground">{statusText}</span>
+        </button>
+      </div>,
+      document.body,
+    );
+  }
+
+  return createPortal(
+    <div className="fixed bottom-4 right-4 z-50 flex h-[min(72vh,620px)] w-[min(94vw,440px)] flex-col overflow-hidden rounded-md border bg-background shadow-xl">
+      <div className="flex items-start justify-between gap-3 border-b px-3 py-3">
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            <Bot className="h-4 w-4 shrink-0 text-primary" />
+            <div className="min-w-0 truncate text-sm font-semibold">{title}</div>
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <Badge variant={jobStatusBadgeVariant(status)}>{statusText}</Badge>
+            {job?.job_id ? <code className="max-w-full truncate">{job.job_id}</code> : null}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={onMinimize} aria-label="最小化">
+            <Minus className="h-4 w-4" />
+          </Button>
+          <Button type="button" variant="ghost" size="icon" className="h-8 w-8" onClick={onClose} aria-label="关闭">
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-muted/20 px-3 py-3">
+        <ConfigActionChatLine
+          level="info"
+          message={job?.message || "后台任务已创建，正在等待状态更新"}
+          ts={job?.updated_at || job?.created_at}
+          active={!terminal}
+        />
+        {logs.map((item) => (
+          <ConfigActionChatLine
+            key={item.id}
+            level={item.level}
+            message={item.message}
+            ts={item.ts}
+            detail={item.detail}
+          />
+        ))}
+        {loading && !terminal ? (
+          <div className="flex items-center gap-2 px-1 text-xs text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            正在刷新进度
+          </div>
+        ) : null}
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t bg-background px-3 py-2">
+        <div className="text-xs text-muted-foreground">
+          关闭窗口不会停止后台执行。
+        </div>
+        <Button type="button" variant="outline" size="sm" onClick={onOpenLogs}>
+          查看日志
+        </Button>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+function ConfigActionChatLine({
+  level,
+  message,
+  ts,
+  detail,
+  active = false,
+}: {
+  level: string;
+  message: string;
+  ts?: string | null;
+  detail?: Record<string, unknown> | null;
+  active?: boolean;
+}) {
+  const detailText = configActionLogDetailText(detail);
+  return (
+    <div className="flex gap-2">
+      <div className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border bg-background">
+        {active ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" /> : logLevelIcon(level)}
+      </div>
+      <div className="min-w-0 flex-1 rounded-md border bg-background px-3 py-2">
+        <div className="break-words text-sm leading-5">{message || "状态更新"}</div>
+        {detailText ? (
+          <div className="mt-1 break-words font-mono text-[11px] leading-4 text-muted-foreground">
+            {detailText}
+          </div>
+        ) : null}
+        {ts ? <div className="mt-1 text-[11px] text-muted-foreground">{formatActionJobTime(ts)}</div> : null}
+      </div>
+    </div>
+  );
+}
+
+function configActionJobStatusText(status: string): string {
+  if (status === "queued") return "排队中";
+  if (status === "running") return "执行中";
+  if (status === "succeeded") return "已完成";
+  if (status === "failed") return "失败";
+  return status || "未知";
+}
+
+function jobStatusBadgeVariant(status: string): "default" | "secondary" | "destructive" | "outline" | "success" {
+  if (status === "succeeded") return "success";
+  if (status === "failed") return "destructive";
+  if (status === "running") return "default";
+  return "secondary";
+}
+
+function jobStatusIcon(status: string) {
+  if (status === "succeeded") return <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />;
+  if (status === "failed") return <XCircle className="h-4 w-4 shrink-0 text-destructive" />;
+  return <Clock3 className="h-4 w-4 shrink-0 text-muted-foreground" />;
+}
+
+function logLevelIcon(level: string) {
+  const normalized = String(level || "").toLowerCase();
+  if (normalized === "error") return <XCircle className="h-3.5 w-3.5 text-destructive" />;
+  if (normalized === "warn" || normalized === "warning") return <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />;
+  return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />;
+}
+
+function configActionLogDetailText(detail?: Record<string, unknown> | null): string {
+  if (!detail) return "";
+  const hidden = new Set(["plugin_key", "action_key", "config_action_job_id", "component"]);
+  const parts = Object.entries(detail)
+    .filter(([key, value]) => !hidden.has(key) && value !== undefined && value !== null && value !== "")
+    .map(([key, value]) => `${key}=${formatDetailValue(value)}`);
+  return parts.slice(0, 6).join("  ");
+}
+
+function formatDetailValue(value: unknown): string {
+  if (typeof value === "string") return value.length > 80 ? `${value.slice(0, 79)}…` : value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function formatActionJobTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 interface UsageGuide {

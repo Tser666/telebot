@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 from urllib.parse import quote
 
@@ -62,6 +62,7 @@ async def run_plugin_config_action(
     current_config: Mapping[str, Any] | None = None,
     action_input: Mapping[str, Any] | None = None,
     installed_plugin: InstalledPlugin | Mapping[str, Any] | None = None,
+    log: Callable[..., Awaitable[None]] | None = None,
 ) -> dict[str, Any]:
     """Run a declared plugin config action and normalize its result."""
 
@@ -76,7 +77,7 @@ async def run_plugin_config_action(
         account_id=account.id,
         feature_key=feature.key,
         config=runtime_config,
-        log=None,
+        log=log,
         http=await _build_http_facade(db, account, feature.key, manifest, runtime_config),
         ai=_build_ai_facade(account.id, feature.key, manifest),
         account_proxy_url=await _account_proxy_url(db, account),

@@ -6,7 +6,15 @@ from .command import AccountCommandLink, CommandTemplate, LLMProvider
 from .feature import AccountFeature, Feature
 from .ignored_peer import IgnoredPeer
 from .llm_usage import LLMUsage
-from .log import AuditLog, EventAction, EventSpan, EventTrace, PluginRuntimeStatus, RuntimeLog
+from .log import (
+    AuditLog,
+    EventAction,
+    EventSpan,
+    EventTrace,
+    PluginConfigActionJob,
+    PluginRuntimeStatus,
+    RuntimeLog,
+)
 from .notify import NotifyBot
 from .plugin import InstalledPlugin, PluginInstall
 from .plugin_global_config import PluginGlobalConfig
@@ -38,6 +46,7 @@ __all__ = [
     "NotifyBot",
     "PluginInstall",
     "PluginGlobalConfig",
+    "PluginConfigActionJob",
     "PluginRepo",
     "PluginRuntimeStatus",
     "Proxy",

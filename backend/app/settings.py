@@ -107,7 +107,7 @@ class Settings(BaseSettings):
     llm_max_output_tokens: int = 0
     # 第三方插件 ctx.ai 的额外保护上限；插件只能请求文本补全，且输出/超时默认收紧。
     plugin_ai_max_output_tokens: int = 4096
-    plugin_ai_timeout_seconds: int = 60
+    plugin_ai_timeout_seconds: int = 600
 
     # ── 启动期自动迁移 ────────────────────────────────────────────
     # True = backend 启动时自动 ``alembic upgrade head``，把 DB schema 升到代码期望的版本

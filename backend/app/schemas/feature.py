@@ -219,3 +219,33 @@ class PluginConfigActionResponse(BaseModel):
     toast: str | None = None
     config_patch: dict[str, Any] = Field(default_factory=dict)
     result: dict[str, Any] = Field(default_factory=dict)
+
+
+class PluginConfigActionJobLogItem(BaseModel):
+    """插件配置动作后台任务的一条过程日志。"""
+
+    id: int
+    ts: Any
+    level: str
+    message: str
+    detail: dict[str, Any] | None = None
+
+
+class PluginConfigActionJobResponse(BaseModel):
+    """插件配置动作后台任务状态。"""
+
+    job_id: str
+    account_id: int
+    plugin_key: str
+    action_key: str
+    status: str
+    message: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    result: dict[str, Any] = Field(default_factory=dict)
+    config_patch: dict[str, Any] = Field(default_factory=dict)
+    created_at: Any | None = None
+    started_at: Any | None = None
+    ended_at: Any | None = None
+    updated_at: Any | None = None
+    logs: list[PluginConfigActionJobLogItem] = Field(default_factory=list)

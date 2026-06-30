@@ -64,6 +64,38 @@ class RuntimeLog(Base):
     )
 
 
+class PluginConfigActionJob(Base):
+    """插件配置页后台动作任务。"""
+
+    __tablename__ = "plugin_config_action_job"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    job_id: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    account_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("account.id", ondelete="CASCADE"), nullable=False
+    )
+    plugin_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    action_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    input_preview: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    config_patch: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_plugin_config_action_job_account_created", "account_id", "created_at"),
+        Index("ix_plugin_config_action_job_plugin_status_created", "plugin_key", "status", "created_at"),
+    )
+
+
 class EventTrace(Base):
     """一条 Telegram 事件在 TelePilot 内的完整链路。"""
 

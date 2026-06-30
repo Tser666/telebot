@@ -28,7 +28,7 @@ from ...settings import settings
 ProviderLoader = Callable[[], Awaitable[Mapping[int, LLMProviderDTO]]]
 
 DEFAULT_PLUGIN_AI_MAX_TOKENS = 4096
-DEFAULT_PLUGIN_AI_TIMEOUT_SECONDS = 60
+DEFAULT_PLUGIN_AI_TIMEOUT_SECONDS = 600
 _SAFE_MODEL_KEYS = frozenset(
     {
         "id",
