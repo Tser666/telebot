@@ -2000,6 +2000,68 @@ async def test_plugin_command_ctx_client_send_message_records_action(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_plugin_command_ctx_messages_apply_records_trace(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    rule = {
+        "id": "ten-half-paid",
+        "name": "十点半",
+        "action": "module",
+        "module_key": "ten_half",
+        "module_action": "start_ten_half",
+        "module_session_scope": "chat",
+        "participant_policy": "paid_pool",
+        "chat_ids": [-100123],
+        "valid_seconds": 600,
+    }
+    record_action = AsyncMock()
+    monkeypatch.setattr(loader_mod, "record_action", record_action)
+    monkeypatch.setattr(loader_mod, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(
+        loader_mod.account_bot_service,
+        "get_transfer_notice_config",
+        AsyncMock(return_value={"enabled": True, "rules": [rule]}),
+    )
+    state = loader_mod._AccountState(1)
+    state.redis = _FakeRedis()
+    ctx = PluginContext(
+        account_id=1,
+        feature_key="ten_half",
+        client=MagicMock(),
+        messages=loader_mod._LiveMessageOps(state, plugin_key="ten_half"),
+    )
+
+    async def _handler(client, event, args, account_id, ctx):  # noqa: ANN001
+        await ctx.messages.apply(
+            [
+                {
+                    "type": "start_session",
+                    "chat_id": -100123,
+                    "entry_key": "start_ten_half",
+                    "started_by_user_id": 999,
+                }
+            ],
+            entry_key="start_ten_half",
+        )
+
+    wrapped = loader_mod._wrap_cmd(_handler, ctx)
+    event = SimpleNamespace(trace_id="evt_command_session_trace", chat_id=-100123, message=SimpleNamespace(id=7))
+
+    await wrapped(ctx.client, event, ["100"], 1)
+
+    record_action.assert_awaited_once()
+    assert record_action.await_args.args[0]["trace_id"] == "evt_command_session_trace"
+    assert record_action.await_args.args[1]["type"] == "start_session"
+    assert record_action.await_args.args[1]["context"]["entry_key"] == "start_ten_half"
+    assert record_action.await_args.kwargs["actual_send_via"] == "interaction_session"
+
+
+@pytest.mark.asyncio
 async def test_message_edited_dispatches_dedicated_hook(monkeypatch) -> None:
     from app.worker.plugins.base import _REGISTRY, register
 

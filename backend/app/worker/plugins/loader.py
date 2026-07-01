@@ -2147,28 +2147,54 @@ class _LiveMessageOps:
     常驻上下文使用本 facade，供插件命令和后台任务继续走平台受控通道。
     """
 
-    def __init__(self, state: _AccountState, *, plugin_key: str, entry_key: str = "") -> None:
+    def __init__(
+        self,
+        state: _AccountState,
+        *,
+        plugin_key: str,
+        entry_key: str = "",
+        trace: Any | None = None,
+    ) -> None:
         self._state = state
         self._plugin_key = plugin_key
         self._entry_key = entry_key
+        self._trace = trace
         self.actions: list[dict[str, Any]] = []
 
     async def apply(self, actions: list[dict[str, Any]], *, entry_key: str | None = None) -> None:
         normalized = _normalize_interaction_actions(actions)
         if not normalized:
             return
+        effective_entry_key = entry_key if entry_key is not None else self._entry_key
+        context = trace_log_context(
+            self._trace,
+            plugin_key=self._plugin_key,
+            entry_key=effective_entry_key,
+        )
+        for action in normalized:
+            action.setdefault("context", dict(context))
         self.actions.extend(normalized)
         redis = self._state.redis or get_redis()
         event = SimpleNamespace(chat_id=None)
-        await _apply_userbot_event_bus_actions(
+        failed = await _apply_userbot_event_bus_actions(
             self._state,
-            None,
+            self._trace,
             event,
             plugin_key=self._plugin_key,
-            entry_key=entry_key if entry_key is not None else self._entry_key,
+            entry_key=effective_entry_key,
             actions=normalized,
             redis=redis,
         )
+        if failed:
+            await _log(
+                redis,
+                self._state.account_id,
+                "warn",
+                "插件消息动作部分执行失败，请在消息链路动作记录中查看具体原因。",
+                source="plugin",
+                action_count=len(normalized),
+                **context,
+            )
 
     async def send(self, **kwargs: Any) -> dict[str, Any]:
         from .message_ops import BufferedMessageOps
@@ -2850,6 +2876,21 @@ def _wrap_cmd(fn, ctx: PluginContext):
     async def w(client, event, args, account_id):  # noqa: ANN001
         trace_id = str(getattr(event, "trace_id", "") or "").strip() or None
         previous_client = ctx.client
+        previous_log = ctx.log
+        previous_messages = ctx.messages
+        if isinstance(previous_messages, _LiveMessageOps):
+            ctx.messages = _LiveMessageOps(
+                previous_messages._state,  # noqa: SLF001
+                plugin_key=ctx.feature_key,
+                trace=trace_id,
+            )
+        if previous_log is not None and trace_id:
+            async def _trace_log(level: str, message: str, **detail: Any) -> None:
+                detail.setdefault("trace_id", trace_id)
+                detail.setdefault("plugin_key", ctx.feature_key)
+                await previous_log(level, message, **detail)
+
+            ctx.log = _trace_log
         ctx.client = _trace_plugin_client(
             previous_client if previous_client is not None else client,
             trace_id,
@@ -2861,6 +2902,8 @@ def _wrap_cmd(fn, ctx: PluginContext):
             await fn(ctx.client if ctx.client is not None else client, plugin_event, args, account_id, ctx)
         finally:
             ctx.client = previous_client
+            ctx.log = previous_log
+            ctx.messages = previous_messages
 
     return w
 

@@ -20,6 +20,13 @@
 
 ## [Unreleased]
 
+## [0.46.1] — 2026-07-01 · patch（补丁版本） · 插件命令 MessageOps 追踪补丁
+
+### Fixed
+- 修复 userbot 插件命令中通过 `ctx.messages.apply` 发出的 `start_session`、发送、编辑等标准动作缺少当前命令 trace 的问题；现在这些动作会写入消息链路的动作记录，排查“命令已启动但后续付款/按钮无反应”时可以直接看到动作成功或失败原因。
+- 当插件命令里的 MessageOps 动作部分执行失败时，运行日志会写入中文告警并关联 `trace_id`、`plugin_key` 和 `entry_key`，避免后台动作失败被静默吞掉。
+- 补充回归测试，覆盖插件命令通过 MessageOps 写入交互会话时能记录 trace 与 `interaction_session` 动作。
+
 ## [0.46.0] — 2026-07-01 · minor（次版本） · 插件低延时直通模式
 
 ### Added
