@@ -3344,6 +3344,11 @@ def _event_bus_payment_plugin_payload(
     actor = _interaction_actor_envelope(incoming, data)
     player = _interaction_player_envelope(incoming, data, event_type="payment_confirmed")
     source_actor = _interaction_source_actor_envelope(incoming, data)
+    existing_source_actor = event.get("source_actor")
+    if isinstance(existing_source_actor, dict):
+        source_actor = {**existing_source_actor, **source_actor}
+        if existing_source_actor.get("type") is not None:
+            source_actor["type"] = existing_source_actor["type"]
     payer_user_id = _int_or_none(player.get("user_id"))
     payer_name = str(player.get("display_name") or data.get("payer_name") or "").strip()
     amount = _int_or_none(data.get("amount"))

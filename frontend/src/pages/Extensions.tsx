@@ -619,6 +619,7 @@ function RemoteUpdateSettingsCard() {
 
 function OfficialPluginsCard() {
   const qc = useQueryClient();
+  const [expanded, setExpanded] = useState(false);
   const officialQ = useQuery({ queryKey: OFFICIAL_PLUGINS_QK, queryFn: fetchOfficialPlugins });
   const installOfficialMut = useMutation({
     mutationFn: (name: string) => installOfficialPlugin(name),
@@ -655,9 +656,24 @@ function OfficialPluginsCard() {
           title="推荐插件"
           description="这些条目来自 TelePilot 预置推荐源，只保留首次部署建议安装的自动回复和自动复读；更多插件请添加自己的 Git 插件仓库。"
           meta={<SignalPill tone="neutral" label="推荐项" value={items.length} className="h-8" />}
+          actions={(
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 gap-1.5"
+              onClick={() => setExpanded((value) => !value)}
+              aria-expanded={expanded}
+              aria-controls="official-recommended-plugins"
+            >
+              <ChevronDown className={cn("h-4 w-4 transition-transform", expanded && "rotate-180")} />
+              {expanded ? "收起" : "展开"}
+            </Button>
+          )}
         />
       </CardHeader>
-      <CardContent>
+      {expanded ? (
+      <CardContent id="official-recommended-plugins">
         {officialQ.isLoading ? (
           <div className="flex h-16 items-center justify-center">
             <Spinner className="text-primary" />
@@ -722,6 +738,7 @@ function OfficialPluginsCard() {
           </div>
         )}
       </CardContent>
+      ) : null}
     </Card>
   );
 }

@@ -476,6 +476,17 @@ class TestSandboxClientSecurity:
         resolver = SandboxClient(FakeClient(), ["resolve_entity"], plugin_key="demo")
         assert callable(resolver.get_entity)
 
+    def test_sandbox_forward_messages_uses_forward_message_permission(self):
+        """原生转发使用 Telethon 复数方法，但 manifest 能力名保持 forward_message。"""
+        from app.worker.plugins.sandbox import SandboxClient
+
+        class FakeClient:
+            def forward_messages(self, *args, **kwargs):
+                return None
+
+        sandbox = SandboxClient(FakeClient(), ["forward_message"], plugin_key="demo")
+        assert callable(sandbox.forward_messages)
+
     def test_sandbox_blocks_undelared_attrs(self):
         """未声明的属性访问必须被拒绝。"""
         sandbox = self._make_sandbox()

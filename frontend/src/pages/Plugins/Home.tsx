@@ -33,6 +33,7 @@ import { PageHeader, PageShell } from "@/components/layout/PageScaffold";
 import { Spinner } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { MetaBadge } from "@/components/ui/meta-badge";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   SectionHeader,
   SignalPill,
@@ -193,6 +194,17 @@ export function PluginsHome() {
   const [guideExpanded, setGuideExpanded] = useState(false);
   const [aiPanelExpanded, setAiPanelExpanded] = useState(false);
   const guideActive = searchParams.get("guide") === "1";
+  const quickNavTargets = useMemo<Record<string, string>>(
+    () => ({
+      templates: "/plugins/templates",
+      scheduler: "/plugins/scheduler",
+      whitelist: selectedAid
+        ? `/plugins/auto-command-whitelist?aid=${selectedAid}`
+        : "/plugins/auto-command-whitelist",
+      manage: "/plugins/manage?tab=plugins",
+    }),
+    [selectedAid],
+  );
   const [bannerVisible, setBannerVisible] = useState(() => {
     if (typeof window === "undefined") return false;
     return localStorage.getItem(DANGEROUS_CMD_BANNER_KEY) !== "1";
@@ -387,77 +399,34 @@ export function PluginsHome() {
 
       <Card>
         <CardContent className="space-y-4 !pt-5">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <Button
-              variant="outline"
-              className={`h-full min-h-[96px] justify-start whitespace-normal px-4 py-3 text-left ${
-                guideActive ? "siri-glow" : ""
-              }`}
-              onClick={() => nav("/plugins/templates")}
+          <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
+            <Tabs
+              className="w-full sm:w-auto"
+              value="manage"
+              onValueChange={(value) => {
+                const target = quickNavTargets[value];
+                if (target) nav(target);
+              }}
             >
-              <span>
-                <span className="flex items-center gap-2 font-medium">
-                  <FileText className="h-4 w-4 text-primary" />
+              <TabsList>
+                <TabsTrigger value="templates" className={`gap-1.5 ${guideActive ? "siri-glow" : ""}`}>
+                  <FileText className="h-4 w-4" />
                   指令模板
-                </span>
-                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                  先把常用回复、转发、AI 指令整理成一套模板，再按账号开启复用。
-                </span>
-              </span>
-            </Button>
-            <Button
-              variant="outline"
-              className="h-full min-h-[96px] justify-start whitespace-normal px-4 py-3 text-left"
-              onClick={() => nav("/plugins/scheduler")}
-            >
-              <span>
-                <span className="flex items-center gap-2 font-medium">
-                  <CalendarClock className="h-4 w-4 text-primary" />
+                </TabsTrigger>
+                <TabsTrigger value="scheduler" className="gap-1.5">
+                  <CalendarClock className="h-4 w-4" />
                   定时任务
-                </span>
-                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                  按账号定时发消息、跑指令或调用 AI 模型，适合固定周期的自动动作。
-                </span>
-              </span>
-            </Button>
-            <Button
-              variant="outline"
-              className="h-full min-h-[96px] justify-start whitespace-normal px-4 py-3 text-left"
-              onClick={() =>
-                nav(
-                  selectedAid
-                    ? `/plugins/auto-command-whitelist?aid=${selectedAid}`
-                    : "/plugins/auto-command-whitelist",
-                )
-              }
-            >
-              <span>
-                <span className="flex items-center gap-2 font-medium">
-                  <ShieldCheck className="h-4 w-4 text-primary" />
+                </TabsTrigger>
+                <TabsTrigger value="whitelist" className="gap-1.5">
+                  <ShieldCheck className="h-4 w-4" />
                   自动指令白名单
-                </span>
-                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                  控制定时任务和自动动作能触发哪些指令，避免误执行高风险操作。
-                </span>
-              </span>
-            </Button>
-            <Button
-              variant="outline"
-              className={`h-full min-h-[96px] justify-start whitespace-normal border-primary/45 bg-primary/5 px-4 py-3 text-left shadow-md shadow-primary/10 hover:border-primary/70 hover:bg-primary/10 ${
-                guideActive ? "siri-glow" : ""
-              }`}
-              onClick={() => nav("/plugins/manage?tab=plugins")}
-            >
-              <span>
-                <span className="flex items-center gap-2 font-medium">
-                  <PackagePlus className="h-4 w-4 text-primary" />
+                </TabsTrigger>
+                <TabsTrigger value="manage" className={`gap-1.5 ${guideActive ? "siri-glow" : ""}`}>
+                  <PackagePlus className="h-4 w-4" />
                   插件管理
-                </span>
-                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                  添加 Git 仓库，安装、更新和卸载插件；完成后回到本页按账号启用和配置。
-                </span>
-              </span>
-            </Button>
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
           </div>
           {(settingsQ.data?.ai_enabled ?? false) ? (
             <div className="rounded-lg border px-4 py-3">

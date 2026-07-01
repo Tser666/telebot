@@ -7,10 +7,8 @@ import {
   ArrowUp,
   Bell,
   Bot,
-  Braces,
   ChevronRight,
   Copy,
-  FileJson,
   KeyRound,
   Loader2,
   Plus,
@@ -103,21 +101,6 @@ function localizeBotRuntimeError(message: string): string {
     return "交互 Bot polling 冲突：同一个 Bbot token 正在被另一个实例监听。请确认它没有被其他账号、本地/Docker/VPS 中的另一套 TelePilot，或其他程序同时使用。";
   }
   return message;
-}
-
-function formatDebugJson(value: unknown): string {
-  try {
-    return JSON.stringify(value ?? {}, null, 2);
-  } catch {
-    return String(value ?? "");
-  }
-}
-
-function debugStageLabel(stage?: string | null): string {
-  if (stage === "payload_built") return "已下发事件";
-  if (stage === "plugin_error") return "插件失败";
-  if (stage === "actions_guarded") return "动作已处理";
-  return stage || "暂无事件";
 }
 
 const ROLE_META: Record<AccountBotRole, { label: string; desc: string }> = {
@@ -1815,6 +1798,8 @@ export function BotTab({
     notify_enabled: true,
     enabled: true,
   });
+  const [interactionIdentityExpanded, setInteractionIdentityExpanded] = useState(() => !isInteractionCenter);
+  const [interactionAdvancedExpanded, setInteractionAdvancedExpanded] = useState(() => !isInteractionCenter);
 
   const botQ = useQuery({
     queryKey: ["account", aid, "bot"],
@@ -2417,71 +2402,6 @@ export function BotTab({
     </div>
   );
 
-  const debug = interactionQ.data?.interaction_debug;
-  const debugWarnings = debug?.warnings ?? [];
-  const hasDebugSnapshot = Boolean(debug?.stage || debug?.error || Object.keys(debug?.payload ?? {}).length);
-
-  const interactionDebugContent = isInteractionCenter ? (
-    <Card className="order-1">
-      <CardHeader className="pb-3">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <FileJson className="h-4 w-4" />
-              事件与动作调试
-            </CardTitle>
-            <CardDescription>
-              最近一次插件事件信封、插件动作、平台处理结果和契约告警。
-            </CardDescription>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Badge variant={hasDebugSnapshot ? "secondary" : "outline"}>
-              {debugStageLabel(debug?.stage)}
-            </Badge>
-            {debugWarnings.length > 0 ? (
-              <Badge variant="destructive">告警 {debugWarnings.length}</Badge>
-            ) : null}
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className="grid gap-3 xl:grid-cols-3">
-        <div className="min-w-0 rounded-md border bg-muted/20 p-3">
-          <div className="mb-2 flex items-center gap-2 text-sm font-medium">
-            <Braces className="h-4 w-4" />
-            Payload
-          </div>
-          <pre className="max-h-72 overflow-auto rounded bg-background p-2 text-xs leading-5">
-            {formatDebugJson(debug?.payload ?? {})}
-          </pre>
-        </div>
-        <div className="min-w-0 rounded-md border bg-muted/20 p-3">
-          <div className="mb-2 flex items-center gap-2 text-sm font-medium">
-            <Braces className="h-4 w-4" />
-            Actions
-          </div>
-          <pre className="max-h-72 overflow-auto rounded bg-background p-2 text-xs leading-5">
-            {formatDebugJson({
-              returned: debug?.actions ?? [],
-              delivered: debug?.guarded_actions ?? [],
-            })}
-          </pre>
-        </div>
-        <div className="min-w-0 rounded-md border bg-muted/20 p-3">
-          <div className="mb-2 flex items-center gap-2 text-sm font-medium">
-            <ShieldCheck className="h-4 w-4" />
-            告警与失败
-          </div>
-          <pre className="max-h-72 overflow-auto rounded bg-background p-2 text-xs leading-5">
-            {formatDebugJson({
-              error: debug?.error ?? null,
-              warnings: debugWarnings,
-            })}
-          </pre>
-        </div>
-      </CardContent>
-    </Card>
-  ) : null;
-
   const floatingInteractionSaveButton = isInteractionCenter && typeof document !== "undefined"
     ? createPortal(
         <div className="pointer-events-none fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] right-4 z-[55] flex justify-end sm:bottom-6 sm:right-8">
@@ -2510,7 +2430,6 @@ export function BotTab({
     <div className={cn(isInteractionCenter ? "space-y-4" : "space-y-6")}>
       {floatingInteractionSaveButton}
       {isInteractionCenter ? null : interactionStatus}
-      {interactionDebugContent}
       <Card className={cn(isInteractionCenter && "border-0 bg-transparent shadow-none")}>
         {isInteractionCenter ? null : (
         <CardHeader>
@@ -2649,10 +2568,30 @@ export function BotTab({
                     <Switch checked={transferEnabled} onCheckedChange={setTransferEnabled} />
                   </label>
                 ) : null}
+                {isInteractionCenter ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8 gap-1.5"
+                    onClick={() => setInteractionIdentityExpanded((value) => !value)}
+                    aria-expanded={interactionIdentityExpanded}
+                    aria-controls="interaction-identity-config"
+                  >
+                    <ChevronRight
+                      className={cn(
+                        "h-4 w-4 transition-transform",
+                        interactionIdentityExpanded && "rotate-90",
+                      )}
+                    />
+                    {interactionIdentityExpanded ? "收起" : "展开"}
+                  </Button>
+                ) : null}
               </div>
             </div>
 
-            <div className="grid gap-3 2xl:grid-cols-2">
+            {(!isInteractionCenter || interactionIdentityExpanded) ? (
+            <div id="interaction-identity-config" className="grid gap-3 2xl:grid-cols-2">
               <div className="space-y-3 rounded-md border bg-muted/20 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
@@ -2774,6 +2713,7 @@ export function BotTab({
                 </div>
               </div>
             </div>
+            ) : null}
           </section>
 
           <section className={cn("space-y-3 rounded-lg border p-3 sm:p-4", isInteractionCenter && "order-1")}>
@@ -3133,67 +3073,92 @@ export function BotTab({
                   这里放测试通知模板和保存入口，不影响现有保存逻辑。
                 </div>
               </div>
-              <Badge variant={hasTransferToken || transferBotToken.trim() ? "secondary" : "outline"}>
-                {hasTransferToken || transferBotToken.trim() ? "通知模板可联调" : "模板可先预设"}
-              </Badge>
-            </div>
-            <div className="space-y-1.5">
-              <Label>测试通知模板</Label>
-              <Textarea
-                rows={5}
-                placeholder={DEFAULT_TRANSFER_NOTICE_TEMPLATE}
-                value={transferNoticeTemplate}
-                onChange={(e) => setTransferNoticeTemplate(e.target.value)}
-              />
-              <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
-                <span><code>{"{payer_name}"}</code>：付款人显示名</span>
-                <span><code>{"{payer_user_id}"}</code>：付款人用户 ID</span>
-                <span><code>{"{receiver_name}"}</code>：收款人显示名</span>
-                <span><code>{"{amount}"}</code>：转账金额</span>
-                <span><code>{"{receiver_user_id}"}</code>：收款人用户 ID</span>
-                <span className="sm:col-span-2"><code>{"{payer_user_id_line}"}</code>：有付款人 ID 时渲染为“付款人ID：数字”，没有时自动留空</span>
-                <span className="sm:col-span-2"><code>{"{receiver_user_id_line}"}</code>：有收款人 ID 时渲染为“收款人ID：数字”，没有时自动留空</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={hasTransferToken || transferBotToken.trim() ? "secondary" : "outline"}>
+                  {hasTransferToken || transferBotToken.trim() ? "通知模板可联调" : "模板可先预设"}
+                </Badge>
+                {isInteractionCenter ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-8 gap-1.5"
+                    onClick={() => setInteractionAdvancedExpanded((value) => !value)}
+                    aria-expanded={interactionAdvancedExpanded}
+                    aria-controls="interaction-advanced-config"
+                  >
+                    <ChevronRight
+                      className={cn(
+                        "h-4 w-4 transition-transform",
+                        interactionAdvancedExpanded && "rotate-90",
+                      )}
+                    />
+                    {interactionAdvancedExpanded ? "收起" : "展开"}
+                  </Button>
+                ) : null}
               </div>
-              <div className="rounded-md border bg-background p-3 text-xs">
-                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                  <div className="font-medium">消息预览</div>
-                  <span className="text-[11px] text-muted-foreground">使用示例变量渲染</span>
+            </div>
+            {(!isInteractionCenter || interactionAdvancedExpanded) ? (
+              <>
+                <div id="interaction-advanced-config" className="space-y-1.5">
+                  <Label>测试通知模板</Label>
+                  <Textarea
+                    rows={5}
+                    placeholder={DEFAULT_TRANSFER_NOTICE_TEMPLATE}
+                    value={transferNoticeTemplate}
+                    onChange={(e) => setTransferNoticeTemplate(e.target.value)}
+                  />
+                  <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
+                    <span><code>{"{payer_name}"}</code>：付款人显示名</span>
+                    <span><code>{"{payer_user_id}"}</code>：付款人用户 ID</span>
+                    <span><code>{"{receiver_name}"}</code>：收款人显示名</span>
+                    <span><code>{"{amount}"}</code>：转账金额</span>
+                    <span><code>{"{receiver_user_id}"}</code>：收款人用户 ID</span>
+                    <span className="sm:col-span-2"><code>{"{payer_user_id_line}"}</code>：有付款人 ID 时渲染为“付款人ID：数字”，没有时自动留空</span>
+                    <span className="sm:col-span-2"><code>{"{receiver_user_id_line}"}</code>：有收款人 ID 时渲染为“收款人ID：数字”，没有时自动留空</span>
+                  </div>
+                  <div className="rounded-md border bg-background p-3 text-xs">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <div className="font-medium">消息预览</div>
+                      <span className="text-[11px] text-muted-foreground">使用示例变量渲染</span>
+                    </div>
+                    <TelegramHtmlPreview
+                      value={renderTransferNoticeTemplatePreview(transferNoticeTemplate)}
+                      mode="html"
+                      title="转账通知 Bot"
+                      caption="transfer notice"
+                      hints={[
+                        { label: "payer", value: TRANSFER_NOTICE_TEMPLATE_SAMPLE_VALUES.payer_name },
+                        { label: "receiver", value: TRANSFER_NOTICE_TEMPLATE_SAMPLE_VALUES.receiver_name },
+                        { label: "amount", value: TRANSFER_NOTICE_TEMPLATE_SAMPLE_VALUES.amount },
+                      ]}
+                    />
+                  </div>
                 </div>
-                <TelegramHtmlPreview
-                  value={renderTransferNoticeTemplatePreview(transferNoticeTemplate)}
-                  mode="html"
-                  title="转账通知 Bot"
-                  caption="transfer notice"
-                  hints={[
-                    { label: "payer", value: TRANSFER_NOTICE_TEMPLATE_SAMPLE_VALUES.payer_name },
-                    { label: "receiver", value: TRANSFER_NOTICE_TEMPLATE_SAMPLE_VALUES.receiver_name },
-                    { label: "amount", value: TRANSFER_NOTICE_TEMPLATE_SAMPLE_VALUES.amount },
-                  ]}
-                />
-              </div>
-            </div>
 
-          <div className="rounded-md bg-muted px-3 py-2 text-xs leading-5 text-muted-foreground">
-            群里回复任意消息发送 <code>+123</code> 后，若已填写转账结果通知 Bot Token，会生成带 <code>language-转账成功</code> 标识的 HTML 代码块。
-            没有测试用的转账通知结果 Bot 的 Token 时，交互 Bot 只监听群里真实出现的转账结果通知。
-          </div>
-          {isInteractionCenter ? null : (
-            <div className="flex justify-end">
-              <Button
-                variant="outline"
-                className="w-full sm:w-auto sm:min-w-[156px]"
-                onClick={() => saveTransferMut.mutate()}
-                disabled={isInteractionConfigSaveDisabled}
-              >
-                {saveTransferMut.isPending ? (
-                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                ) : (
-                  <Save className="mr-1 h-4 w-4" />
+                <div className="rounded-md bg-muted px-3 py-2 text-xs leading-5 text-muted-foreground">
+                  群里回复任意消息发送 <code>+123</code> 后，若已填写转账结果通知 Bot Token，会生成带 <code>language-转账成功</code> 标识的 HTML 代码块。
+                  没有测试用的转账通知结果 Bot 的 Token 时，交互 Bot 只监听群里真实出现的转账结果通知。
+                </div>
+                {isInteractionCenter ? null : (
+                  <div className="flex justify-end">
+                    <Button
+                      variant="outline"
+                      className="w-full sm:w-auto sm:min-w-[156px]"
+                      onClick={() => saveTransferMut.mutate()}
+                      disabled={isInteractionConfigSaveDisabled}
+                    >
+                      {saveTransferMut.isPending ? (
+                        <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Save className="mr-1 h-4 w-4" />
+                      )}
+                      保存整块交互配置
+                    </Button>
+                  </div>
                 )}
-                保存整块交互配置
-              </Button>
-            </div>
-          )}
+              </>
+            ) : null}
           </section>
         </CardContent>
       </Card>
