@@ -1296,11 +1296,60 @@ class TestPluginRepoInstallFlow:
         assert updated.source == "repo"
         assert updated.source_url == "https://example.com/repo.git"
         assert updated.enabled is True
+        assert updated.manifest_json["version"] == "1.2.0"
         assert updated.manifest_json["_telepilot_remote"]["default_enabled"] is True
         assert "new_demo" not in db.installed_rows
         assert (tmp_path / "installed" / "update_demo" / "plugin.json").read_text(encoding="utf-8").find("1.2.0") >= 0
         assert not (tmp_path / "installed" / "update_demo.installing").exists()
         assert not (tmp_path / "installed" / "update_demo.bak-update").exists()
+
+    @pytest.mark.asyncio
+    async def test_update_installed_plugins_from_repo_refreshes_stale_same_version_manifest(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        monkeypatch.setattr(repo_svc.settings, "plugins_installed_dir", str(tmp_path / "installed"))
+        repo_dir = tmp_path / "repo"
+        _write_runtime_plugin(repo_dir / "ten_half", key="ten_half", version="0.3.2")
+        _write_runtime_plugin(tmp_path / "installed" / "ten_half", key="ten_half", version="0.3.2")
+
+        async def _cached(_url: str, **_kwargs):
+            return repo_dir
+
+        monkeypatch.setattr(repo_svc, "_ensure_repo_cached", _cached)
+        db = _FakePluginRepoDB(PluginRepo(id=1, url="https://example.com/repo.git", name="Repo"))
+        db.installed_rows["ten_half"] = InstalledPlugin(
+            key="ten_half",
+            source="repo",
+            source_url="https://example.com/repo.git",
+            installed_path=str(tmp_path / "installed" / "ten_half"),
+            version="0.3.2",
+            enabled=True,
+            manifest_json={
+                "name": "ten_half",
+                "version": "0.3.1",
+                "_telepilot_remote": {
+                    "default_enabled": False,
+                    "latest_version": "0.3.2",
+                    "update_available": True,
+                },
+            },
+        )
+
+        result = await repo_svc.update_installed_plugins_from_repo(db, 1)
+
+        assert result.checked == 1
+        assert result.updated == 1
+        assert result.skipped == 0
+        assert [(item.name, item.status, item.message) for item in result.items] == [
+            ("ten_half", "updated", "已同步元数据"),
+        ]
+        updated = db.installed_rows["ten_half"]
+        assert updated.version == "0.3.2"
+        assert updated.manifest_json["version"] == "0.3.2"
+        assert updated.manifest_json["_telepilot_remote"]["update_available"] is False
+        assert updated.manifest_json["_telepilot_remote"]["latest_version"] == "0.3.2"
 
     @pytest.mark.asyncio
     async def test_install_local_plugin_writes_installed_plugin(self, monkeypatch, tmp_path):

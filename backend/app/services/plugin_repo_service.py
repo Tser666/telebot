@@ -65,6 +65,7 @@ from .remote_plugin_service import (
     _merge_feature_manifest_preserving_global_config,
     _plugin_dir,
     _read_plugin_metadata,
+    _remote_info_from_manifest,
     _run_git,
     _validate_runtime_plugin_shape,
     _validate_source_url,
@@ -816,6 +817,22 @@ async def _replace_installed_plugin_from_repo_dir(
     return remote_plugin_view_from_installed(row)
 
 
+def _installed_plugin_metadata_needs_refresh(installed: InstalledPlugin, meta: PluginMetadata) -> bool:
+    """同版本插件也可能残留旧 manifest；批量更新时需要顺手自愈。"""
+
+    manifest = dict(installed.manifest_json or {})
+    manifest_version = str(manifest.get("version") or "")
+    if manifest_version and manifest_version != str(meta.version or ""):
+        return True
+
+    remote_info = _remote_info_from_manifest(manifest)
+    if bool(remote_info.get("update_available", False)):
+        return True
+    if str(remote_info.get("latest_version") or "") not in {"", str(meta.version or "")}:
+        return True
+    return False
+
+
 async def update_installed_plugins_from_repo(
     db: AsyncSession,
     repo_id: int,
@@ -850,6 +867,42 @@ async def update_installed_plugins_from_repo(
         result.checked += 1
         old_version = str(installed.version or "")
         if _version_tuple(meta.version) <= _version_tuple(installed.version):
+            if _version_tuple(meta.version) == _version_tuple(installed.version) and _installed_plugin_metadata_needs_refresh(installed, meta):
+                try:
+                    updated = await _replace_installed_plugin_from_repo_dir(
+                        db,
+                        repo_url=row.url,
+                        plugin_dir=plugin_dir,
+                        meta=meta,
+                        installed=installed,
+                    )
+                except PluginRepoError as exc:
+                    result.failed += 1
+                    result.items.append(
+                        PluginRepoBulkUpdateItem(
+                            name=meta.name,
+                            display_name=meta.display_name or meta.name,
+                            from_version=old_version,
+                            to_version=meta.version,
+                            status="failed",
+                            message=exc.message,
+                        )
+                    )
+                    continue
+
+                result.updated += 1
+                result.items.append(
+                    PluginRepoBulkUpdateItem(
+                        name=updated.name,
+                        display_name=updated.display_name or updated.name,
+                        from_version=old_version,
+                        to_version=updated.version,
+                        status="updated",
+                        message="已同步元数据",
+                    )
+                )
+                continue
+
             result.skipped += 1
             result.items.append(
                 PluginRepoBulkUpdateItem(

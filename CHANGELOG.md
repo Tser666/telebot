@@ -20,6 +20,12 @@
 
 ## [Unreleased]
 
+## [0.46.3] — 2026-07-01 · patch（补丁版本） · 插件仓库元数据自愈
+
+### Fixed
+- 修复插件仓库批量更新时只比较 `installed_plugin.version`，没有同步检查 `manifest_json.version` 与远程更新状态的问题；现在同版本但 manifest 仍停留在旧版本、或仍标记 `update_available=true` 时，会自动刷新安装目录与数据库元数据并触发插件热加载。
+- 增加回归测试，覆盖“插件文件与安装版本已经是新版本，但数据库 manifest 仍为旧版本”的脏状态，避免 UI、诊断与 worker 后续读到旧插件契约。
+
 ## [0.46.2] — 2026-07-01 · patch（补丁版本） · 付款事件身份修复
 
 ### Fixed
