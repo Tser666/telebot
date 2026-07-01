@@ -1003,6 +1003,10 @@ def _has_dispatch_target(cmd: str, args_raw: str = "") -> bool:
     )
 
 
+def _is_plugin_command(cmd: str) -> bool:
+    return cmd in _PLUGIN_COMMANDS
+
+
 def _is_self_chat(event) -> bool:
     return _is_self_chat_impl(event, ctx=_ctx)
 
@@ -2039,6 +2043,27 @@ def make_command_handler(client: TelegramClient, account_id: int, prefix: str | 
 
     async def _handle(event, *, allow_normal: bool, incoming_sudo: bool = False):
         text = event.raw_text or ""
+        if incoming_sudo:
+            p = current_command_prefix(fallback=fallback_prefix)
+            pattern_normal = re.compile(rf"^{re.escape(p)}(\S+)(?:\s+(.*))?$", re.S)
+            m_normal = pattern_normal.match(text)
+            if m_normal:
+                cmd = m_normal.group(1)
+                args_raw = (m_normal.group(2) or "").strip()
+                if not _looks_like_command_name(cmd, prefix=p):
+                    return
+                if not _is_plugin_command(cmd):
+                    return
+                await _dispatch_command(
+                    client,
+                    _IncomingSudoEvent(event),
+                    cmd,
+                    args_raw,
+                    account_id=account_id,
+                    help_prefix=p,
+                )
+                return
+
         sudo_p = current_sudo_prefix()
         pattern_sudo = re.compile(rf"^{re.escape(sudo_p)}(\S+)(?:\s+(.*))?$", re.S)
         m = pattern_sudo.match(text)

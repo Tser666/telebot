@@ -7296,6 +7296,46 @@ async def test_interaction_bot_skips_prefixed_userbot_command_messages(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_transfer_test_update_skips_prefixed_userbot_command_messages(monkeypatch) -> None:
+    class _DB:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, model, key=None):  # noqa: ANN002
+            if getattr(model, "__name__", "") == "SystemSetting" and key == "command_prefix":
+                return SimpleNamespace(value={"value": "。"})
+            return None
+
+    transfer_command = AsyncMock(return_value=True)
+    monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
+    monkeypatch.setattr(account_bot_runtime, "_try_handle_transfer_command", transfer_command)
+
+    await account_bot_runtime._handle_transfer_test_update(
+        1,
+        "bbot-token",
+        {
+            "update_id": 15002,
+            "message": {
+                "message_id": 150020,
+                "text": "。10d 6789",
+                "from": {"id": 1682400007, "first_name": "Owner"},
+                "chat": {"id": -100778, "type": "supergroup"},
+                "reply_to_message": {
+                    "message_id": 150019,
+                    "from": {"id": 111, "first_name": "玩家A"},
+                    "text": "入局",
+                },
+            },
+        },
+    )
+
+    transfer_command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_paid_module_start_keyword_is_blocked_but_answer_message_routes(monkeypatch) -> None:
     class _DB:
         async def __aenter__(self):

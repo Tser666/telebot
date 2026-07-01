@@ -1096,6 +1096,14 @@ async def _handle_transfer_test_update(aid: int, token: str, update: dict[str, A
     if incoming is None:
         return
     async with AsyncSessionLocal() as db:
+        if await _incoming_is_userbot_command_text(db, incoming):
+            log.info(
+                "transfer command skipped: userbot command text aid=%s chat_id=%s sender_id=%s",
+                incoming.account_id,
+                incoming.chat_id,
+                incoming.user_id,
+            )
+            return
         await _try_handle_transfer_command(db, incoming)
 
 
