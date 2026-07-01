@@ -74,6 +74,7 @@ function sameConfig(a: Record<string, unknown>, b: Record<string, unknown>): boo
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+const EMPTY_CONFIG: Record<string, unknown> = {};
 const CONFIG_ACTION_TERMINAL_STATUSES = new Set(["succeeded", "failed"]);
 
 function normalizeConfigActions(rawActions: unknown[]): ConfigAction[] {
@@ -148,8 +149,8 @@ export function GenericPluginConfigPage() {
   const feature = matrixQ.data?.features.find((item) => item.key === featureKey);
   const accountFeature = featuresQ.data?.find((item) => item.feature_key === featureKey);
   const schema = isConfigSchema(feature?.config_schema) ? feature.config_schema : null;
-  const globalConfig = globalConfigQ.data ?? {};
-  const accountConfig = accountFeature?.config ?? {};
+  const globalConfig = globalConfigQ.data ?? EMPTY_CONFIG;
+  const accountConfig = accountFeature?.config ?? EMPTY_CONFIG;
   const commandPrefix = settingsQ.data?.command_prefix || ",";
   const llmProvidersQ = useQuery({
     queryKey: ["llm-providers"],
