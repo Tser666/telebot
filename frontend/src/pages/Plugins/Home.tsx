@@ -7,16 +7,13 @@ import {
   ArrowRight,
   BookOpen,
   Boxes,
-  CalendarClock,
   ChevronDown,
-  FileText,
   History,
   MessageSquareText,
   Package2,
   Package,
   PackagePlus,
   Settings2,
-  ShieldCheck,
   Sparkles,
 } from "lucide-react";
 
@@ -33,7 +30,6 @@ import { PageHeader, PageShell } from "@/components/layout/PageScaffold";
 import { Spinner } from "@/components/ui/misc";
 import { Button } from "@/components/ui/button";
 import { MetaBadge } from "@/components/ui/meta-badge";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   SectionHeader,
   SignalPill,
@@ -59,6 +55,7 @@ import {
 } from "@/types/pluginContract";
 
 import { featureConfigPath } from "./_shared/featureConfig";
+import { PluginWorkspaceNav } from "./WorkspaceNav";
 
 type ModuleCategory = "interactive" | "automation" | "utility";
 const CATEGORY_META: Record<ModuleCategory, { title: string; hint: string; icon: React.ReactNode }> = {
@@ -194,17 +191,6 @@ export function PluginsHome() {
   const [guideExpanded, setGuideExpanded] = useState(false);
   const [aiPanelExpanded, setAiPanelExpanded] = useState(false);
   const guideActive = searchParams.get("guide") === "1";
-  const quickNavTargets = useMemo<Record<string, string>>(
-    () => ({
-      templates: "/plugins/templates",
-      scheduler: "/plugins/scheduler",
-      whitelist: selectedAid
-        ? `/plugins/auto-command-whitelist?aid=${selectedAid}`
-        : "/plugins/auto-command-whitelist",
-      manage: "/plugins/manage?tab=plugins",
-    }),
-    [selectedAid],
-  );
   const [bannerVisible, setBannerVisible] = useState(() => {
     if (typeof window === "undefined") return false;
     return localStorage.getItem(DANGEROUS_CMD_BANNER_KEY) !== "1";
@@ -397,37 +383,10 @@ export function PluginsHome() {
         )}
       />
 
+      <PluginWorkspaceNav activeTab="home" selectedAid={selectedAid} guideActive={guideActive} />
+
       <Card>
         <CardContent className="space-y-4 !pt-5">
-          <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-start">
-            <Tabs
-              className="w-full sm:w-auto"
-              value="manage"
-              onValueChange={(value) => {
-                const target = quickNavTargets[value];
-                if (target) nav(target);
-              }}
-            >
-              <TabsList>
-                <TabsTrigger value="templates" className={`gap-1.5 ${guideActive ? "siri-glow" : ""}`}>
-                  <FileText className="h-4 w-4" />
-                  指令模板
-                </TabsTrigger>
-                <TabsTrigger value="scheduler" className="gap-1.5">
-                  <CalendarClock className="h-4 w-4" />
-                  定时任务
-                </TabsTrigger>
-                <TabsTrigger value="whitelist" className="gap-1.5">
-                  <ShieldCheck className="h-4 w-4" />
-                  自动指令白名单
-                </TabsTrigger>
-                <TabsTrigger value="manage" className={`gap-1.5 ${guideActive ? "siri-glow" : ""}`}>
-                  <PackagePlus className="h-4 w-4" />
-                  插件管理
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
-          </div>
           {(settingsQ.data?.ai_enabled ?? false) ? (
             <div className="rounded-lg border px-4 py-3">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">

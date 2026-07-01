@@ -84,6 +84,7 @@ import { goBackOr } from "@/lib/navigation";
 import { getErrMsg } from "@/lib/api";
 import { splitPluginWarnings } from "@/lib/plugin-config-contract";
 import { isPlatformFeature } from "@/lib/plugin-modes";
+import { PluginWorkspaceNav } from "@/pages/Plugins/WorkspaceNav";
 
 import { getFeatureMatrix } from "@/api/features";
 import {
@@ -433,6 +434,8 @@ export function Extensions() {
           </CardHeader>
         </Card>
       </div>
+
+      <PluginWorkspaceNav activeTab="manage" />
 
       {guideActive ? (
       <PluginInstallGuide

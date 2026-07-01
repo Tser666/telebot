@@ -6,6 +6,7 @@ import { Card, CardHeader } from "@/components/ui/card";
 import { SectionHeader } from "@/components/ui/status";
 import { goBackOr } from "@/lib/navigation";
 import { CommandTemplates } from "@/pages/Plugins/TemplatesEditor";
+import { PluginWorkspaceNav } from "./WorkspaceNav";
 
 export function PluginsTemplatesPage() {
   const nav = useNavigate();
@@ -24,6 +25,7 @@ export function PluginsTemplatesPage() {
           />
         </CardHeader>
       </Card>
+      <PluginWorkspaceNav activeTab="templates" />
       <CommandTemplates />
     </div>
   );

@@ -6,6 +6,7 @@ import { Card, CardHeader } from "@/components/ui/card";
 import { SectionHeader } from "@/components/ui/status";
 import { goBackOr } from "@/lib/navigation";
 import { SchedulerConfig } from "@/pages/Plugins/configs/Scheduler";
+import { PluginWorkspaceNav } from "./WorkspaceNav";
 
 export function PluginsSchedulerPage() {
   const nav = useNavigate();
@@ -24,6 +25,7 @@ export function PluginsSchedulerPage() {
           />
         </CardHeader>
       </Card>
+      <PluginWorkspaceNav activeTab="scheduler" />
       <SchedulerConfig />
     </div>
   );

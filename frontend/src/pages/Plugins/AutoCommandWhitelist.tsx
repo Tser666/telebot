@@ -21,6 +21,7 @@ import { SectionHeader } from "@/components/ui/status";
 import { Textarea } from "@/components/ui/textarea";
 import { getErrMsg } from "@/lib/api";
 import { goBackOr } from "@/lib/navigation";
+import { PluginWorkspaceNav } from "./WorkspaceNav";
 
 export function PluginsAutoCommandWhitelistPage() {
   const nav = useNavigate();
@@ -84,6 +85,7 @@ export function PluginsAutoCommandWhitelistPage() {
           />
         </CardHeader>
       </Card>
+      <PluginWorkspaceNav activeTab="whitelist" selectedAid={aid || null} />
 
       <Card>
         <CardHeader>
