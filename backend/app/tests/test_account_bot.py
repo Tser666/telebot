@@ -6590,8 +6590,19 @@ async def test_interaction_callback_routes_disabled_active_session_to_worker_ent
     )
     send = AsyncMock()
     answer = AsyncMock()
+    redis = _MemoryRedis()
+    rule = {
+        "id": "button-game",
+        "enabled": False,
+        "chat_ids": [-100777],
+        "action": "module",
+        "module_key": "button_game",
+        "module_action": "play",
+        "module_prize": 456,
+    }
+    await redis.set(account_bot_runtime._rule_state_key(1, rule, -100777), "closed")
     monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())
-    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: _MemoryRedis())
+    monkeypatch.setattr(account_bot_runtime, "get_redis", lambda: redis)
     dispatch_event = MagicMock(side_effect=account_bot_runtime.dispatch_event)
     monkeypatch.setattr(account_bot_runtime, "dispatch_event", dispatch_event)
     monkeypatch.setattr(account_bot_runtime, "_run_worker_interaction_entry", run_entry)
@@ -6611,17 +6622,7 @@ async def test_interaction_callback_routes_disabled_active_session_to_worker_ent
         AsyncMock(
             return_value={
                 "enabled": True,
-                "rules": [
-                    {
-                        "id": "button-game",
-                        "enabled": False,
-                        "chat_ids": [-100777],
-                        "action": "module",
-                        "module_key": "button_game",
-                        "module_action": "play",
-                        "module_prize": 456,
-                    },
-                ],
+                "rules": [rule],
             }
         ),
     )
@@ -7477,7 +7478,7 @@ async def test_disabled_active_paid_pool_session_payment_bypasses_static_rule_am
         "id": "ten-half-paid",
         "enabled": False,
         "chat_ids": [-100123],
-        "trigger_mode": "both",
+        "trigger_mode": "keyword",
         "trigger_texts": ["转账成功"],
         "module_start_keywords": ["10d"],
         "receiver_text": "你心里已经有答案了",
@@ -7504,6 +7505,7 @@ async def test_disabled_active_paid_pool_session_payment_bypasses_static_rule_am
             ensure_ascii=False,
         ),
     )
+    await redis.set(account_bot_runtime._rule_state_key(1, rule, -100123), "closed")
     run_entry = AsyncMock(return_value=(True, None, [{"type": "send_message", "text": "加入成功"}]))
     send = AsyncMock()
     monkeypatch.setattr(account_bot_runtime, "AsyncSessionLocal", lambda: _DB())

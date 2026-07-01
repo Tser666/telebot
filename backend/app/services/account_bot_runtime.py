@@ -2787,21 +2787,25 @@ async def _select_transfer_notice_rule(
     parsed_receiver = str(parsed.get("receiver_name") or "")
     parsed_receiver_id = _int_or_none(parsed.get("receiver_user_id"))
     for rule in _interaction_rules(cfg, include_disabled=True):
-        if not _rule_trigger_mode_allows(rule, "payment"):
-            continue
         if not _rule_chat_matches(rule, incoming.chat_id or 0):
-            continue
-        if not _rule_matches_payment_notice_trigger(rule, incoming, parsed):
             continue
         has_active_session = bool(
             await _list_interaction_sessions_for_rule(incoming.account_id, rule, incoming.chat_id)
         )
-        if not rule.get("enabled", True) and not has_active_session:
-            continue
-        if not has_active_session and not _rule_amount_matches(rule, parsed_amount):
-            continue
-        if not await _is_interaction_rule_open(incoming.account_id, rule, incoming.chat_id):
-            continue
+        if has_active_session:
+            if not _rule_entry_allows_event(rule, "payment_confirmed"):
+                continue
+        else:
+            if not rule.get("enabled", True):
+                continue
+            if not _rule_trigger_mode_allows(rule, "payment"):
+                continue
+            if not _rule_matches_payment_notice_trigger(rule, incoming, parsed):
+                continue
+            if not _rule_amount_matches(rule, parsed_amount):
+                continue
+            if not await _is_interaction_rule_open(incoming.account_id, rule, incoming.chat_id):
+                continue
         receiver_filter = await _rule_receiver_filter(db, incoming.account_id, rule)
         if not _receiver_matches_filter(receiver_filter, user_id=parsed_receiver_id, name=parsed_receiver):
             continue
@@ -3445,8 +3449,6 @@ async def _try_handle_interaction_module_message(db: Any, incoming: Incoming) ->
         return False
     for rule in _interaction_rules(cfg, include_disabled=True):
         if not _rule_chat_matches(rule, incoming.chat_id):
-            continue
-        if not await _is_interaction_rule_open(incoming.account_id, rule, incoming.chat_id):
             continue
         if str(rule.get("action") or "") != "module":
             continue
@@ -5109,9 +5111,6 @@ async def _try_handle_transfer_notice(
             parsed.get("amount"),
         )
         return False
-    if not await _is_interaction_rule_open(incoming.account_id, rule, incoming.chat_id):
-        log.info("transfer notice skipped: rule closed aid=%s rule=%s", incoming.account_id, rule.get("id"))
-        return True
     if not await _claim_interaction_trigger(incoming, rule, "transfer_notice", parsed):
         log.info("transfer notice skipped: duplicate aid=%s rule=%s", incoming.account_id, rule.get("id"))
         return True
