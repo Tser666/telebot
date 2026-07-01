@@ -3209,12 +3209,7 @@ async def _try_handle_event_bus_payment_notice(
                 message="Event Bus 付款订阅缺少 entry_key，无法投递给插件入口。",
             )
             continue
-        payload = _event_bus_plugin_payload(incoming, event, decision)
-        payload["event_type"] = "payment_confirmed"
-        payload["payment"] = dict(parsed)
-        payload["source_actor"] = dict(event["source_actor"])
-        payload["actor"] = dict(event["actor"])
-        payload["player"] = dict(event["player"])
+        payload = _event_bus_payment_plugin_payload(incoming, event, decision, parsed)
         ok, error, actions = await _run_worker_interaction_entry(
             incoming,
             plugin_key=decision.plugin_key,
@@ -3327,6 +3322,52 @@ def _event_bus_plugin_payload(incoming: Incoming, event: dict[str, Any], decisio
     payload["native_raw"] = incoming.native_raw if allowed else None
     if not allowed:
         payload.pop("raw_event", None)
+    return payload
+
+
+def _event_bus_payment_plugin_payload(
+    incoming: Incoming,
+    event: dict[str, Any],
+    decision: Any,
+    parsed: dict[str, Any],
+) -> dict[str, Any]:
+    """Build a payment_confirmed payload where actor/player is the payer.
+
+    The Telegram message sender is the transfer-notice bot. Plugins should see
+    that bot as sender/source_actor, while actor/player/payment describe the
+    user who actually paid.
+    """
+
+    payload = _event_bus_plugin_payload(incoming, event, decision)
+    data = dict(parsed or {})
+    data["event_type"] = "payment_confirmed"
+    actor = _interaction_actor_envelope(incoming, data)
+    player = _interaction_player_envelope(incoming, data, event_type="payment_confirmed")
+    source_actor = _interaction_source_actor_envelope(incoming, data)
+    payer_user_id = _int_or_none(player.get("user_id"))
+    payer_name = str(player.get("display_name") or data.get("payer_name") or "").strip()
+    amount = _int_or_none(data.get("amount"))
+    payload.update(
+        {
+            "event_type": "payment_confirmed",
+            "payment": _interaction_payment_envelope(
+                incoming,
+                data,
+                payer_user_id=payer_user_id,
+                payer_name=payer_name or None,
+            ),
+            "raw_payment": data,
+            "sender": source_actor,
+            "source_actor": source_actor,
+            "actor": actor,
+            "player": player,
+            "reply_to": _interaction_reply_to_envelope(incoming),
+            "payer_user_id": payer_user_id,
+            "payer_name": payer_name or None,
+            "amount": amount,
+            "payment_amount": amount,
+        }
+    )
     return payload
 
 

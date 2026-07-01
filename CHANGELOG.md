@@ -20,6 +20,13 @@
 
 ## [Unreleased]
 
+## [0.46.2] — 2026-07-01 · patch（补丁版本） · 付款事件身份修复
+
+### Fixed
+- 修复 Event Bus 外部转账通知投递给插件时，`actor` / `player` 可能错误指向转账通知 Bot 的问题；现在付款事件中 `actor`、`player`、`payment.payer_user_id` 会优先使用已解析付款人或被回复消息的真实用户，转账通知 Bot 仅保留在 `sender` / `source_actor`。
+- 补齐 Event Bus 付款 payload 的 `payment`、`raw_payment`、`reply_to`、`payer_user_id`、`payer_name` 与 `payment_amount` 字段，让交互插件不用再从通知 Bot 文本里反复猜字段。
+- 增加回归测试，覆盖转账通知 Bot 回复玩家 `+金额` 消息时，插件收到的玩家身份必须是真实付款人。
+
 ## [0.46.1] — 2026-07-01 · patch（补丁版本） · 插件命令 MessageOps 追踪补丁
 
 ### Fixed

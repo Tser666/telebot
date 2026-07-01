@@ -1847,6 +1847,63 @@ def test_interaction_payment_payload_preserves_payer_user_id() -> None:
     assert payload["raw"]["parsed"] == {"payer_name": "AAA", "payer_user_id": 111, "amount": 10003}
 
 
+def test_event_bus_payment_payload_uses_replied_user_as_player() -> None:
+    incoming = account_bot_runtime.Incoming(
+        account_id=1,
+        token="bbot-token",
+        update_id=10,
+        user_id=456,
+        chat_id=-100123,
+        chat_type="group",
+        message_id=70,
+        text="玩家A 射出 7895 蝌蚪\nOwner 接收 7895 蝌蚪",
+        display_name="TransferBot",
+        username="transfer_bot",
+        reply_to_user_id=111,
+        reply_to_message_id=66,
+        reply_to_display_name="玩家A",
+        reply_to_username="aaa",
+        reply_to_text="+7895",
+    )
+    event = {
+        "source": {"type": "payment_confirmed", "chat_id": -100123, "message_id": 70},
+        "sender": {"user_id": 456, "display_name": "TransferBot", "username": "transfer_bot"},
+        "actor": {"user_id": None, "display_name": "玩家A"},
+        "player": {"user_id": None, "display_name": "玩家A"},
+        "raw": {"event_type": "payment_confirmed"},
+    }
+    decision = SimpleNamespace(
+        plugin_key="ten_half",
+        entry_key="start_ten_half",
+        dispatch_mode="event_subscription",
+        scope="all_allowed_chats",
+        filters={},
+    )
+
+    payload = account_bot_runtime._event_bus_payment_plugin_payload(
+        incoming,
+        event,
+        decision,
+        {"payer_name": "玩家A", "receiver_name": "Owner", "amount": 7895},
+    )
+
+    assert payload["event_type"] == "payment_confirmed"
+    assert payload["sender"]["user_id"] == 456
+    assert payload["source_actor"]["user_id"] == 456
+    assert payload["actor"]["user_id"] == 111
+    assert payload["actor"]["display_name"] == "玩家A"
+    assert payload["player"]["user_id"] == 111
+    assert payload["player"]["identity_confidence"] == "reply_context"
+    assert payload["payment"]["amount"] == 7895
+    assert payload["payment"]["payer_user_id"] == 111
+    assert payload["payment"]["payer_display_name"] == "玩家A"
+    assert payload["payment"]["notice_sender_user_id"] == 456
+    assert payload["reply_to"]["user_id"] == 111
+    assert payload["payer_user_id"] == 111
+    assert payload["payer_name"] == "玩家A"
+    assert payload["sender_user_id"] == 456
+
+
 @pytest.mark.asyncio
 async def test_resolve_payout_mode_accepts_math10_module_rule(monkeypatch) -> None:
     class _DB:
