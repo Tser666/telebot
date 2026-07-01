@@ -103,6 +103,8 @@ export interface ConfigSchema {
   "x-help"?: unknown;
 }
 
+const EMPTY_CONFIG: Record<string, unknown> = {};
+
 interface ConfigDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -119,7 +121,7 @@ interface ConfigDialogProps {
 
 export function ConfigDialog({
   open, onOpenChange, pluginKey, pluginName, schema, accountName,
-  accountId, globalConfig = {}, accountConfig = {}, onSave,
+  accountId, globalConfig = EMPTY_CONFIG, accountConfig = EMPTY_CONFIG, onSave,
 }: ConfigDialogProps) {
   const [globalVals, setGlobalVals] = useState<Record<string, unknown>>({});
   const [accountVals, setAccountVals] = useState<Record<string, unknown>>({});
