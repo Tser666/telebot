@@ -6564,7 +6564,7 @@ async def test_interaction_plain_message_routes_to_worker_entry_as_message(monke
 
 
 @pytest.mark.asyncio
-async def test_interaction_callback_routes_to_worker_entry_and_answers_callback(monkeypatch) -> None:
+async def test_interaction_callback_routes_disabled_active_session_to_worker_entry_and_answers_callback(monkeypatch) -> None:
     class _DB:
         async def __aenter__(self):
             return self
@@ -6614,7 +6614,7 @@ async def test_interaction_callback_routes_to_worker_entry_and_answers_callback(
                 "rules": [
                     {
                         "id": "button-game",
-                        "enabled": True,
+                        "enabled": False,
                         "chat_ids": [-100777],
                         "action": "module",
                         "module_key": "button_game",
@@ -7456,7 +7456,7 @@ async def test_transfer_notice_module_rule_starts_game24_with_interaction_bot(mo
 
 
 @pytest.mark.asyncio
-async def test_active_paid_pool_session_payment_bypasses_static_rule_amount(monkeypatch) -> None:
+async def test_disabled_active_paid_pool_session_payment_bypasses_static_rule_amount(monkeypatch) -> None:
     class _DB:
         async def __aenter__(self):
             return self
@@ -7475,7 +7475,7 @@ async def test_active_paid_pool_session_payment_bypasses_static_rule_amount(monk
     redis = _MemoryRedis()
     rule = {
         "id": "ten-half-paid",
-        "enabled": True,
+        "enabled": False,
         "chat_ids": [-100123],
         "trigger_mode": "both",
         "trigger_texts": ["转账成功"],

@@ -1304,10 +1304,13 @@ def _legacy_interaction_rule(cfg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _interaction_rules(cfg: dict[str, Any]) -> list[dict[str, Any]]:
+def _interaction_rules(cfg: dict[str, Any], *, include_disabled: bool = False) -> list[dict[str, Any]]:
     raw_rules = cfg.get("rules")
     if isinstance(raw_rules, list) and raw_rules:
-        return [rule for rule in raw_rules if isinstance(rule, dict) and rule.get("enabled", True)]
+        rules = [rule for rule in raw_rules if isinstance(rule, dict)]
+        if include_disabled:
+            return rules
+        return [rule for rule in rules if rule.get("enabled", True)]
     return [_legacy_interaction_rule(cfg)]
 
 
@@ -2783,7 +2786,7 @@ async def _select_transfer_notice_rule(
     parsed_amount = int(parsed.get("amount") or 0)
     parsed_receiver = str(parsed.get("receiver_name") or "")
     parsed_receiver_id = _int_or_none(parsed.get("receiver_user_id"))
-    for rule in _interaction_rules(cfg):
+    for rule in _interaction_rules(cfg, include_disabled=True):
         if not _rule_trigger_mode_allows(rule, "payment"):
             continue
         if not _rule_chat_matches(rule, incoming.chat_id or 0):
@@ -2793,6 +2796,8 @@ async def _select_transfer_notice_rule(
         has_active_session = bool(
             await _list_interaction_sessions_for_rule(incoming.account_id, rule, incoming.chat_id)
         )
+        if not rule.get("enabled", True) and not has_active_session:
+            continue
         if not has_active_session and not _rule_amount_matches(rule, parsed_amount):
             continue
         if not await _is_interaction_rule_open(incoming.account_id, rule, incoming.chat_id):
@@ -3438,7 +3443,7 @@ async def _try_handle_interaction_module_message(db: Any, incoming: Incoming) ->
     cfg = await account_bot_service.get_transfer_notice_config(db, incoming.account_id)
     if not cfg.get("enabled"):
         return False
-    for rule in _interaction_rules(cfg):
+    for rule in _interaction_rules(cfg, include_disabled=True):
         if not _rule_chat_matches(rule, incoming.chat_id):
             continue
         if not await _is_interaction_rule_open(incoming.account_id, rule, incoming.chat_id):
@@ -5095,19 +5100,6 @@ async def _try_handle_transfer_notice(
                 message="外部转账通知已进入 Event Bus，但插件执行失败。",
         )
         return True
-    if not any(
-        _rule_trigger_mode_allows(rule, "payment")
-        and _rule_chat_matches(rule, incoming.chat_id)
-        and _rule_matches_payment_notice_trigger(rule, incoming, parsed)
-        for rule in _interaction_rules(cfg)
-    ):
-        if _incoming_matches_interaction_trigger(cfg, incoming):
-            log.info(
-                "transfer notice skipped: no chat/trigger rule matched aid=%s incoming_chat=%s",
-                incoming.account_id,
-                incoming.chat_id,
-            )
-        return False
     rule = await _select_transfer_notice_rule(db, incoming, cfg, parsed)
     if rule is None:
         log.info(
